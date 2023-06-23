@@ -1,5 +1,5 @@
-# Open SERP (Search Engine Page Results)
-Get Google, Yandex, Baidu search engine page results via API or CLI.
+# Open SERP (Search Engine Results Page)
+Get Google, Yandex, Baidu search engine results via API or CLI.
 
 ## Docker usage
 * Run:
@@ -11,7 +11,7 @@ docker run -p 127.0.0.1:7000:7000 -it karust/openserp serve -a 0.0.0.0 -p 7000
 docker-compose up --build
 ```
 
-* Get *20* `Google` results for **hello world**, only in *English* - `[serv_addr]/google/search?lang=EN&limit=20&text=hello world`:
+* Get 20 **Google** results for `hello world`, only in English - `[serv_addr]/google/search?lang=EN&limit=20&text=hello world`:
 ```JSON
 [
     {
@@ -20,7 +20,6 @@ docker-compose up --build
         "title": "\"Hello, World!\" program",
         "description": "A \"Hello, World!\" program is generally a computer program that ignores any input, and outputs or displays a message similar to \"Hello, World!\"."
     },
-...
 ]
 ```
 * You can replace `google` to `yandex` or `baidu` in API call to change search engine.
@@ -55,6 +54,5 @@ As a result you should get JSON output containting search results:
   "title": "11 Sure-Fire Ways to Get Banned From Google | CyberOptik",
   "description": "How To Get Banned From Google · 1. Cloaking: The Art of Deception · 2. Plagiarism: Because Originality is Overrated · 3. Keyword Stuffing: More is Always Better · 4 ..."
  },
-...
 ]
  ```
