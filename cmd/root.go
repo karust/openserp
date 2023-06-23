@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/karust/googler/core"
+	"github.com/karust/openserp/core"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"

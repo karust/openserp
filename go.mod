@@ -1,4 +1,4 @@
-module github.com/karust/googler
+module github.com/karust/openserp
 
 go 1.20
 

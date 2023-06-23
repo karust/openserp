@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/karust/googler/cmd"
+	"github.com/karust/openserp/cmd"
 	"github.com/sirupsen/logrus"
 )
 

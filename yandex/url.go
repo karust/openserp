@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/karust/googler/core"
+	"github.com/karust/openserp/core"
 )
 
 func BuildURL(q core.Query, page int) (string, error) {

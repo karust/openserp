@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/karust/googler/core"
+	"github.com/karust/openserp/core"
 	"github.com/sirupsen/logrus"
 )
 

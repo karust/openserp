@@ -3,10 +3,10 @@ package cmd
 import (
 	"time"
 
-	"github.com/karust/googler/baidu"
-	"github.com/karust/googler/core"
-	"github.com/karust/googler/google"
-	"github.com/karust/googler/yandex"
+	"github.com/karust/openserp/baidu"
+	"github.com/karust/openserp/core"
+	"github.com/karust/openserp/google"
+	"github.com/karust/openserp/yandex"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )

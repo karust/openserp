@@ -7,7 +7,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/corpix/uarand"
-	"github.com/karust/googler/core"
+	"github.com/karust/openserp/core"
 	"github.com/sirupsen/logrus"
 )
 

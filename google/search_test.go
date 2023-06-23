@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/karust/googler/core"
+	"github.com/karust/openserp/core"
 )
 
 var browser *core.Browser
