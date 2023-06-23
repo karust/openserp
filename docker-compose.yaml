@@ -1,0 +1,9 @@
+version: '3'
+
+services:
+  openserp:
+    container_name: serp
+    image: openserp
+    ports: 
+      - 7000:7000
+    command: serve -a 0.0.0.0 -p 7000
