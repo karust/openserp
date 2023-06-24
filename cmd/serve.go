@@ -21,9 +21,14 @@ var serveCMD = &cobra.Command{
 
 func serve(cmd *cobra.Command, args []string) {
 	opts := core.BrowserOpts{
-		IsHeadless: !appConf.IsBrowserHead,
-		IsLeakless: appConf.IsLeakless,
-		Timeout:    time.Second * time.Duration(appConf.Timeout),
+		IsHeadless:    !appConf.IsBrowserHead, // Disable headless if browser head mode is set
+		IsLeakless:    appConf.IsLeakless,
+		Timeout:       time.Second * time.Duration(appConf.Timeout),
+		LeavePageOpen: appConf.IsLeaveHead,
+	}
+
+	if appConf.IsDebug {
+		opts.IsHeadless = false
 	}
 
 	browser, err := core.NewBrowser(opts)

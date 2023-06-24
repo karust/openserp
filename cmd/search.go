@@ -25,12 +25,11 @@ var searchCMD = &cobra.Command{
 func search(cmd *cobra.Command, args []string) {
 	var err error
 	engineType := args[0]
-	results := []core.SearchResult{}
-
 	query := core.Query{
 		Text:  args[1],
 		Limit: 10,
 	}
+	results := []core.SearchResult{}
 
 	if appConf.IsRawRequests {
 		results, err = searchRaw(engineType, query)
@@ -55,14 +54,15 @@ func searchBrowser(engineType string, query core.Query) ([]core.SearchResult, er
 	var engine core.SearchEngine
 
 	opts := core.BrowserOpts{
-		IsHeadless: !appConf.IsBrowserHead, // Disable headless if browser head mode is set
-		IsLeakless: appConf.IsLeakless,
-		Timeout:    time.Second * time.Duration(appConf.Timeout),
+		IsHeadless:    !appConf.IsBrowserHead, // Disable headless if browser head mode is set
+		IsLeakless:    appConf.IsLeakless,
+		Timeout:       time.Second * time.Duration(appConf.Timeout),
+		LeavePageOpen: appConf.IsLeaveHead,
 	}
 
-	//if appConf.IsDebug {
-	//	opts.IsHeadless = false
-	//}
+	if appConf.IsDebug {
+		opts.IsHeadless = false
+	}
 
 	browser, err := core.NewBrowser(opts)
 	if err != nil {

@@ -1,7 +1,6 @@
 package baidu
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -33,9 +32,10 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	page := baid.Navigate(url)
 
-	results, err := page.Search("div.c-container.new-pmd")
+	results, err := page.Timeout(baid.Timeout).Search("div.c-container.new-pmd")
 	if err != nil {
 		return nil, err
 	}
@@ -52,29 +52,33 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 			continue
 		}
 		linkText, err := link.Property("href")
+		if err != nil {
+			logrus.Error("No `href` tag found")
+		}
 
 		// Get title
 		title, err := link.Text()
 		if err != nil {
+			logrus.Error("Cannot extract text from title")
 			title = "No title"
-			fmt.Println(2, err)
 		}
 
 		// Get description
-		desc := "No description found"
-		desc, err = r.Text()
+		desc, err := r.Text()
 		if err != nil {
-			continue
+			desc = ""
 		}
 		desc = strings.ReplaceAll(desc, title, "")
 
-		gR := core.SearchResult{Rank: i, URL: linkText.String(), Title: title, Description: desc}
+		gR := core.SearchResult{Rank: i + 1, URL: linkText.String(), Title: title, Description: desc}
 		searchResults = append(searchResults, gR)
 	}
 
-	err = page.Close()
-	if err != nil {
-		logrus.Error(err)
+	if !baid.LeavePageOpen {
+		err = page.Close()
+		if err != nil {
+			logrus.Error(err)
+		}
 	}
 
 	return searchResults, nil
