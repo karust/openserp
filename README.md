@@ -1,17 +1,45 @@
-# Open SERP (Search Engine Results Page)
-Get Google, Yandex, Baidu search engine results via API or CLI.
+# OpenSERP (Search Engine Results Page)
+![OpenSERP](/logo.png)
 
-## Docker usage
-* Run:
+[![Go Report Card](https://goreportcard.com/badge/github.com/karust/openserp)](https://goreportcard.com/report/github.com/karust/openserp)
+[![Go Reference](https://pkg.go.dev/badge/github.com/karust/openserp.svg)](https://pkg.go.dev/github.com/karust/openserp)
+<!-- ![Docker Image Size (tag)](https://img.shields.io/docker/image-size/karust/openserp/latest)
+![GitHub release (by tag)](https://img.shields.io/github/downloads/karust/openserp/0.1/total) -->
+
+API access for search engines results if available isn't free.
+
+Using OpenSERP, you can get search results from **Google**, **Yandex**, **Baidu** via API or CLI!
+
+See [Docker](#docker), [CLI](#cli) usage examples below.
+
+## Docker usage  <a name="docker"></a> 🐳
+* Run API server:
 ```bash
 # Use prebuilt image
 docker run -p 127.0.0.1:7000:7000 -it karust/openserp serve -a 0.0.0.0 -p 7000
 
-# Or use docker-compose.yaml instead
+# Or
 docker-compose up --build
 ```
 
-* Get 20 **Google** results for `hello world`, only in English - `[serv_addr]/google/search?lang=EN&limit=20&text=hello world`:
+### *Example request*
+Get 20 **Google** results for `hello world`, only in English:
+```JSON
+GET http:/127.0.0.1:7000/google/search?lang=EN&limit=20&text=hello world
+```
+You can replace `google` to `yandex` or `baidu` in query to change search engine.
+
+### Request parameters
+| Param | Description                                                  |
+|-------|--------------------------------------------------------------|
+| text  | Text to search                                               |
+| lang  | Search pages in selected language (`EN`, `DE`, `RU`...)      |
+| date  | Date in `YYYYMMDD..YYYYMMDD` format (e.g. 20181010..20231010) |
+| file  | File extension to search  (e.g. `PDF`, `DOC`)                 |
+| site  | Search only in selected site                                 |
+| limit | Limit the number of results                                  |
+
+### *Example response*
 ```JSON
 [
     {
@@ -22,28 +50,18 @@ docker-compose up --build
     },
 ]
 ```
-* You can replace `google` to `yandex` or `baidu` in API call to change search engine.
 
-* Available search parameters:
 
-| Param | Description                                                  |
-|-------|--------------------------------------------------------------|
-| text  | Text to search                                               |
-| lang  | Search pages in selected language (`EN`, `DE`, `RU`...)      |
-| date  | Date in `YYYYMMDD..YYYYMMDD` format (e.g. 20181010..20231010) |
-| file  | File extension to search  (e.g. `PDF`, `DOC`)                 |
-| site  | Search only in selected site                                 |
-| limit | Limit the number of results                                  |
 
-## CLI
+## CLI <a name="cli"></a> ⌨️
 * Use `-h` flag to see commands.
-* You can use `serve` to serve API:
+* You can use `serve` command to serve API:
 ```bash
 openserp serve 
 ```
 * Or print results in CLI using `search` command:
 ```bash
-openserp search google "how to get banned in google fast" # You can change `google` to `yandex` or `baidu`
+openserp search google "how to get banned in google fast" # Change `google` to `yandex` or `baidu`
 ```
 As a result you should get JSON output containting search results:
 ```json
@@ -56,3 +74,9 @@ As a result you should get JSON output containting search results:
  },
 ]
  ```
+
+ ## License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
+
+## Bugs + Questions 👾
+If you have some issues/bugs/questions, feel free to open an issue.
