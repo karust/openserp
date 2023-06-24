@@ -1,8 +1,6 @@
 package yandex
 
 import (
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -13,13 +11,13 @@ import (
 type Yandex struct {
 	core.Browser
 	checkTimeout time.Duration // Timeout for secondary elements check
-	pagesSleep   time.Duration // Sleep between pages
+	pageSleep    time.Duration // Sleep between pages
 }
 
 func New(browser core.Browser) *Yandex {
 	yand := Yandex{Browser: browser}
 	yand.checkTimeout = time.Second * 2
-	yand.pagesSleep = time.Second * 1
+	yand.pageSleep = time.Second * 1
 	return &yand
 }
 
@@ -35,17 +33,16 @@ func (yand *Yandex) isCaptcha(page *rod.Page) bool {
 	return true
 }
 
+// Check if nothig is found
 func (yand *Yandex) isNoResults(page *rod.Page) bool {
 	noResFound := false
 
 	_, err := page.Timeout(yand.checkTimeout).Search("div.EmptySearchResults-Title")
-	fmt.Println(err)
 	if err == nil {
 		noResFound = true
 	}
 
 	_, err = page.Timeout(yand.checkTimeout).Search("div>div.RequestMeta-Message")
-	fmt.Println(err)
 	if err == nil {
 		noResFound = true
 	}
@@ -63,23 +60,29 @@ func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.Searc
 			continue
 		}
 		linkText, err := link.Property("href")
+		if err != nil {
+			logrus.Error("No `href` tag found")
+		}
 
 		// Get title
 		titleTag, err := link.Element("h2")
 		if err != nil {
-			logrus.Error("No title tag found")
+			logrus.Error("No title `h2` tag found")
 			continue
 		}
 
 		title, err := titleTag.Text()
 		if err != nil {
+			logrus.Error("Cannot extract text from title")
 			title = "No title"
 		}
 
 		// Get description
 		descTag, err := r.Element(`span.OrganicTextContentSpan`)
-		desc := "No description found"
-		if err == nil {
+		desc := ""
+		if err != nil {
+			logrus.Trace("No description `span.OrganicTextContentSpan` tag found")
+		} else {
 			desc = descTag.MustText()
 		}
 
@@ -103,33 +106,43 @@ func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
 		}
 
 		page := yand.Navigate(url)
-		defer page.Close()
 
-		searchRes, _ := page.Timeout(yand.Timeout).Search("li.serp-item")
-		if searchRes != nil {
-			elements, _ := searchRes.All()
-			r := yand.parseResults(elements, searchPage)
-			allResults = append(allResults, r...)
+		// Get all search results in page
+		searchRes, err := page.Timeout(yand.Timeout).Search("li.serp-item")
+		if err != nil {
+			logrus.Errorf("Cannot parse search results: %s", err)
 		}
 
+		// Check why no results, maybe captcha?
 		if searchRes == nil {
 			if yand.isNoResults(page) {
-				return allResults, nil
+				logrus.Errorf("No results found")
 			} else if yand.isCaptcha(page) {
-				logrus.Error(errors.New("Yandex captcha occured during: " + url))
-				return allResults, nil
+				logrus.Errorf("Yandex captcha occurred during: %s", url)
 			}
 			break
 		}
 
-		searchPage++
-
-		err = page.Close()
+		elements, err := searchRes.All()
 		if err != nil {
-			logrus.Error(err)
+			logrus.Errorf("Cannot get all elements from search results: %s", err)
+			break
 		}
 
-		time.Sleep(yand.pagesSleep)
+		r := yand.parseResults(elements, searchPage)
+		allResults = append(allResults, r...)
+
+		searchPage++
+
+		if !yand.Browser.LeavePageOpen {
+			// Close tab before opening new one during the cycle
+			err = page.Close()
+			if err != nil {
+				logrus.Error(err)
+			}
+		}
+
+		time.Sleep(yand.pageSleep)
 	}
 
 	return allResults, nil

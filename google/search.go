@@ -20,7 +20,7 @@ type Google struct {
 
 func New(browser core.Browser) *Google {
 	gogl := Google{Browser: browser}
-	gogl.checkTimeout = time.Second * 2
+	gogl.checkTimeout = time.Second * 5
 	gogl.findNumRgxp = regexp.MustCompile("\\d")
 	return &gogl
 }
@@ -49,6 +49,11 @@ func (gogl *Google) FindTotalResults(page *rod.Page) (int, error) {
 	return total, nil
 }
 
+func (gogl *Google) preparePage(page *rod.Page) {
+	// Remove "similar queries" lists
+	page.Eval(";(() => { document.querySelectorAll(`div[data-initq]`).forEach( el => el.remove());  })();")
+}
+
 func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 	logrus.Tracef("Start Google search, query: %+v", query)
 
@@ -59,17 +64,21 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	page := gogl.Navigate(url)
+	gogl.preparePage(page)
 
 	totalResults, err := gogl.FindTotalResults(page)
 	if err != nil {
 		return nil, err
 	}
+	logrus.Tracef("%d total results found", totalResults)
+
 	if totalResults == 0 {
 		return searchResults, nil
 	}
 
-	results, err := page.Search("div>div.g")
+	results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][lang]")
 	if err != nil {
 		return nil, err
 	}
@@ -86,34 +95,42 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 			continue
 		}
 		linkText, err := link.Property("href")
+		if err != nil {
+			logrus.Error("No `href` tag found")
+		}
 
 		// Get title
 		titleTag, err := link.Element("h3")
 		if err != nil {
-			logrus.Error(err)
+			logrus.Error("No `h3` tag found")
 			continue
 		}
 
 		title, err := titleTag.Text()
 		if err != nil {
+			logrus.Error("Cannot extract text from title")
 			title = "No title"
-			logrus.Error(err)
 		}
 
 		// Get description
+		// doesn't catch all
 		descTag, err := r.Element(`div[data-sncf~="1"]`)
-		desc := "No description found"
-		if err == nil {
+		desc := ""
+		if err != nil {
+			logrus.Trace(`No description 'div[data-sncf~="1"]' tag found`)
+		} else {
 			desc = descTag.MustText()
 		}
 
-		gR := core.SearchResult{Rank: i, URL: linkText.String(), Title: title, Description: desc}
+		gR := core.SearchResult{Rank: i + 1, URL: linkText.String(), Title: title, Description: desc}
 		searchResults = append(searchResults, gR)
 	}
 
-	err = page.Close()
-	if err != nil {
-		logrus.Error(err)
+	if !gogl.Browser.LeavePageOpen {
+		err = page.Close()
+		if err != nil {
+			logrus.Error(err)
+		}
 	}
 
 	return searchResults, nil
