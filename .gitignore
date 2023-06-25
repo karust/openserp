@@ -22,3 +22,5 @@ dev.md
 .gitignore
 logrus.txt
 logs.txt
+.release
+core/test/

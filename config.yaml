@@ -5,4 +5,4 @@ app:
   verbose: true
   timeout: 15
   head: false
-  leakless: true
+  leakless: false
