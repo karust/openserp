@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -39,6 +40,14 @@ func NewServer(host string, port int, searchEngines ...SearchEngine) *Server {
 
 			res, err := locEngine.Search(q)
 			if err != nil {
+				switch err {
+				case ErrCaptcha:
+					err = errors.New(fmt.Sprintf("Captcha found, please stop sending requests for a while\n%s", err))
+					c.Status(503)
+				default:
+					c.Status(500)
+				}
+
 				logrus.Errorf("Error during %s search: %s", locEngine.Name(), err)
 				return err
 			}

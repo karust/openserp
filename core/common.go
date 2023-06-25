@@ -7,6 +7,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+var ErrCaptcha = errors.New("Captcha detected")
+
 type SearchResult struct {
 	Rank        int    `json:"rank"`
 	URL         string `json:"url"`

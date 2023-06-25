@@ -49,6 +49,14 @@ func (gogl *Google) FindTotalResults(page *rod.Page) (int, error) {
 	return total, nil
 }
 
+func (gogl *Google) isCaptcha(page *rod.Page) bool {
+	_, err := page.Timeout(gogl.checkTimeout).Search("form#captcha-form")
+	if err != nil {
+		return false
+	}
+	return true
+}
+
 func (gogl *Google) preparePage(page *rod.Page) {
 	// Remove "similar queries" lists
 	page.Eval(";(() => { document.querySelectorAll(`div[data-initq]`).forEach( el => el.remove());  })();")
@@ -68,20 +76,27 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 	page := gogl.Navigate(url)
 	gogl.preparePage(page)
 
+	results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][lang], div[data-surl][jsaction]")
+	if err != nil {
+		logrus.Errorf("Cannot parse search results: %s", err)
+	}
+
+	// Check why no results, maybe captcha?
+	if results == nil {
+		defer page.Close()
+
+		if gogl.isCaptcha(page) {
+			logrus.Errorf("Google captcha occurred during: %s", url)
+			return searchResults, core.ErrCaptcha
+		}
+		return searchResults, nil
+	}
+
 	totalResults, err := gogl.FindTotalResults(page)
 	if err != nil {
 		return nil, err
 	}
 	logrus.Tracef("%d total results found", totalResults)
-
-	if totalResults == 0 {
-		return searchResults, nil
-	}
-
-	results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][lang]")
-	if err != nil {
-		return nil, err
-	}
 
 	resultElements, err := results.All()
 	if err != nil {

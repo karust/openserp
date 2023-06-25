@@ -115,10 +115,13 @@ func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
 
 		// Check why no results, maybe captcha?
 		if searchRes == nil {
+			defer page.Close()
+
 			if yand.isNoResults(page) {
 				logrus.Errorf("No results found")
 			} else if yand.isCaptcha(page) {
 				logrus.Errorf("Yandex captcha occurred during: %s", url)
+				return allResults, core.ErrCaptcha
 			}
 			break
 		}

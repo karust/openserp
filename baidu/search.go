@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-rod/rod"
 	"github.com/karust/openserp/core"
 	"github.com/sirupsen/logrus"
 )
@@ -22,6 +23,22 @@ func (baid *Baidu) Name() string {
 	return "baidu"
 }
 
+func (baid *Baidu) isCaptcha(page *rod.Page) bool {
+	_, err := page.Timeout(baid.checkTimeout).Search("div.passMod_dialog-body")
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+func (baid *Baidu) isTimeout(page *rod.Page) bool {
+	_, err := page.Timeout(baid.checkTimeout).Search("button.timeout-button")
+	if err != nil {
+		return false
+	}
+	return true
+}
+
 func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 	logrus.Tracef("Start Baidu search, query: %+v", query)
 
@@ -37,7 +54,21 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 
 	results, err := page.Timeout(baid.Timeout).Search("div.c-container.new-pmd")
 	if err != nil {
-		return nil, err
+		logrus.Errorf("Cannot parse search results: %s", err)
+	}
+
+	// Check why no results, maybe captcha?
+	if results == nil {
+		defer page.Close()
+
+		if baid.isCaptcha(page) {
+			logrus.Errorf("Baidu captcha occurred during: %s", url)
+			return searchResults, core.ErrCaptcha
+		} else if baid.isTimeout(page) {
+			logrus.Errorf("Baidu timeout occurred during: %s", url)
+			return searchResults, core.ErrCaptcha
+		}
+		return searchResults, nil
 	}
 
 	resultElements, err := results.All()
