@@ -3,7 +3,7 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/karust/openserp)](https://goreportcard.com/report/github.com/karust/openserp)
 [![Go Reference](https://pkg.go.dev/badge/github.com/karust/openserp.svg)](https://pkg.go.dev/github.com/karust/openserp)
-[![release](https://img.shields.io/github/release-pre/karust/openserp.svg)](https://github.com/derailed/k9s/releases)
+[![release](https://img.shields.io/github/release-pre/karust/openserp.svg)](https://github.com/karust/openserp/releases)
 <!-- ![Docker Image Size (tag)](https://img.shields.io/docker/image-size/karust/openserp/latest) -->
 API access for search engines results if available isn't free.
 
@@ -60,7 +60,7 @@ openserp serve
 ```
 * Or print results in CLI using `search` command:
 ```bash
-openserp search google "how to get banned in google fast" # Change `google` to `yandex` or `baidu`
+openserp search google "how to get banned from google fast" # Change `google` to `yandex` or `baidu`
 ```
 As a result you should get JSON output containting search results:
 ```json

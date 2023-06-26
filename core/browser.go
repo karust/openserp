@@ -16,18 +16,19 @@ type BrowserOpts struct {
 	IsLeakless    bool          // Force to kill browser
 	Timeout       time.Duration // Timeout
 	LanguageCode  string
-	WaitRequests  bool // Wait requests to complete after navigation
-	LeavePageOpen bool // Leave pages and browser open
+	WaitRequests  bool          // Wait requests to complete after navigation
+	LeavePageOpen bool          // Leave pages and browser open
+	WaitLoadTime  time.Duration // Time to wait till page loads
 }
 
 // Initialize browser parameters with default values if they are not set
-func (o *BrowserOpts) Init() {
+func (o *BrowserOpts) Check() {
 	if o.Timeout == 0 {
 		o.Timeout = time.Second * 30
 	}
 
-	if o.LanguageCode == "" {
-		o.LanguageCode = "en"
+	if o.WaitLoadTime == 0 {
+		o.WaitLoadTime = time.Second * 2
 	}
 }
 
@@ -38,7 +39,7 @@ type Browser struct {
 }
 
 func NewBrowser(opts BrowserOpts) (*Browser, error) {
-	opts.Init()
+	opts.Check()
 	logrus.Debugf("Browser options: %+v", opts)
 
 	path, has := launcher.LookPath()
@@ -66,11 +67,11 @@ func (b *Browser) Navigate(URL string) *rod.Page {
 
 	b.browser = rod.New().ControlURL(b.browserAddr)
 	b.browser.MustConnect()
-	//b.browser.SetCookies(nil)
+	b.browser.SetCookies(nil)
 
 	page := stealth.MustPage(b.browser)
 	wait := page.MustWaitRequestIdle()
-	page.Navigate(URL)
+	page.MustNavigate(URL)
 
 	// causes bugs in google
 	if b.WaitRequests {
@@ -83,7 +84,7 @@ func (b *Browser) Navigate(URL string) *rod.Page {
 	})
 
 	// Wait till page loads
-	time.Sleep(time.Second * 1)
+	time.Sleep(b.WaitLoadTime)
 
 	return page
 }
