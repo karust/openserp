@@ -78,7 +78,9 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 
 	results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][lang], div[data-surl][jsaction]")
 	if err != nil {
+		defer page.Close()
 		logrus.Errorf("Cannot parse search results: %s", err)
+		return nil, core.ErrSearchTimeout
 	}
 
 	// Check why no results, maybe captcha?
@@ -87,9 +89,9 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 
 		if gogl.isCaptcha(page) {
 			logrus.Errorf("Google captcha occurred during: %s", url)
-			return searchResults, core.ErrCaptcha
+			return nil, core.ErrCaptcha
 		}
-		return searchResults, nil
+		return nil, err
 	}
 
 	totalResults, err := gogl.FindTotalResults(page)

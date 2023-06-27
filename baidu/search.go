@@ -54,7 +54,9 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 
 	results, err := page.Timeout(baid.Timeout).Search("div.c-container.new-pmd")
 	if err != nil {
+		defer page.Close()
 		logrus.Errorf("Cannot parse search results: %s", err)
+		return nil, core.ErrSearchTimeout
 	}
 
 	// Check why no results, maybe captcha?
@@ -63,12 +65,12 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 
 		if baid.isCaptcha(page) {
 			logrus.Errorf("Baidu captcha occurred during: %s", url)
-			return searchResults, core.ErrCaptcha
+			return nil, core.ErrCaptcha
 		} else if baid.isTimeout(page) {
 			logrus.Errorf("Baidu timeout occurred during: %s", url)
-			return searchResults, core.ErrCaptcha
+			return nil, core.ErrCaptcha
 		}
-		return searchResults, nil
+		return nil, nil
 	}
 
 	resultElements, err := results.All()

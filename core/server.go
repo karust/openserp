@@ -43,13 +43,12 @@ func NewServer(host string, port int, searchEngines ...SearchEngine) *Server {
 				switch err {
 				case ErrCaptcha:
 					err = errors.New(fmt.Sprintf("Captcha found, please stop sending requests for a while\n%s", err))
-					c.Status(503)
-				default:
-					c.Status(500)
+				case ErrSearchTimeout:
+					err = errors.New(fmt.Sprintf("Error: %s\nProbably need to update CSS selector", err))
 				}
 
 				logrus.Errorf("Error during %s search: %s", locEngine.Name(), err)
-				return err
+				return fiber.NewError(fiber.StatusServiceUnavailable, err.Error())
 			}
 
 			return c.JSON(res)

@@ -110,7 +110,9 @@ func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
 		// Get all search results in page
 		searchRes, err := page.Timeout(yand.Timeout).Search("li.serp-item")
 		if err != nil {
+			defer page.Close()
 			logrus.Errorf("Cannot parse search results: %s", err)
+			return nil, core.ErrSearchTimeout
 		}
 
 		// Check why no results, maybe captcha?
@@ -121,7 +123,7 @@ func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
 				logrus.Errorf("No results found")
 			} else if yand.isCaptcha(page) {
 				logrus.Errorf("Yandex captcha occurred during: %s", url)
-				return allResults, core.ErrCaptcha
+				return nil, core.ErrCaptcha
 			}
 			break
 		}

@@ -8,6 +8,7 @@ import (
 )
 
 var ErrCaptcha = errors.New("Captcha detected")
+var ErrSearchTimeout = errors.New("Timeout. Cannot find element on page")
 
 type SearchResult struct {
 	Rank        int    `json:"rank"`
