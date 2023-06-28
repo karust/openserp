@@ -10,26 +10,35 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/karust/openserp/core"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 )
 
 type Google struct {
 	core.Browser
-	findNumRgxp  *regexp.Regexp
-	checkTimeout time.Duration
+	core.SearchEngineOptions
+	findNumRgxp *regexp.Regexp
 }
 
-func New(browser core.Browser) *Google {
+func New(browser core.Browser, opts core.SearchEngineOptions) *Google {
 	gogl := Google{Browser: browser}
-	gogl.checkTimeout = time.Second * 5
+	opts.Init()
+	gogl.SearchEngineOptions = opts
+
 	gogl.findNumRgxp = regexp.MustCompile("\\d")
 	return &gogl
 }
+
 func (gogl *Google) Name() string {
 	return "google"
 }
 
+func (gogl *Google) GetRateLimiter() *rate.Limiter {
+	ratelimit := rate.Every(gogl.RateTime / time.Duration(gogl.RateRequests))
+	return rate.NewLimiter(ratelimit, gogl.RateBurst)
+}
+
 func (gogl *Google) FindTotalResults(page *rod.Page) (int, error) {
-	resultsStats, err := page.Timeout(gogl.checkTimeout).Search("div#result-stats")
+	resultsStats, err := page.Timeout(gogl.SelectorTimeout).Search("div#result-stats")
 	if err != nil {
 		return 0, errors.New("Result stats not found: " + err.Error())
 	}
@@ -50,7 +59,7 @@ func (gogl *Google) FindTotalResults(page *rod.Page) (int, error) {
 }
 
 func (gogl *Google) isCaptcha(page *rod.Page) bool {
-	_, err := page.Timeout(gogl.checkTimeout).Search("form#captcha-form")
+	_, err := page.Timeout(gogl.SelectorTimeout).Search("form#captcha-form")
 	if err != nil {
 		return false
 	}

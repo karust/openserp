@@ -36,9 +36,9 @@ func serve(cmd *cobra.Command, args []string) {
 		logrus.Error(err)
 	}
 
-	yand := yandex.New(*browser)
-	gogl := google.New(*browser)
-	baidu := baidu.New(*browser)
+	yand := yandex.New(*browser, appConf.YandexConfig)
+	gogl := google.New(*browser, appConf.GoogleConfig)
+	baidu := baidu.New(*browser, appConf.BaiduConfig)
 
 	serv := core.NewServer(appConf.Host, appConf.Port, gogl, yand, baidu)
 	serv.Listen()

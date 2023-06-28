@@ -15,7 +15,7 @@ func init() {
 }
 
 func TestSearchGoogle(t *testing.T) {
-	gogl := New(*browser)
+	gogl := New(*browser, core.SearchEngineOptions{})
 
 	query := core.Query{Text: "HEY", Limit: 10}
 	results, err := gogl.Search(query)

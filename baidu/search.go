@@ -7,24 +7,32 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/karust/openserp/core"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 )
 
 type Baidu struct {
 	core.Browser
-	checkTimeout time.Duration
+	core.SearchEngineOptions
 }
 
-func New(browser core.Browser) *Baidu {
+func New(browser core.Browser, opts core.SearchEngineOptions) *Baidu {
 	baid := Baidu{Browser: browser}
-	baid.checkTimeout = time.Second * 2
+	opts.Init()
+	baid.SearchEngineOptions = opts
 	return &baid
 }
+
 func (baid *Baidu) Name() string {
 	return "baidu"
 }
 
+func (baid *Baidu) GetRateLimiter() *rate.Limiter {
+	ratelimit := rate.Every(baid.RateTime / time.Duration(baid.RateRequests))
+	return rate.NewLimiter(ratelimit, baid.RateBurst)
+}
+
 func (baid *Baidu) isCaptcha(page *rod.Page) bool {
-	_, err := page.Timeout(baid.checkTimeout).Search("div.passMod_dialog-body")
+	_, err := page.Timeout(baid.SelectorTimeout).Search("div.passMod_dialog-body")
 	if err != nil {
 		return false
 	}
@@ -32,7 +40,7 @@ func (baid *Baidu) isCaptcha(page *rod.Page) bool {
 }
 
 func (baid *Baidu) isTimeout(page *rod.Page) bool {
-	_, err := page.Timeout(baid.checkTimeout).Search("button.timeout-button")
+	_, err := page.Timeout(baid.SelectorTimeout).Search("button.timeout-button")
 	if err != nil {
 		return false
 	}

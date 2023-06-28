@@ -1,18 +1,21 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 )
 
 type SearchEngine interface {
 	Search(Query) ([]SearchResult, error)
 	IsInitialized() bool
 	Name() string
+	GetRateLimiter() *rate.Limiter
 }
 
 type Server struct {
@@ -29,13 +32,19 @@ func NewServer(host string, port int, searchEngines ...SearchEngine) *Server {
 
 	for _, engine := range searchEngines {
 		locEngine := engine
+		limiter := engine.GetRateLimiter()
+
 		serv.app.Get(fmt.Sprintf("/%s/search", strings.ToLower(locEngine.Name())), func(c *fiber.Ctx) error {
 			q := Query{}
 			err := q.InitFromContext(c)
-
 			if err != nil {
 				logrus.Errorf("Error while setting %s query: %s", locEngine.Name(), err)
 				return err
+			}
+
+			err = limiter.Wait(context.Background())
+			if err != nil {
+				logrus.Errorf("Ratelimiter error during %s query: %s", locEngine.Name(), err)
 			}
 
 			res, err := locEngine.Search(q)

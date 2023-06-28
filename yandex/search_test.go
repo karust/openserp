@@ -16,7 +16,7 @@ func init() {
 
 func TestSearchYandex(t *testing.T) {
 
-	yand := New(*browser)
+	yand := New(*browser, core.SearchEngineOptions{})
 
 	query := core.Query{Text: "HEY", Limit: 10}
 	results, err := yand.Search(query)

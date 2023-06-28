@@ -71,11 +71,11 @@ func searchBrowser(engineType string, query core.Query) ([]core.SearchResult, er
 
 	switch strings.ToLower(engineType) {
 	case "yandex":
-		engine = yandex.New(*browser)
+		engine = yandex.New(*browser, appConf.YandexConfig)
 	case "google":
-		engine = google.New(*browser)
+		engine = google.New(*browser, appConf.GoogleConfig)
 	case "baidu":
-		engine = baidu.New(*browser)
+		engine = baidu.New(*browser, appConf.BaiduConfig)
 	default:
 		logrus.Infof("No `%s` search engine found", engineType)
 	}

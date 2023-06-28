@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 var (
@@ -24,6 +26,9 @@ func (SeMock) IsInitialized() bool {
 }
 func (s SeMock) Search(q Query) (res []SearchResult, err error) {
 	return []SearchResult{{Title: s.EngineName}}, nil
+}
+func (s SeMock) GetRateLimiter() *rate.Limiter {
+	return nil
 }
 
 func TestCreateServer(t *testing.T) {

@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -51,4 +52,26 @@ func (q *Query) InitFromContext(c *fiber.Ctx) error {
 	}
 
 	return nil
+}
+
+type SearchEngineOptions struct {
+	RateRequests    int           `mapstructure:"rate_requests"`
+	RateTime        time.Duration `mapstructure:"rate_seconds"`
+	RateBurst       int           `mapstructure:"rate_burst"`
+	SelectorTimeout time.Duration `mapstructure:"selector_timeout"`
+}
+
+func (o *SearchEngineOptions) Init() {
+	if o.RateRequests == 0 {
+		o.RateRequests = 1
+	}
+	if o.RateTime == 0 {
+		o.RateTime = time.Second * 10
+	}
+	if o.RateBurst == 0 {
+		o.RateBurst = 1
+	}
+	if o.SelectorTimeout == 0 {
+		o.SelectorTimeout = time.Second * 5
+	}
 }

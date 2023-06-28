@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	version                    = "0.1.2"
+	version                    = "0.2.1"
 	defaultConfigFilename      = "config"
 	envPrefix                  = "OPENSERP"
 	replaceHyphenWithCamelCase = false
@@ -22,12 +22,15 @@ type AppConfig struct {
 	Port          int
 	Timeout       int
 	ConfigPath    string
-	IsBrowserHead bool `mapstructure:"head"`
-	IsLeaveHead   bool `mapstructure:"leave_head"`
-	IsLeakless    bool `mapstructure:"leakless"`
-	IsDebug       bool `mapstructure:"debug"`
-	IsVerbose     bool `mapstructure:"verbose"`
-	IsRawRequests bool `mapstructure:"raw_requests"`
+	IsBrowserHead bool                     `mapstructure:"head"`
+	IsLeaveHead   bool                     `mapstructure:"leave_head"`
+	IsLeakless    bool                     `mapstructure:"leakless"`
+	IsDebug       bool                     `mapstructure:"debug"`
+	IsVerbose     bool                     `mapstructure:"verbose"`
+	IsRawRequests bool                     `mapstructure:"raw_requests"`
+	GoogleConfig  core.SearchEngineOptions `mapstructure:"google"`
+	YandexConfig  core.SearchEngineOptions `mapstructure:"yandex"`
+	BaiduConfig   core.SearchEngineOptions `mapstructure:"baidu"`
 }
 
 var appConf = AppConfig{}

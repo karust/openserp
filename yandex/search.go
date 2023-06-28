@@ -6,17 +6,20 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/karust/openserp/core"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 )
 
 type Yandex struct {
 	core.Browser
-	checkTimeout time.Duration // Timeout for secondary elements check
-	pageSleep    time.Duration // Sleep between pages
+	core.SearchEngineOptions
+	pageSleep time.Duration // Sleep between pages
 }
 
-func New(browser core.Browser) *Yandex {
+func New(browser core.Browser, opts core.SearchEngineOptions) *Yandex {
 	yand := Yandex{Browser: browser}
-	yand.checkTimeout = time.Second * 2
+	opts.Init()
+	yand.SearchEngineOptions = opts
+
 	yand.pageSleep = time.Second * 1
 	return &yand
 }
@@ -25,8 +28,13 @@ func (yand *Yandex) Name() string {
 	return "yandex"
 }
 
+func (yand *Yandex) GetRateLimiter() *rate.Limiter {
+	ratelimit := rate.Every(yand.RateTime / time.Duration(yand.RateRequests))
+	return rate.NewLimiter(ratelimit, yand.RateBurst)
+}
+
 func (yand *Yandex) isCaptcha(page *rod.Page) bool {
-	_, err := page.Timeout(yand.checkTimeout).Search("form#checkbox-captcha-form")
+	_, err := page.Timeout(yand.SelectorTimeout).Search("form#checkbox-captcha-form")
 	if err != nil {
 		return false
 	}
@@ -37,12 +45,12 @@ func (yand *Yandex) isCaptcha(page *rod.Page) bool {
 func (yand *Yandex) isNoResults(page *rod.Page) bool {
 	noResFound := false
 
-	_, err := page.Timeout(yand.checkTimeout).Search("div.EmptySearchResults-Title")
+	_, err := page.Timeout(yand.SelectorTimeout).Search("div.EmptySearchResults-Title")
 	if err == nil {
 		noResFound = true
 	}
 
-	_, err = page.Timeout(yand.checkTimeout).Search("div>div.RequestMeta-Message")
+	_, err = page.Timeout(yand.SelectorTimeout).Search("div>div.RequestMeta-Message")
 	if err == nil {
 		noResFound = true
 	}
