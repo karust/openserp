@@ -29,12 +29,12 @@ func (yand *Yandex) Name() string {
 }
 
 func (yand *Yandex) GetRateLimiter() *rate.Limiter {
-	ratelimit := rate.Every(yand.RateTime / time.Duration(yand.RateRequests))
+	ratelimit := rate.Every(yand.GetRatelimit())
 	return rate.NewLimiter(ratelimit, yand.RateBurst)
 }
 
 func (yand *Yandex) isCaptcha(page *rod.Page) bool {
-	_, err := page.Timeout(yand.SelectorTimeout).Search("form#checkbox-captcha-form")
+	_, err := page.Timeout(yand.GetSelectorTimeout()).Search("form#checkbox-captcha-form")
 	if err != nil {
 		return false
 	}
@@ -45,12 +45,12 @@ func (yand *Yandex) isCaptcha(page *rod.Page) bool {
 func (yand *Yandex) isNoResults(page *rod.Page) bool {
 	noResFound := false
 
-	_, err := page.Timeout(yand.SelectorTimeout).Search("div.EmptySearchResults-Title")
+	_, err := page.Timeout(yand.GetSelectorTimeout()).Search("div.EmptySearchResults-Title")
 	if err == nil {
 		noResFound = true
 	}
 
-	_, err = page.Timeout(yand.SelectorTimeout).Search("div>div.RequestMeta-Message")
+	_, err = page.Timeout(yand.GetSelectorTimeout()).Search("div>div.RequestMeta-Message")
 	if err == nil {
 		noResFound = true
 	}

@@ -40,7 +40,7 @@ func TestUrlBuild(t *testing.T) {
 // }
 
 func TestSearchBaidu(t *testing.T) {
-	baid := New(*browser)
+	baid := New(*browser, core.SearchEngineOptions{})
 	results, err := baid.Search(testQuery)
 	if err != nil {
 		t.Fatal(err)

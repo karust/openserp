@@ -2,7 +2,6 @@ package baidu
 
 import (
 	"strings"
-	"time"
 
 	"github.com/go-rod/rod"
 	"github.com/karust/openserp/core"
@@ -27,12 +26,12 @@ func (baid *Baidu) Name() string {
 }
 
 func (baid *Baidu) GetRateLimiter() *rate.Limiter {
-	ratelimit := rate.Every(baid.RateTime / time.Duration(baid.RateRequests))
+	ratelimit := rate.Every(baid.GetRatelimit())
 	return rate.NewLimiter(ratelimit, baid.RateBurst)
 }
 
 func (baid *Baidu) isCaptcha(page *rod.Page) bool {
-	_, err := page.Timeout(baid.SelectorTimeout).Search("div.passMod_dialog-body")
+	_, err := page.Timeout(baid.GetSelectorTimeout()).Search("div.passMod_dialog-body")
 	if err != nil {
 		return false
 	}
@@ -40,7 +39,7 @@ func (baid *Baidu) isCaptcha(page *rod.Page) bool {
 }
 
 func (baid *Baidu) isTimeout(page *rod.Page) bool {
-	_, err := page.Timeout(baid.SelectorTimeout).Search("button.timeout-button")
+	_, err := page.Timeout(baid.GetSelectorTimeout()).Search("button.timeout-button")
 	if err != nil {
 		return false
 	}

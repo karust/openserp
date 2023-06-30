@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-rod/rod"
 	"github.com/karust/openserp/core"
@@ -33,15 +32,16 @@ func (gogl *Google) Name() string {
 }
 
 func (gogl *Google) GetRateLimiter() *rate.Limiter {
-	ratelimit := rate.Every(gogl.RateTime / time.Duration(gogl.RateRequests))
+	ratelimit := rate.Every(gogl.GetRatelimit())
 	return rate.NewLimiter(ratelimit, gogl.RateBurst)
 }
 
-func (gogl *Google) FindTotalResults(page *rod.Page) (int, error) {
-	resultsStats, err := page.Timeout(gogl.SelectorTimeout).Search("div#result-stats")
+func (gogl *Google) findTotalResults(page *rod.Page) (int, error) {
+	resultsStats, err := page.Timeout(gogl.GetSelectorTimeout()).Search("div#result-stats")
 	if err != nil {
 		return 0, errors.New("Result stats not found: " + err.Error())
 	}
+
 	stats, err := resultsStats.First.Text()
 	if err != nil {
 		return 0, errors.New("Cannot extract result stats text: " + err.Error())
@@ -59,7 +59,7 @@ func (gogl *Google) FindTotalResults(page *rod.Page) (int, error) {
 }
 
 func (gogl *Google) isCaptcha(page *rod.Page) bool {
-	_, err := page.Timeout(gogl.SelectorTimeout).Search("form#captcha-form")
+	_, err := page.Timeout(gogl.GetSelectorTimeout()).Search("form#captcha-form")
 	if err != nil {
 		return false
 	}
@@ -103,11 +103,11 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 		return nil, err
 	}
 
-	totalResults, err := gogl.FindTotalResults(page)
+	totalResults, err := gogl.findTotalResults(page)
 	if err != nil {
-		return nil, err
+		logrus.Errorf("Error capturing total results: %v", err)
 	}
-	logrus.Tracef("%d total results found", totalResults)
+	logrus.Infof("%d total results found", totalResults)
 
 	resultElements, err := results.All()
 	if err != nil {

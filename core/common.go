@@ -55,23 +55,31 @@ func (q *Query) InitFromContext(c *fiber.Ctx) error {
 }
 
 type SearchEngineOptions struct {
-	RateRequests    int           `mapstructure:"rate_requests"`
-	RateTime        time.Duration `mapstructure:"rate_seconds"`
-	RateBurst       int           `mapstructure:"rate_burst"`
-	SelectorTimeout time.Duration `mapstructure:"selector_timeout"`
+	RateRequests    int   `mapstructure:"rate_requests"`
+	RateTime        int64 `mapstructure:"rate_seconds"`
+	RateBurst       int   `mapstructure:"rate_burst"`
+	SelectorTimeout int64 `mapstructure:"selector_timeout"` // CSS selector timeout in seconds
 }
 
 func (o *SearchEngineOptions) Init() {
 	if o.RateRequests == 0 {
-		o.RateRequests = 1
+		o.RateRequests = 6
 	}
 	if o.RateTime == 0 {
-		o.RateTime = time.Second * 10
+		o.RateTime = 60
 	}
 	if o.RateBurst == 0 {
 		o.RateBurst = 1
 	}
 	if o.SelectorTimeout == 0 {
-		o.SelectorTimeout = time.Second * 5
+		o.SelectorTimeout = 5
 	}
+}
+
+func (o *SearchEngineOptions) GetRatelimit() time.Duration {
+	return (time.Duration(o.RateTime) * time.Second) / time.Duration(o.RateRequests)
+}
+
+func (o *SearchEngineOptions) GetSelectorTimeout() time.Duration {
+	return time.Duration(o.SelectorTimeout) * time.Second
 }
