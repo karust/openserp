@@ -31,7 +31,7 @@ func search(cmd *cobra.Command, args []string) {
 	}
 	results := []core.SearchResult{}
 
-	if appConf.IsRawRequests {
+	if config.App.IsRawRequests {
 		results, err = searchRaw(engineType, query)
 	} else {
 		results, err = searchBrowser(engineType, query)
@@ -54,13 +54,13 @@ func searchBrowser(engineType string, query core.Query) ([]core.SearchResult, er
 	var engine core.SearchEngine
 
 	opts := core.BrowserOpts{
-		IsHeadless:    !appConf.IsBrowserHead, // Disable headless if browser head mode is set
-		IsLeakless:    appConf.IsLeakless,
-		Timeout:       time.Second * time.Duration(appConf.Timeout),
-		LeavePageOpen: appConf.IsLeaveHead,
+		IsHeadless:    !config.App.IsBrowserHead, // Disable headless if browser head mode is set
+		IsLeakless:    config.App.IsLeakless,
+		Timeout:       time.Second * time.Duration(config.App.Timeout),
+		LeavePageOpen: config.App.IsLeaveHead,
 	}
 
-	if appConf.IsDebug {
+	if config.App.IsDebug {
 		opts.IsHeadless = false
 	}
 
@@ -71,11 +71,11 @@ func searchBrowser(engineType string, query core.Query) ([]core.SearchResult, er
 
 	switch strings.ToLower(engineType) {
 	case "yandex":
-		engine = yandex.New(*browser, appConf.YandexConfig)
+		engine = yandex.New(*browser, config.YandexConfig)
 	case "google":
-		engine = google.New(*browser, appConf.GoogleConfig)
+		engine = google.New(*browser, config.GoogleConfig)
 	case "baidu":
-		engine = baidu.New(*browser, appConf.BaiduConfig)
+		engine = baidu.New(*browser, config.BaiduConfig)
 	default:
 		logrus.Infof("No `%s` search engine found", engineType)
 	}

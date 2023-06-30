@@ -6,3 +6,15 @@ app:
   timeout: 15
   head: false
   leakless: false
+
+google:
+  rate_requests: 4     # Number of requests per Minute
+  rate_burst: 2        # Number of non-ratelimited requests per Minute
+
+yandex:
+  rate_requests: 4     
+  rate_burst: 2        
+
+baidu:
+  rate_requests: 4     
+  rate_burst: 2        

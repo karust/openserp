@@ -7,4 +7,12 @@ services:
       context: .
     ports: 
       - 7000:7000
-    command: serve -a 0.0.0.0 -p 7000 -v -l
+    command: serve -l
+    #volumes:
+    #  - ./config.yaml:/usr/src/app/config.yaml
+    environment:
+      OPENSERP_APP_HOST: "0.0.0.0"
+      OPENSERP_APP_PORT: 7000
+      OPENSERP_BAIDU_RATE_REQUESTS: 6   # Number of requests per Minute
+      OPENSERP_BAIDU_RATE_BURST: 2      # Number of non-ratelimited requests per Minute
+    

@@ -21,13 +21,13 @@ var serveCMD = &cobra.Command{
 
 func serve(cmd *cobra.Command, args []string) {
 	opts := core.BrowserOpts{
-		IsHeadless:    !appConf.IsBrowserHead, // Disable headless if browser head mode is set
-		IsLeakless:    appConf.IsLeakless,
-		Timeout:       time.Second * time.Duration(appConf.Timeout),
-		LeavePageOpen: appConf.IsLeaveHead,
+		IsHeadless:    !config.App.IsBrowserHead, // Disable headless if browser head mode is set
+		IsLeakless:    config.App.IsLeakless,
+		Timeout:       time.Second * time.Duration(config.App.Timeout),
+		LeavePageOpen: config.App.IsLeaveHead,
 	}
 
-	if appConf.IsDebug {
+	if config.App.IsDebug {
 		opts.IsHeadless = false
 	}
 
@@ -36,11 +36,11 @@ func serve(cmd *cobra.Command, args []string) {
 		logrus.Error(err)
 	}
 
-	yand := yandex.New(*browser, appConf.YandexConfig)
-	gogl := google.New(*browser, appConf.GoogleConfig)
-	baidu := baidu.New(*browser, appConf.BaiduConfig)
+	yand := yandex.New(*browser, config.YandexConfig)
+	gogl := google.New(*browser, config.GoogleConfig)
+	baidu := baidu.New(*browser, config.BaiduConfig)
 
-	serv := core.NewServer(appConf.Host, appConf.Port, gogl, yand, baidu)
+	serv := core.NewServer(config.App.Host, config.App.Port, gogl, yand, baidu)
 	serv.Listen()
 }
 
