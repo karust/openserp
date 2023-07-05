@@ -8,8 +8,10 @@ import (
 	"github.com/karust/openserp/core"
 )
 
+const baseURL = "https://www.yandex.com"
+
 func BuildURL(q core.Query, page int) (string, error) {
-	base, _ := url.Parse("https://www.yandex.com")
+	base, _ := url.Parse(baseURL)
 	base.Path += "search/"
 
 	params := url.Values{}
@@ -34,6 +36,39 @@ func BuildURL(q core.Query, page int) (string, error) {
 
 	if len(params.Get("text")) == 0 {
 		return "", errors.New("Empty query built")
+	}
+
+	base.RawQuery = params.Encode()
+	return base.String(), nil
+}
+
+func BuildImageURL(q core.Query, page int) (string, error) {
+	// TODO: Add other parameters
+	base, _ := url.Parse(baseURL)
+	base.Path += "images/search/"
+
+	params := url.Values{}
+	if q.Text != "" {
+		text := q.Text
+
+		if q.DateInterval != "" {
+			text += " date:" + q.DateInterval
+		}
+
+		params.Add("text", text)
+		params.Add("p", fmt.Sprint(page))
+	}
+
+	if len(params.Get("text")) == 0 {
+		return "", errors.New("Empty query built")
+	}
+
+	if q.Site != "" {
+		params.Add("site", q.Site)
+	}
+
+	if q.Filetype != "" {
+		params.Add("itype", q.Filetype)
 	}
 
 	base.RawQuery = params.Encode()

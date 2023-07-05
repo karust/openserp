@@ -1,6 +1,7 @@
 package yandex
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -8,6 +9,21 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
+
+type YandexImageData struct {
+	SerpItem struct {
+		Freshness string
+		Snippet   struct {
+			Title     string
+			Text      string
+			URL       string
+			Domain    string
+			ShopScore int
+		}
+		ImgHref string `json:"img_href"`
+		Pos     int
+	} `json:"serp-item"`
+}
 
 type Yandex struct {
 	core.Browser
@@ -156,6 +172,89 @@ func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
 		}
 
 		time.Sleep(yand.pageSleep)
+	}
+
+	return allResults, nil
+}
+
+func (yand *Yandex) parseImageResults(results rod.Elements, pageNum int) []core.SearchResult {
+	searchResults := []core.SearchResult{}
+
+	for i, r := range results {
+
+		dataAttr, err := r.Attribute("data-bem")
+		if err != nil {
+			continue
+		}
+
+		var data YandexImageData
+
+		err = json.Unmarshal([]byte(*dataAttr), &data)
+		if err != nil {
+			logrus.Errorf("Cannot unmarshal yandex image: %v\nData: %v", err, *dataAttr)
+			continue
+		}
+
+		linkText := data.SerpItem.ImgHref
+		title := data.SerpItem.Snippet.Title
+		description := data.SerpItem.Snippet.Text
+
+		r := core.SearchResult{Rank: (pageNum * 10) + (i + 1), URL: linkText, Title: title, Description: description}
+		searchResults = append(searchResults, r)
+	}
+
+	return searchResults
+}
+
+func (yand *Yandex) SearchImage(query core.Query) ([]core.SearchResult, error) {
+	logrus.Tracef("Start Yandex image search, query: %+v", query)
+
+	allResults := []core.SearchResult{}
+	searchPage := 0
+
+	url, err := BuildImageURL(query, searchPage)
+	if err != nil {
+		return nil, err
+	}
+
+	page := yand.Navigate(url)
+
+	// Get all search results in page
+	searchRes, err := page.Timeout(yand.Timeout).Search("div.serp-item")
+	if err != nil {
+		defer page.Close()
+		logrus.Errorf("Cannot parse search results: %s", err)
+		return nil, core.ErrSearchTimeout
+	}
+
+	// Check why no results, maybe captcha?
+	if searchRes == nil {
+		defer page.Close()
+
+		if yand.isNoResults(page) {
+			logrus.Errorf("No results found")
+		} else if yand.isCaptcha(page) {
+			logrus.Errorf("Yandex captcha occurred during: %s", url)
+			return nil, core.ErrCaptcha
+		}
+		return nil, err
+	}
+
+	elements, err := searchRes.All()
+	if err != nil {
+		logrus.Errorf("Cannot get all elements from search results: %s", err)
+		return nil, err
+	}
+
+	r := yand.parseImageResults(elements, searchPage)
+	allResults = append(allResults, r...)
+
+	if !yand.Browser.LeavePageOpen {
+		// Close tab before opening new one during the cycle
+		err = page.Close()
+		if err != nil {
+			logrus.Error(err)
+		}
 	}
 
 	return allResults, nil
