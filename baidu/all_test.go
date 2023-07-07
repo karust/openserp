@@ -13,7 +13,7 @@ var testQuery = core.Query{Text: "go", Site: "tutorialspoint.com", DateInterval:
 func init() {
 	core.InitLogger(true, true)
 
-	opts := core.BrowserOpts{IsHeadless: true, IsLeakless: false, Timeout: time.Second * 2, WaitRequests: false}
+	opts := core.BrowserOpts{IsHeadless: false, IsLeakless: false, Timeout: time.Second * 10}
 	browser, _ = core.NewBrowser(opts)
 }
 
@@ -30,16 +30,7 @@ func TestUrlBuild(t *testing.T) {
 	}
 }
 
-// func TestSearchRaw(t *testing.T) {
-// 	results, err := Search(testQuery)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	fmt.Println(results)
-// }
-
-func TestSearchBaidu(t *testing.T) {
+func TestSearch(t *testing.T) {
 	baid := New(*browser, core.SearchEngineOptions{})
 	results, err := baid.Search(testQuery)
 	if err != nil {
@@ -49,4 +40,38 @@ func TestSearchBaidu(t *testing.T) {
 	if len(results) == 0 {
 		t.Fatal("No results got from Baidu search")
 	}
+}
+
+func TestImageUrlBuild(t *testing.T) {
+	query := core.Query{Text: "金毛猎犬", Limit: 10}
+
+	res, err := BuildImageURL(query, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "https://image.baidu.com/search/acjson?cl=2&ie=utf-8&ipn=r&tn=resultjson_com&word=%E9%87%91%E6%AF%9B%E7%8C%8E%E7%8A%AC"
+
+	if want != res {
+		t.Fatalf("Wanted result `%s` doesn't match to resulted `%s`", want, res)
+	}
+}
+
+func TestImageSearch(t *testing.T) {
+
+	baid := New(*browser, core.SearchEngineOptions{})
+
+	query := core.Query{Text: "金毛猎犬", Limit: 31}
+	results, err := baid.SearchImage(query)
+	if err != nil {
+		t.Fatalf("Cannot [ImageBaidu]: %s", err)
+	}
+
+	if len(results) == 0 {
+		t.Fatalf("[ImageBaidu] returned empty result")
+	}
+
+	// for _, r := range results {
+	// 	fmt.Printf("%+v\n", r)
+	// }
 }

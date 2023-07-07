@@ -1,6 +1,8 @@
 package baidu
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/go-rod/rod"
@@ -8,6 +10,34 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
+
+type imageDataJson struct {
+	Query        string `json:"queryExt"`
+	TotalResults int    `json:"displayNum"`
+
+	Data []struct {
+		Title       string `json:"fromPageTitle"`
+		PictureDate string `json:"bdImgnewsDate"`
+		ThumbURL    string `json:"thumbURL"`
+		Type        string
+		Height      int
+		Width       int
+		IsCopyright int
+
+		URL []struct {
+			SourcePage string `json:"FromURL"`
+			Original   string `json:"ObjURL"`
+		} `json:"replaceUrl"`
+
+		// Versions []struct {
+		// 	Height        int
+		// 	Width         int
+		// 	ImgSourcePage string `json:"fromURL"`
+		// 	URL           string `json:"objURL"`
+		// 	Type          string
+		// } `json:"setList"`
+	}
+}
 
 type Baidu struct {
 	core.Browser
@@ -118,6 +148,82 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 		err = page.Close()
 		if err != nil {
 			logrus.Error(err)
+		}
+	}
+
+	return searchResults, nil
+}
+
+func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
+	logrus.Tracef("Start Baidu Image search, query: %+v", query)
+
+	searchResults := []core.SearchResult{}
+	searchPage := 0
+
+	for len(searchResults) < query.Limit {
+		url, err := BuildImageURL(query, searchPage)
+		if err != nil {
+			return nil, err
+		}
+
+		// Get anti-crawler cookies first, then reload page
+		page := baid.Navigate(url)
+		if !baid.LeavePageOpen {
+			defer page.Close()
+		}
+		page.Reload()
+		page.WaitLoad()
+
+		result, err := page.Timeout(baid.Timeout).Search("body > pre")
+		if err != nil {
+			defer page.Close()
+			logrus.Errorf("Cannot parse search results: %s", err)
+			return nil, core.ErrSearchTimeout
+		}
+
+		// Check why no results, maybe captcha?
+		if result == nil {
+			defer page.Close()
+
+			if baid.isCaptcha(page) {
+				logrus.Errorf("Baidu captcha occurred during: %s", url)
+				return nil, core.ErrCaptcha
+			} else if baid.isTimeout(page) {
+				logrus.Errorf("Baidu timeout occurred during: %s", url)
+				return nil, core.ErrCaptcha
+			}
+			return nil, nil
+		}
+
+		jsonText, err := result.First.Text()
+		if err != nil {
+			return nil, err
+		}
+
+		var data imageDataJson
+
+		err = json.Unmarshal([]byte(jsonText), &data)
+		if err != nil {
+			logrus.Errorf("Cannot unmarshal Baidu image JSON: %v\nData: %v", err, jsonText)
+			return nil, err
+		}
+
+		for i, img := range data.Data {
+			if len(img.URL) == 0 {
+				continue
+			}
+			res := core.SearchResult{
+				Rank:        (searchPage * 30) + (i + 1),
+				URL:         img.URL[0].Original,
+				Title:       img.Title,
+				Description: fmt.Sprintf("%v,%v,%vx%x,copyright:%v", img.PictureDate, img.Type, img.Height, img.Width, img.IsCopyright)}
+			searchResults = append(searchResults, res)
+		}
+
+		searchPage += 1
+
+		if !baid.LeavePageOpen {
+			page.Close()
 		}
 	}
 
