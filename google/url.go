@@ -269,3 +269,111 @@ func BuildURL(q core.Query) (string, error) {
 	base.RawQuery = params.Encode()
 	return base.String(), nil
 }
+
+func BuildImageURL(q core.Query) (string, error) {
+	// TODO: Add new params
+	googleBase := GoogleDomains[strings.ToLower(q.LangCode)]
+	base, err := url.Parse(fmt.Sprintf("https://www.google.%s", googleBase))
+	if err != nil {
+		return "", err
+	}
+
+	base.Path += "search"
+	params := url.Values{}
+	params.Add("tbm", "isch") // Search images
+
+	// Set request text
+	if q.Text != "" || q.Site != "" || q.Filetype != "" {
+		text := q.Text
+		if q.Site != "" {
+			text += " site:" + q.Site
+		}
+		if q.Filetype != "" {
+			text += " filetype:" + q.Filetype
+		}
+
+		logrus.Tracef("Query text: %s", text)
+		params.Add("q", text)
+		params.Add("oq", text)
+	}
+
+	if len(params.Get("q")) == 0 {
+		return "", errors.New("Empty query built")
+	}
+
+	// Set search date range
+	if q.DateInterval != "" {
+		intervals := strings.Split(q.DateInterval, "..")
+		if len(intervals) != 2 {
+			return "", errors.New("Incorrect data interval provided")
+		}
+
+		dataParam := fmt.Sprintf("cdr:1,cd_min:%s,cd_max:%s", intervals[0], intervals[1])
+		params.Add("tbs", dataParam)
+	}
+
+	// Limit number of results
+	if q.Limit != 0 {
+		params.Add("num", strconv.Itoa(q.Limit))
+	}
+
+	if q.LangCode != "" {
+		params.Add("hl", q.LangCode)
+		params.Add("lr", "lang_"+strings.ToLower(q.LangCode))
+	}
+
+	params.Add("pws", "0")  // Do not personalize earch results
+	params.Add("nfpr", "1") // Do not auto correct search queries
+
+	base.RawQuery = params.Encode()
+	return base.String(), nil
+}
+
+type SourceImage struct {
+	PageURL     string
+	OriginalURL string
+	Width       string
+	Height      string
+}
+
+func parseSourceImageURL(href string) (SourceImage, error) {
+	source := SourceImage{}
+
+	href = strings.ReplaceAll(href, ";", "&")
+	parsed, err := url.QueryUnescape(href)
+	if err != nil {
+		return source, err
+	}
+
+	u, err := url.Parse(parsed)
+	if err != nil {
+		return source, err
+	}
+
+	queryMap, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return source, err
+	}
+
+	val, ok := queryMap["h"]
+	if ok && len(val) > 0 {
+		source.Height = val[0]
+	}
+
+	val, ok = queryMap["w"]
+	if ok && len(val) > 0 {
+		source.Width = val[0]
+	}
+
+	val, ok = queryMap["imgrefurl"]
+	if ok && len(val) > 0 {
+		source.PageURL = val[0]
+	}
+
+	val, ok = queryMap["imgurl"]
+	if ok && len(val) > 0 {
+		source.OriginalURL = val[0]
+	}
+
+	return source, nil
+}

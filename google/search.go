@@ -2,11 +2,13 @@ package google
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/proto"
 	"github.com/karust/openserp/core"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
@@ -157,6 +159,106 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 		if err != nil {
 			logrus.Error(err)
 		}
+	}
+
+	return searchResults, nil
+}
+
+func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
+	logrus.Tracef("Start Google Image search, query: %+v", query)
+
+	searchResults := []core.SearchResult{}
+
+	// Build URL from query struct to open in browser
+	url, err := BuildImageURL(query)
+	if err != nil {
+		return nil, err
+	}
+
+	page := gogl.Navigate(url)
+	if !gogl.LeavePageOpen {
+		defer page.Close()
+	}
+	page.WaitLoad()
+
+	results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][jsaction]")
+	if err != nil {
+		defer page.Close()
+		logrus.Errorf("Cannot parse search results: %s", err)
+		return nil, core.ErrSearchTimeout
+	}
+
+	// Check why no results, maybe captcha?
+	if results == nil {
+		defer page.Close()
+
+		if gogl.isCaptcha(page) {
+			logrus.Errorf("Google captcha occurred during: %s", url)
+			return nil, core.ErrCaptcha
+		}
+		return nil, err
+	}
+
+	resultElements, err := results.All()
+	if err != nil {
+		return nil, err
+	}
+
+	for i, r := range resultElements {
+		// TODO: parse AF_initDataCallback to optimize instead of this?
+		err := r.Click(proto.InputMouseButtonRight, 1)
+		if err != nil {
+			logrus.Error("Error clicking")
+			continue
+		}
+
+		// dataID, err := r.Attribute("data-id")
+		// if err != nil {
+		// 	continue
+		// }
+		// fmt.Println(*dataID)
+
+		// Get URLs
+		link, err := r.Element("a[tabindex][role]")
+		if err != nil {
+			continue
+		}
+
+		linkText, err := link.Property("href")
+		if err != nil {
+			logrus.Error("No `href` tag found")
+		}
+
+		imgSrc, err := parseSourceImageURL(linkText.String())
+		if err != nil {
+			logrus.Errorf("Cannot parse image href: %v", err)
+			continue
+		}
+
+		// Get title
+		titleTag, err := r.Element("h3")
+		if err != nil {
+			logrus.Error("No `h3` tag found")
+			continue
+		}
+
+		title, err := titleTag.Text()
+		if err != nil {
+			logrus.Error("Cannot extract text from title")
+			title = "No title"
+		}
+
+		gR := core.SearchResult{
+			Rank:        i + 1,
+			URL:         imgSrc.OriginalURL,
+			Title:       title,
+			Description: fmt.Sprintf("Height:%v, Width:%v, Source Page: %v", imgSrc.Height, imgSrc.Width, imgSrc.PageURL),
+		}
+		searchResults = append(searchResults, gR)
+	}
+
+	if !gogl.LeavePageOpen {
+		page.Close()
 	}
 
 	return searchResults, nil
