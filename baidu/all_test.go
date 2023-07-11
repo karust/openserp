@@ -43,17 +43,17 @@ func TestSearch(t *testing.T) {
 }
 
 func TestImageUrlBuild(t *testing.T) {
-	query := core.Query{Text: "金毛猎犬", Limit: 10}
+	query := core.Query{Text: "金毛猎犬"}
 
-	res, err := BuildImageURL(query, 0)
+	got, err := BuildImageURL(query, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	want := "https://image.baidu.com/search/acjson?cl=2&ie=utf-8&ipn=r&tn=resultjson_com&word=%E9%87%91%E6%AF%9B%E7%8C%8E%E7%8A%AC"
+	want := "https://image.baidu.com/search/acjson?cl=2&fp=result&ie=utf-8&ipn=rj&oe=utf-8&pn=0&rn=30&tn=resultjson_com&word=%E9%87%91%E6%AF%9B%E7%8C%8E%E7%8A%AC"
 
-	if want != res {
-		t.Fatalf("Wanted result `%s` doesn't match to resulted `%s`", want, res)
+	if want != got {
+		t.Fatalf("Want: `%s`, Got `%s`", want, got)
 	}
 }
 
