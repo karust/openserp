@@ -51,27 +51,21 @@ func TestImageUrlBuild(t *testing.T) {
 	}
 
 	want := "https://image.baidu.com/search/acjson?cl=2&fp=result&ie=utf-8&ipn=rj&oe=utf-8&pn=0&rn=30&tn=resultjson_com&word=%E9%87%91%E6%AF%9B%E7%8C%8E%E7%8A%AC"
-
 	if want != got {
 		t.Fatalf("Want: `%s`, Got `%s`", want, got)
 	}
 }
 
 func TestImageSearch(t *testing.T) {
-
 	baid := New(*browser, core.SearchEngineOptions{})
 
-	query := core.Query{Text: "金毛猎犬", Limit: 31}
+	query := core.Query{Text: "each each data", Limit: 60}
 	results, err := baid.SearchImage(query)
 	if err != nil {
 		t.Fatalf("Cannot [ImageBaidu]: %s", err)
 	}
 
-	if len(results) == 0 {
-		t.Fatalf("[ImageBaidu] returned empty result")
+	if len(results) < 60 {
+		t.Fatalf("[ImageBaidu] returned not full result")
 	}
-
-	// for _, r := range results {
-	// 	fmt.Printf("%+v\n", r)
-	// }
 }

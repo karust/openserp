@@ -3,6 +3,7 @@ package baidu
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/go-rod/rod"
@@ -202,9 +203,18 @@ func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
 
 		var data imageDataJson
 
-		err = json.Unmarshal([]byte(jsonText), &data)
+		// Fix broken JSON
+		jsonText = strings.ReplaceAll(jsonText, `\'`, "'")
+		matchNewlines := regexp.MustCompile(`[\r\n\t]`)
+		escapeNewlines := func(s string) string {
+			return matchNewlines.ReplaceAllString(s, "\\n")
+		}
+		re := regexp.MustCompile(`"[^"\\]*(?:\\[\s\S][^"\\]*)*"`)
+		fixedJson := re.ReplaceAllStringFunc(jsonText, escapeNewlines)
+
+		err = json.Unmarshal([]byte(fixedJson), &data)
 		if err != nil {
-			logrus.Errorf("Cannot unmarshal Baidu image JSON: %v\nData: %v", err, jsonText)
+			logrus.Errorf("Cannot unmarshal JSON: %v\nData: %v", err, jsonText)
 			return nil, err
 		}
 
