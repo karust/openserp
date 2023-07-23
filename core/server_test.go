@@ -27,6 +27,9 @@ func (SeMock) IsInitialized() bool {
 func (s SeMock) Search(q Query) (res []SearchResult, err error) {
 	return []SearchResult{{Title: s.EngineName}}, nil
 }
+func (s SeMock) SearchImage(q Query) (res []SearchResult, err error) {
+	return []SearchResult{{Title: s.EngineName}}, nil
+}
 func (s SeMock) GetRateLimiter() *rate.Limiter {
 	return nil
 }
