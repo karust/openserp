@@ -292,7 +292,6 @@ func BuildImageURL(q core.Query) (string, error) {
 			text += " filetype:" + q.Filetype
 		}
 
-		logrus.Tracef("Query text: %s", text)
 		params.Add("q", text)
 		params.Add("oq", text)
 	}

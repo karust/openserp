@@ -167,9 +167,7 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	logrus.Tracef("Start Google Image search, query: %+v", query)
 
-	searchResults := []core.SearchResult{}
-
-	// Build URL from query struct to open in browser
+	searchResultsMap := map[string]core.SearchResult{}
 	url, err := BuildImageURL(query)
 	if err != nil {
 		return nil, err
@@ -179,87 +177,106 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	if !gogl.LeavePageOpen {
 		defer page.Close()
 	}
-	page.WaitLoad()
 
-	results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][jsaction]")
-	if err != nil {
-		defer page.Close()
-		logrus.Errorf("Cannot parse search results: %s", err)
-		return nil, core.ErrSearchTimeout
-	}
+	//// TODO: Case with cookie accept (appears with VPN)
+	// if page.MustInfo().URL != url {
+	// 	results, _ := page.Search("button[aria-label][jsaction]")
+	// 	if results != nil {
+	// 		//buttons, _ := results.All()
+	// 		//buttons[1].Click(proto.InputMouseButtonLeft, 1)
+	// 	}
+	// }
 
-	// Check why no results, maybe captcha?
-	if results == nil {
-		defer page.Close()
+	for len(searchResultsMap) < query.Limit {
+		page.WaitLoad()
+		page.Mouse.Scroll(0, 1000000, 1)
+		page.WaitLoad()
 
-		if gogl.isCaptcha(page) {
-			logrus.Errorf("Google captcha occurred during: %s", url)
-			return nil, core.ErrCaptcha
-		}
-		return nil, err
-	}
-
-	resultElements, err := results.All()
-	if err != nil {
-		return nil, err
-	}
-
-	for i, r := range resultElements {
-		// TODO: parse AF_initDataCallback to optimize instead of this?
-		err := r.Click(proto.InputMouseButtonRight, 1)
+		results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][jsaction]")
 		if err != nil {
-			logrus.Error("Error clicking")
+			logrus.Errorf("Cannot parse search results: %s", err)
+			return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrSearchTimeout
+		}
+
+		// Check why no results
+		if results == nil {
+			if gogl.isCaptcha(page) {
+				logrus.Errorf("Google captcha occurred during: %s", url)
+				return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrCaptcha
+			}
+			return *core.ConvertSearchResultsMap(searchResultsMap), err
+		}
+
+		resultElements, err := results.All()
+		if err != nil {
+			return *core.ConvertSearchResultsMap(searchResultsMap), err
+		}
+
+		if len(resultElements) < len(searchResultsMap) {
 			continue
 		}
 
-		// dataID, err := r.Attribute("data-id")
-		// if err != nil {
-		// 	continue
-		// }
-		// fmt.Println(*dataID)
+		for i, r := range resultElements[len(searchResultsMap):] {
+			// TODO: parse AF_initDataCallback to optimize instead of this?
+			err := r.Click(proto.InputMouseButtonRight, 1)
+			if err != nil {
+				logrus.Error("Error clicking")
+				continue
+			}
 
-		// Get URLs
-		link, err := r.Element("a[tabindex][role]")
-		if err != nil {
-			continue
+			dataID, err := r.Attribute("data-id")
+			if err != nil {
+				continue
+			}
+
+			// If already have image with this ID
+			if _, ok := searchResultsMap[*dataID]; ok {
+				continue
+			}
+
+			// Get URLs
+			link, err := r.Element("a[tabindex][role]")
+			if err != nil {
+				continue
+			}
+
+			linkText, err := link.Property("href")
+			if err != nil {
+				logrus.Error("No `href` tag found")
+			}
+
+			imgSrc, err := parseSourceImageURL(linkText.String())
+			if err != nil {
+				logrus.Errorf("Cannot parse image href: %v", err)
+				continue
+			}
+
+			// Get title
+			titleTag, err := r.Element("h3")
+			if err != nil {
+				logrus.Error("No `h3` tag found")
+				continue
+			}
+
+			title, err := titleTag.Text()
+			if err != nil {
+				logrus.Error("Cannot extract text from title")
+				title = "No title"
+			}
+
+			gR := core.SearchResult{
+				Rank:        i + 1,
+				URL:         imgSrc.OriginalURL,
+				Title:       title,
+				Description: fmt.Sprintf("Height:%v, Width:%v, Source Page: %v", imgSrc.Height, imgSrc.Width, imgSrc.PageURL),
+			}
+			searchResultsMap[*dataID] = gR
 		}
 
-		linkText, err := link.Property("href")
-		if err != nil {
-			logrus.Error("No `href` tag found")
+		if !gogl.LeavePageOpen {
+			page.Close()
 		}
-
-		imgSrc, err := parseSourceImageURL(linkText.String())
-		if err != nil {
-			logrus.Errorf("Cannot parse image href: %v", err)
-			continue
-		}
-
-		// Get title
-		titleTag, err := r.Element("h3")
-		if err != nil {
-			logrus.Error("No `h3` tag found")
-			continue
-		}
-
-		title, err := titleTag.Text()
-		if err != nil {
-			logrus.Error("Cannot extract text from title")
-			title = "No title"
-		}
-
-		gR := core.SearchResult{
-			Rank:        i + 1,
-			URL:         imgSrc.OriginalURL,
-			Title:       title,
-			Description: fmt.Sprintf("Height:%v, Width:%v, Source Page: %v", imgSrc.Height, imgSrc.Width, imgSrc.PageURL),
-		}
-		searchResults = append(searchResults, gR)
 	}
 
-	if !gogl.LeavePageOpen {
-		page.Close()
-	}
-
-	return searchResults, nil
+	return *core.ConvertSearchResultsMap(searchResultsMap), nil
 }

@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"sort"
 	"strconv"
 	"time"
 
@@ -16,6 +17,19 @@ type SearchResult struct {
 	URL         string `json:"url"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
+}
+
+func ConvertSearchResultsMap(searchResultsMap map[string]SearchResult) *[]SearchResult {
+	searchResults := []SearchResult{}
+
+	for _, v := range searchResultsMap {
+		searchResults = append(searchResults, v)
+	}
+
+	sort.Slice(searchResults, func(i, j int) bool {
+		return searchResults[i].Rank < searchResults[j].Rank
+	})
+	return &searchResults
 }
 
 type Query struct {

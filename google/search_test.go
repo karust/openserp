@@ -10,7 +10,7 @@ import (
 var browser *core.Browser
 
 func init() {
-	opts := core.BrowserOpts{IsHeadless: false, IsLeakless: false, Timeout: time.Second * 5}
+	opts := core.BrowserOpts{IsHeadless: false, IsLeakless: false, Timeout: time.Second * 5, LeavePageOpen: true}
 	browser, _ = core.NewBrowser(opts)
 }
 
@@ -48,57 +48,17 @@ func TestParseSourceImageURL(t *testing.T) {
 	}
 }
 
-// 	// TODO: Remove
-// func TestImageScript(t *testing.T) {
-// 	gogl := New(*browser, core.SearchEngineOptions{})
-// 	query := core.Query{Text: "alpine marmot"}
-
-// 	url, err := BuildImageURL(query)
-// 	if err != nil {
-// 		t.Fatalf("[ImageGoogle] Cannot build query")
-// 	}
-
-// 	page := gogl.Navigate(url)
-// 	result, err := page.Search("script")
-// 	if err != nil {
-// 		t.Fatalf("[ImageGoogle] Cannot find script")
-// 	}
-
-// 	scripts, err := result.All()
-// 	if err != nil {
-// 		t.Fatalf("[ImageGoogle] Cannot get all results")
-// 	}
-
-// 	rgxp, err := regexp.Compile(`http[^\[]*?\.(?:jpg|jpeg|png|bmp|gif)`)
-// 	if err != nil {
-// 		t.Fatalf("[ImageGoogle] Cannot compile regexp")
-// 	}
-
-// 	for _, s := range scripts {
-// 		if !strings.Contains(s.MustText(), "AF_initDataCallback") {
-// 			continue
-// 		}
-// 		if strings.Contains(s.MustText(), "ds:0") || !strings.Contains(s.MustText(), "ds:1") {
-// 			continue
-// 		}
-
-// 		uris := rgxp.FindAllString(s.MustText(), -1)
-// 		fmt.Println(len(uris))
-// 		fmt.Println(uris)
-// 	}
-// }
-
 func TestImageSearch(t *testing.T) {
 	gogl := New(*browser, core.SearchEngineOptions{})
-	query := core.Query{Text: "Ferrari Testarossa"}
+	query := core.Query{Text: "Ferrari Testarossa", Limit: 77}
 	results, err := gogl.SearchImage(query)
 
 	if err != nil {
 		t.Fatalf("Cannot search images: %s", err)
 	}
 
-	if len(results) == 0 {
-		t.Fatalf("Returned empty result")
+	if len(results) < 77 {
+		t.Fatalf("Returned not full result")
 	}
 
 	if results[0].URL == "" {
