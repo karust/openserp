@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/input"
 	"github.com/karust/openserp/core"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
@@ -177,85 +178,81 @@ func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
 	return allResults, nil
 }
 
-func (yand *Yandex) parseImageResults(results rod.Elements, pageNum int) []core.SearchResult {
-	searchResults := []core.SearchResult{}
-
-	for i, r := range results {
-
-		dataAttr, err := r.Attribute("data-bem")
-		if err != nil {
-			continue
-		}
-
-		var data YandexImageData
-
-		err = json.Unmarshal([]byte(*dataAttr), &data)
-		if err != nil {
-			logrus.Errorf("Cannot unmarshal yandex image: %v\nData: %v", err, *dataAttr)
-			continue
-		}
-
-		linkText := data.SerpItem.ImgHref
-		title := data.SerpItem.Snippet.Title
-		description := data.SerpItem.Snippet.Text
-
-		r := core.SearchResult{Rank: (pageNum * 10) + (i + 1), URL: linkText, Title: title, Description: description}
-		searchResults = append(searchResults, r)
-	}
-
-	return searchResults
-}
-
 func (yand *Yandex) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	logrus.Tracef("Start Yandex image search, query: %+v", query)
 
-	allResults := []core.SearchResult{}
-	searchPage := 0
-
-	url, err := BuildImageURL(query, searchPage)
+	searchResultsMap := map[string]core.SearchResult{}
+	url, err := BuildImageURL(query)
 	if err != nil {
 		return nil, err
 	}
 
 	page := yand.Navigate(url)
-
-	// Get all search results in page
-	searchRes, err := page.Timeout(yand.Timeout).Search("div.serp-item")
-	if err != nil {
+	if !yand.LeavePageOpen {
 		defer page.Close()
-		logrus.Errorf("Cannot parse search results: %s", err)
-		return nil, core.ErrSearchTimeout
 	}
 
-	// Check why no results, maybe captcha?
-	if searchRes == nil {
-		defer page.Close()
+	for len(searchResultsMap) < query.Limit {
+		page.WaitLoad()
+		page.Keyboard.Press(input.End)
+		page.WaitLoad()
+		time.Sleep(time.Duration(time.Second * 2))
 
-		if yand.isNoResults(page) {
-			logrus.Errorf("No results found")
-		} else if yand.isCaptcha(page) {
-			logrus.Errorf("Yandex captcha occurred during: %s", url)
-			return nil, core.ErrCaptcha
-		}
-		return nil, err
-	}
-
-	elements, err := searchRes.All()
-	if err != nil {
-		logrus.Errorf("Cannot get all elements from search results: %s", err)
-		return nil, err
-	}
-
-	r := yand.parseImageResults(elements, searchPage)
-	allResults = append(allResults, r...)
-
-	if !yand.Browser.LeavePageOpen {
-		// Close tab before opening new one during the cycle
-		err = page.Close()
+		// Get all search results in page
+		results, err := page.Timeout(yand.Timeout).Search("div.serp-item")
 		if err != nil {
-			logrus.Error(err)
+			logrus.Errorf("Cannot find search results: %s", err)
+		}
+
+		// Check why no results
+		if results == nil {
+			if yand.isCaptcha(page) {
+				logrus.Errorf("Yandex captcha occurred during: %s", url)
+				return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrCaptcha
+			} else if yand.isNoResults(page) {
+				logrus.Errorf("No results found")
+			}
+			return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrSearchTimeout
+		}
+
+		for i := 0; i < results.ResultCount; i++ {
+			r, err := results.Get(i, 1)
+			if err != nil {
+				logrus.Errorf("Cannot [%v] element from search result, [%v total]: %s", i, results.ResultCount, err)
+				return *core.ConvertSearchResultsMap(searchResultsMap), err
+			}
+
+			dataAttr, err := r[0].Attribute("data-bem")
+			if err != nil {
+				continue
+			}
+
+			var data YandexImageData
+
+			err = json.Unmarshal([]byte(*dataAttr), &data)
+			if err != nil {
+				logrus.Errorf("Cannot unmarshal yandex image data: %v\nData: %v", err, *dataAttr)
+				continue
+			}
+
+			linkText := data.SerpItem.ImgHref
+			title := data.SerpItem.Snippet.Title
+			description := data.SerpItem.Snippet.Text
+
+			yR := core.SearchResult{
+				Rank:        (i + 1),
+				URL:         linkText,
+				Title:       title,
+				Description: description,
+			}
+
+			searchResultsMap[linkText+title] = yR
+		}
+
+		if !yand.LeavePageOpen {
+			page.Close()
 		}
 	}
 
-	return allResults, nil
+	return *core.ConvertSearchResultsMap(searchResultsMap), nil
 }

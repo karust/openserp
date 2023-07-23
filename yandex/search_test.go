@@ -1,7 +1,6 @@
 package yandex
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -11,7 +10,7 @@ import (
 var browser *core.Browser
 
 func init() {
-	opts := core.BrowserOpts{IsHeadless: false, IsLeakless: false, Timeout: time.Second * 5}
+	opts := core.BrowserOpts{IsHeadless: false, IsLeakless: false, Timeout: time.Second * 15, LeavePageOpen: true}
 	browser, _ = core.NewBrowser(opts)
 }
 
@@ -31,18 +30,15 @@ func TestSearchYandex(t *testing.T) {
 }
 
 func TestImageYandex(t *testing.T) {
-
 	yand := New(*browser, core.SearchEngineOptions{})
 
-	query := core.Query{Text: "furry tiger"}
+	query := core.Query{Text: "furry tiger", Limit: 90}
 	results, err := yand.SearchImage(query)
 	if err != nil {
 		t.Fatalf("Cannot [ImageYandex]: %s", err)
 	}
 
-	if len(results) == 0 {
+	if len(results) < 90 {
 		t.Fatalf("[ImageYandex] returned empty result")
 	}
-
-	fmt.Println(results)
 }

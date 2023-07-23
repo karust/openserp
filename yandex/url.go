@@ -42,7 +42,7 @@ func BuildURL(q core.Query, page int) (string, error) {
 	return base.String(), nil
 }
 
-func BuildImageURL(q core.Query, page int) (string, error) {
+func BuildImageURL(q core.Query) (string, error) {
 	// TODO: Add other parameters
 	base, _ := url.Parse(baseURL)
 	base.Path += "images/search/"
@@ -56,7 +56,7 @@ func BuildImageURL(q core.Query, page int) (string, error) {
 		}
 
 		params.Add("text", text)
-		params.Add("p", fmt.Sprint(page))
+		//params.Add("p", fmt.Sprint(page))
 	}
 
 	if len(params.Get("text")) == 0 {
