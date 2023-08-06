@@ -216,7 +216,7 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 			continue
 		}
 
-		for i, r := range resultElements[len(searchResultsMap):] {
+		for i, r := range resultElements {
 			// TODO: parse AF_initDataCallback to optimize instead of this?
 			err := r.Click(proto.InputMouseButtonRight, 1)
 			if err != nil {
@@ -271,6 +271,8 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 				Description: fmt.Sprintf("Height:%v, Width:%v, Source Page: %v", imgSrc.Height, imgSrc.Width, imgSrc.PageURL),
 			}
 			searchResultsMap[*dataID] = gR
+
+			r.Remove()
 		}
 
 		if !gogl.LeavePageOpen {

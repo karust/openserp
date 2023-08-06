@@ -9,7 +9,7 @@ API access for search engines results if available isn't free.
 
 Using OpenSERP, you can get search results from **Google**, **Yandex**, **Baidu** via API or CLI!
 
-See [Docker](#docker) and [CLI](#cli) usage examples below.
+See [Docker](#docker) and [CLI](#cli) usage examples below ([search](#search), [images](#images)).
 
 ## Docker usage  <a name="docker"></a> 🐳
 * Run API server:
@@ -21,13 +21,6 @@ docker run -p 127.0.0.1:7000:7000 -it karust/openserp serve -a 0.0.0.0 -p 7000
 docker-compose up --build
 ```
 
-### *Example request*
-Get 20 **Google** results for `hello world`, only in English:
-```
-GET http:/127.0.0.1:7000/google/search?lang=EN&limit=20&text=hello world
-```
-You can replace `google` to `yandex` or `baidu` in query to change search engine.
-
 ### Request parameters
 | Param | Description                                                  |
 |-------|--------------------------------------------------------------|
@@ -36,8 +29,34 @@ You can replace `google` to `yandex` or `baidu` in query to change search engine
 | date  | Date in `YYYYMMDD..YYYYMMDD` format (e.g. 20181010..20231010) |
 | file  | File extension to search  (e.g. `PDF`, `DOC`)                 |
 | site  | Search within a specific website                                 |
-| limit | Limit the number of results                                  |
+| limit | Limit the number of results  
 
+### **Search**
+### *Example request*
+Get 20 **Google** results for `hello world`, only in English:
+```
+GET http:/127.0.0.1:7000/google/search?lang=EN&limit=20&text=hello world
+```
+You can replace `google` to `yandex` or `baidu` in query to change search engine.
+                                |
+
+### *Example response*
+```JSON
+[
+    {
+        "rank": 1,
+        "url": "https://en.wikipedia.org/wiki/%22Hello,_World!%22_program",
+        "title": "\"Hello, World!\" program",
+        "description": "A \"Hello, World!\" program is generally a computer program that ignores any input, and outputs or displays a message similar to \"Hello, World!\"."
+    },
+]
+```
+### **Images**
+### *Example request*
+Get 100 **Google** results for `golden puppy`:
+```
+GET http://127.0.0.1:7000/google/image?text=golden puppy&limit=100
+```
 ### *Example response*
 ```JSON
 [
