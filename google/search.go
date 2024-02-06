@@ -17,7 +17,7 @@ import (
 type Google struct {
 	core.Browser
 	core.SearchEngineOptions
-	findNumRgxp *regexp.Regexp
+	rgxpGetDigits *regexp.Regexp
 }
 
 func New(browser core.Browser, opts core.SearchEngineOptions) *Google {
@@ -25,7 +25,7 @@ func New(browser core.Browser, opts core.SearchEngineOptions) *Google {
 	opts.Init()
 	gogl.SearchEngineOptions = opts
 
-	gogl.findNumRgxp = regexp.MustCompile("\\d")
+	gogl.rgxpGetDigits = regexp.MustCompile("\\d")
 	return &gogl
 }
 
@@ -38,22 +38,29 @@ func (gogl *Google) GetRateLimiter() *rate.Limiter {
 	return rate.NewLimiter(ratelimit, gogl.RateBurst)
 }
 
-func (gogl *Google) findTotalResults(page *rod.Page) (int, error) {
+func (gogl *Google) getTotalResults(page *rod.Page) (int, error) {
 	resultsStats, err := page.Timeout(gogl.GetSelectorTimeout()).Search("div#result-stats")
 	if err != nil {
 		return 0, errors.New("Result stats not found: " + err.Error())
 	}
 
-	stats, err := resultsStats.First.Text()
+	statsText, err := resultsStats.First.Text()
 	if err != nil {
 		return 0, errors.New("Cannot extract result stats text: " + err.Error())
 	}
 
-	// Escape moment with `seconds` and extract digits
-	allNums := gogl.findNumRgxp.FindAllString(stats[:len(stats)-15], -1)
-	stats = strings.Join(allNums, "")
+	if len(statsText) == 0 {
+		return 0, nil
+	}
 
-	total, err := strconv.Atoi(stats)
+	// Remove search time seconds info from the end
+	if len(statsText) > 15 {
+		statsText = statsText[:len(statsText)-15]
+	}
+
+	foundDigits := gogl.rgxpGetDigits.FindAllString(statsText, -1)
+	totalNum := strings.Join(foundDigits, "")
+	total, err := strconv.Atoi(totalNum)
 	if err != nil {
 		return 0, err
 	}
@@ -61,10 +68,24 @@ func (gogl *Google) findTotalResults(page *rod.Page) (int, error) {
 }
 
 func (gogl *Google) isCaptcha(page *rod.Page) bool {
-	_, err := page.Timeout(gogl.GetSelectorTimeout()).Search("form#captcha-form")
+	captchaDiv, err := page.Timeout(gogl.GetSelectorTimeout()).Search("div[data-sitekey]")
 	if err != nil {
 		return false
 	}
+
+	sitekey, err := captchaDiv.First.Attribute("data-sitekey")
+	if err != nil {
+		logrus.Errorf("Cannot get Google captcha sitekey: %s", err)
+		return false
+	}
+
+	dataS, err := captchaDiv.First.Attribute("data-s")
+	if err != nil {
+		logrus.Errorf("Cannot get Google captcha datas: %s", err)
+		return false
+	}
+
+	logrus.Debug("Google Captcha:", *sitekey, *dataS)
 	return true
 }
 
@@ -83,33 +104,33 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	page := gogl.Navigate(url)
+	defer gogl.close(page)
 	gogl.preparePage(page)
 
+	// Check first if there captcha
+	if gogl.isCaptcha(page) {
+		logrus.Errorf("Google captcha occurred during: %s", url)
+		return nil, core.ErrCaptcha
+	}
+
+	// Find all results
 	results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][lang], div[data-surl][jsaction]")
 	if err != nil {
-		defer page.Close()
 		logrus.Errorf("Cannot parse search results: %s", err)
 		return nil, core.ErrSearchTimeout
 	}
 
 	// Check why no results, maybe captcha?
 	if results == nil {
-		defer page.Close()
-
-		if gogl.isCaptcha(page) {
-			logrus.Errorf("Google captcha occurred during: %s", url)
-			return nil, core.ErrCaptcha
-		}
-		return nil, err
+		return nil, nil
 	}
 
-	totalResults, err := gogl.findTotalResults(page)
+	totalResults, err := gogl.getTotalResults(page)
 	if err != nil {
 		logrus.Errorf("Error capturing total results: %v", err)
 	}
-	logrus.Infof("%d total results found", totalResults)
+	logrus.Infof("%d SERP results", totalResults)
 
 	resultElements, err := results.All()
 	if err != nil {
@@ -154,13 +175,6 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 		searchResults = append(searchResults, gR)
 	}
 
-	if !gogl.Browser.LeavePageOpen {
-		err = page.Close()
-		if err != nil {
-			logrus.Error(err)
-		}
-	}
-
 	return searchResults, nil
 }
 
@@ -174,9 +188,7 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	}
 
 	page := gogl.Navigate(url)
-	if !gogl.LeavePageOpen {
-		defer page.Close()
-	}
+	defer gogl.close(page)
 
 	//// TODO: Case with cookie accept (appears with VPN)
 	// if page.MustInfo().URL != url {
@@ -274,11 +286,16 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 
 			r.Remove()
 		}
-
-		if !gogl.LeavePageOpen {
-			page.Close()
-		}
 	}
 
 	return *core.ConvertSearchResultsMap(searchResultsMap), nil
+}
+
+func (gogl *Google) close(page *rod.Page) {
+	if !gogl.Browser.LeavePageOpen {
+		err := page.Close()
+		if err != nil {
+			logrus.Error(err)
+		}
+	}
 }
