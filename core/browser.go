@@ -3,7 +3,6 @@ package core
 import (
 	"time"
 
-	"github.com/corpix/uarand"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/devices"
 	"github.com/go-rod/rod/lib/launcher"
@@ -12,13 +11,15 @@ import (
 )
 
 type BrowserOpts struct {
-	IsHeadless    bool          // Use browser interface
-	IsLeakless    bool          // Force to kill browser
-	Timeout       time.Duration // Timeout
-	LanguageCode  string
-	WaitRequests  bool          // Wait requests to complete after navigation
-	LeavePageOpen bool          // Leave pages and browser open
-	WaitLoadTime  time.Duration // Time to wait till page loads
+	IsHeadless          bool          // Use browser interface
+	IsLeakless          bool          // Force to kill browser
+	Timeout             time.Duration // Timeout
+	LanguageCode        string
+	WaitRequests        bool          // Wait requests to complete after navigation
+	LeavePageOpen       bool          // Leave pages and browser open
+	WaitLoadTime        time.Duration // Time to wait till page loads
+	CaptchaSolverApiKey string        // 2Captcha api key
+
 }
 
 // Initialize browser parameters with default values if they are not set
@@ -34,8 +35,9 @@ func (o *BrowserOpts) Check() {
 
 type Browser struct {
 	BrowserOpts
-	browserAddr string
-	browser     *rod.Browser
+	browserAddr   string
+	browser       *rod.Browser
+	CaptchaSolver *CaptchaSolver
 }
 
 func NewBrowser(opts BrowserOpts) (*Browser, error) {
@@ -48,6 +50,11 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	var err error
 	b := Browser{BrowserOpts: opts}
 	b.browserAddr, err = launcher.New().Bin(path).Leakless(opts.IsLeakless).Headless(opts.IsHeadless).Launch()
+
+	if opts.CaptchaSolverApiKey != "" {
+		b.CaptchaSolver = NewSolver(opts.CaptchaSolverApiKey)
+		logrus.Debug("Captcha solver initialized")
+	}
 
 	return &b, err
 }
@@ -69,22 +76,22 @@ func (b *Browser) Navigate(URL string) *rod.Page {
 	b.browser.MustConnect()
 	b.browser.SetCookies(nil)
 
+	//page := b.browser.MustPage(URL)
 	page := stealth.MustPage(b.browser)
-	wait := page.MustWaitRequestIdle()
+	page.MustEmulate(devices.Device{
+		//UserAgent:      uarand.GetRandom(),
+		AcceptLanguage: b.LanguageCode,
+	})
 	page.MustNavigate(URL)
 
-	// causes bugs in google
+	wait := page.MustWaitRequestIdle()
+	// may cause bugs with google
 	if b.WaitRequests {
 		wait()
 	}
 
-	page.MustEmulate(devices.Device{
-		UserAgent:      uarand.GetRandom(),
-		AcceptLanguage: b.LanguageCode,
-	})
-
 	// Wait till page loads
-	time.Sleep(b.WaitLoadTime)
+	//time.Sleep(b.WaitLoadTime)
 
 	return page
 }
