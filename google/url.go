@@ -236,17 +236,18 @@ func BuildURL(q core.Query) (string, error) {
 
 		logrus.Tracef("Query text: %s", text)
 		params.Add("q", text)
+		params.Add("oq", text)
 	}
 
 	if len(params.Get("q")) == 0 {
-		return "", errors.New("Empty query built")
+		return "", errors.New("empty query built")
 	}
 
 	// Set search date range
 	if q.DateInterval != "" {
 		intervals := strings.Split(q.DateInterval, "..")
 		if len(intervals) != 2 {
-			return "", errors.New("Incorrect data interval provided")
+			return "", errors.New("incorrect data interval provided")
 		}
 
 		dataParam := fmt.Sprintf("cdr:1,cd_min:%s,cd_max:%s", intervals[0], intervals[1])
@@ -265,6 +266,8 @@ func BuildURL(q core.Query) (string, error) {
 
 	params.Add("pws", "0")  // Do not personalize earch results
 	params.Add("nfpr", "1") // Do not auto correct search queries
+	params.Add("sourceid", "chrome")
+	params.Add("ie", "UTF-8")
 
 	base.RawQuery = params.Encode()
 	return base.String(), nil
@@ -297,14 +300,14 @@ func BuildImageURL(q core.Query) (string, error) {
 	}
 
 	if len(params.Get("q")) == 0 {
-		return "", errors.New("Empty query built")
+		return "", errors.New("empty query built")
 	}
 
 	// Set search date range
 	if q.DateInterval != "" {
 		intervals := strings.Split(q.DateInterval, "..")
 		if len(intervals) != 2 {
-			return "", errors.New("Incorrect data interval provided")
+			return "", errors.New("incorrect data interval provided")
 		}
 
 		dataParam := fmt.Sprintf("cdr:1,cd_min:%s,cd_max:%s", intervals[0], intervals[1])
