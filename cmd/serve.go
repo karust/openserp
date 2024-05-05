@@ -21,10 +21,11 @@ var serveCMD = &cobra.Command{
 
 func serve(cmd *cobra.Command, args []string) {
 	opts := core.BrowserOpts{
-		IsHeadless:    !config.App.IsBrowserHead, // Disable headless if browser head mode is set
-		IsLeakless:    config.App.IsLeakless,
-		Timeout:       time.Second * time.Duration(config.App.Timeout),
-		LeavePageOpen: config.App.IsLeaveHead,
+		IsHeadless:          !config.App.IsBrowserHead, // Disable headless if browser head mode is set
+		IsLeakless:          config.App.IsLeakless,
+		Timeout:             time.Second * time.Duration(config.App.Timeout),
+		LeavePageOpen:       config.App.IsLeaveHead,
+		CaptchaSolverApiKey: config.Config2Capcha.ApiKey,
 	}
 
 	if config.App.IsDebug {

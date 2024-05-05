@@ -10,7 +10,7 @@ import (
 var browser *core.Browser
 
 func init() {
-	opts := core.BrowserOpts{IsHeadless: false, IsLeakless: false, Timeout: time.Second * 5, LeavePageOpen: true}
+	opts := core.BrowserOpts{IsHeadless: true, IsLeakless: false, Timeout: time.Second * 5, LeavePageOpen: false}
 	browser, _ = core.NewBrowser(opts)
 }
 

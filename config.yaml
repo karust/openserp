@@ -6,15 +6,20 @@ app:
   timeout: 15
   head: false
   leakless: false
+  leave_head: false
+
+2captcha:
+  apikey: "123123123123123"
 
 google:
-  rate_requests: 4     # Number of requests per Minute
-  rate_burst: 2        # Number of non-ratelimited requests per Minute
+  rate_requests: 4 # Number of requests per Minute
+  rate_burst: 2 # Number of non-ratelimited requests per Minute
+  captcha: true
 
 yandex:
-  rate_requests: 4     
-  rate_burst: 2        
+  rate_requests: 4
+  rate_burst: 2
 
 baidu:
-  rate_requests: 4     
-  rate_burst: 2        
+  rate_requests: 4
+  rate_burst: 2

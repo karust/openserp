@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -52,9 +51,9 @@ func NewServer(host string, port int, searchEngines ...SearchEngine) *Server {
 			if err != nil {
 				switch err {
 				case ErrCaptcha:
-					err = errors.New(fmt.Sprintf("Captcha found, please stop sending requests for a while\n%s", err))
+					err = fmt.Errorf("captcha found, please stop sending requests for a while\n%s", err)
 				case ErrSearchTimeout:
-					err = errors.New(fmt.Sprintf("%s", err))
+					err = fmt.Errorf("%s", err)
 				}
 
 				logrus.Errorf("Error during %s search: %s", locEngine.Name(), err)
@@ -87,9 +86,9 @@ func NewServer(host string, port int, searchEngines ...SearchEngine) *Server {
 			if err != nil {
 				switch err {
 				case ErrCaptcha:
-					err = errors.New(fmt.Sprintf("Captcha found, please stop sending requests for a while\n%s", err))
+					err = fmt.Errorf("captcha found, please stop sending requests for a while: %s", err)
 				case ErrSearchTimeout:
-					err = errors.New(fmt.Sprintf("%s", err))
+					err = fmt.Errorf("%s", err)
 				}
 
 				logrus.Errorf("Error during %s search: %s", locEngine.Name(), err)

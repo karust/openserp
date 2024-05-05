@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -13,16 +12,21 @@ import (
 )
 
 const (
-	version               = "0.2.1"
+	version               = "0.3"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
 
 type Config struct {
-	App          AppConfig                `mapstructure:"app"`
-	GoogleConfig core.SearchEngineOptions `mapstructure:"google"`
-	YandexConfig core.SearchEngineOptions `mapstructure:"yandex"`
-	BaiduConfig  core.SearchEngineOptions `mapstructure:"baidu"`
+	App           AppConfig                `mapstructure:"app"`
+	Config2Capcha Config2Captcha           `mapstructure:"2captcha"`
+	GoogleConfig  core.SearchEngineOptions `mapstructure:"google"`
+	YandexConfig  core.SearchEngineOptions `mapstructure:"yandex"`
+	BaiduConfig   core.SearchEngineOptions `mapstructure:"baidu"`
+}
+
+type Config2Captcha struct {
+	ApiKey string `mapstructure:"apikey"`
 }
 
 type AppConfig struct {
@@ -88,7 +92,7 @@ func initializeConfig(cmd *cobra.Command) error {
 	// 1. Config. Return an error if we cannot parse the config file.
 	err := v.ReadInConfig()
 	if err != nil {
-		err = errors.New(fmt.Sprintf("Cannot read config: %v", err))
+		err = fmt.Errorf("cannot read config: %v", err)
 		logrus.Warn(err)
 	}
 
@@ -107,7 +111,7 @@ func initializeConfig(cmd *cobra.Command) error {
 	// Dump Viper values to config struct
 	err = v.Unmarshal(&config)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Cannot unmarshall config: %v", err))
+		return fmt.Errorf("cannot unmarshall config: %v", err)
 	}
 
 	if config.App.IsDebug {
@@ -128,4 +132,5 @@ func init() {
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsLeakless, "leakless", "l", false, "Use leakless mode to insure browser instances are closed after search")
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsRawRequests, "raw", "r", false, "Disable browser usage, use HTTP requests")
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsLeaveHead, "leave", "", false, "Leave browser and tabs opened after search is made")
+	RootCmd.PersistentFlags().StringVarP(&config.Config2Capcha.ApiKey, "2captcha_key", "", "", "2 captcha api key")
 }

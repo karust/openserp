@@ -9,14 +9,15 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-var ErrCaptcha = errors.New("Captcha detected")
-var ErrSearchTimeout = errors.New("Timeout. Cannot find element on page")
+var ErrCaptcha = errors.New("captcha detected")
+var ErrSearchTimeout = errors.New("timeout. Cannot find element on page")
 
 type SearchResult struct {
 	Rank        int    `json:"rank"`
 	URL         string `json:"url"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
+	Ad          bool   `json:"ad"`
 }
 
 func ConvertSearchResultsMap(searchResultsMap map[string]SearchResult) *[]SearchResult {
@@ -39,6 +40,7 @@ type Query struct {
 	Filetype     string // File extension to search.
 	Site         string // Search site
 	Limit        int    // Limit the number of results
+	Answers      bool   // Include question and answers from SERP page to results with negative indexes
 }
 
 func (q Query) IsEmpty() bool {
@@ -48,23 +50,27 @@ func (q Query) IsEmpty() bool {
 	return false
 }
 
-func (q *Query) InitFromContext(c *fiber.Ctx) error {
-	q.Text = c.Query("text")
-	q.LangCode = c.Query("lang")
-	q.DateInterval = c.Query("date")
-	q.Filetype = c.Query("file")
-	q.Site = c.Query("site")
+func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
+	searchQuery.Text = reqCtx.Query("text")
+	searchQuery.LangCode = reqCtx.Query("lang")
+	searchQuery.DateInterval = reqCtx.Query("date")
+	searchQuery.Filetype = reqCtx.Query("file")
+	searchQuery.Site = reqCtx.Query("site")
 
-	limit, err := strconv.Atoi(c.Query("limit", "25"))
+	limit, err := strconv.Atoi(reqCtx.Query("limit", "25"))
 	if err != nil {
 		return err
 	}
-	q.Limit = limit
+	searchQuery.Limit = limit
 
-	if q.IsEmpty() {
-		return errors.New("Query cannot be empty")
+	searchQuery.Answers, err = strconv.ParseBool(reqCtx.Query("answers", "0"))
+	if err != nil {
+		return err
 	}
 
+	if searchQuery.IsEmpty() {
+		return errors.New("Query cannot be empty")
+	}
 	return nil
 }
 
@@ -73,6 +79,7 @@ type SearchEngineOptions struct {
 	RateTime        int64 `mapstructure:"rate_seconds"`
 	RateBurst       int   `mapstructure:"rate_burst"`
 	SelectorTimeout int64 `mapstructure:"selector_timeout"` // CSS selector timeout in seconds
+	IsSolveCaptcha  bool  `mapstructure:"captcha"`
 }
 
 func (o *SearchEngineOptions) Init() {

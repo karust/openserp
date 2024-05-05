@@ -30,6 +30,7 @@ docker-compose up --build
 | file  | File extension to search  (e.g. `PDF`, `DOC`)                 |
 | site  | Search within a specific website                                 |
 | limit | Limit the number of results  
+| answers | Include google answers as negative rank indexes (e.g. `true`, `false`)
 
 ### **Search**
 ### *Example request*
@@ -47,27 +48,18 @@ You can replace `google` to `yandex` or `baidu` in query to change search engine
         "rank": 1,
         "url": "https://en.wikipedia.org/wiki/%22Hello,_World!%22_program",
         "title": "\"Hello, World!\" program",
-        "description": "A \"Hello, World!\" program is generally a computer program that ignores any input, and outputs or displays a message similar to \"Hello, World!\"."
+        "description": "A \"Hello, World!\" program is generally a computer program that ignores any input, and outputs or displays a message similar to \"Hello, World!\".",
+        "ad": false
     },
 ]
 ```
-### **Images**
+### **Images** **[WIP]**
 ### *Example request*
 Get 100 **Google** results for `golden puppy`:
 ```
 GET http://127.0.0.1:7000/google/image?text=golden puppy&limit=100
 ```
-### *Example response*
-```JSON
-[
-    {
-        "rank": 1,
-        "url": "https://en.wikipedia.org/wiki/%22Hello,_World!%22_program",
-        "title": "\"Hello, World!\" program",
-        "description": "A \"Hello, World!\" program is generally a computer program that ignores any input, and outputs or displays a message similar to \"Hello, World!\"."
-    },
-]
-```
+
 
 ## CLI <a name="cli"></a> ⌨️
 * Use `-h` flag to see commands.
@@ -86,7 +78,8 @@ As a result you should get JSON output containting search results:
   "rank": 1,
   "url": "https://www.cyberoptik.net/blog/6-sure-fire-ways-to-get-banned-from-google/",
   "title": "11 Sure-Fire Ways to Get Banned From Google | CyberOptik",
-  "description": "How To Get Banned From Google · 1. Cloaking: The Art of Deception · 2. Plagiarism: Because Originality is Overrated · 3. Keyword Stuffing: More is Always Better · 4 ..."
+  "description": "How To Get Banned From Google · 1. Cloaking: The Art of Deception · 2. Plagiarism: Because Originality is Overrated · 3. Keyword Stuffing: More is Always Better · 4 ...",
+  "ad": false
  },
 ]
  ```

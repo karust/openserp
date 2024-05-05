@@ -3,6 +3,7 @@ module github.com/karust/openserp
 go 1.20
 
 require (
+	github.com/2captcha/2captcha-go v1.1.4
 	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/corpix/uarand v0.2.0
 	github.com/go-rod/rod v0.113.3
