@@ -319,21 +319,12 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	page := gogl.Navigate(url)
 	defer gogl.close(page)
 
-	//// TODO: Case with cookie accept (appears with VPN)
-	// if page.MustInfo().URL != url {
-	// 	results, _ := page.Search("button[aria-label][jsaction]")
-	// 	if results != nil {
-	// 		//buttons, _ := results.All()
-	// 		//buttons[1].Click(proto.InputMouseButtonLeft, 1)
-	// 	}
-	// }
-
 	for len(searchResultsMap) < query.Limit {
 		page.WaitLoad()
 		page.Mouse.Scroll(0, 1000000, 1)
 		page.WaitLoad()
 
-		results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][jsaction]")
+		results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][jsaction][jsdata]")
 		if err != nil {
 			logrus.Errorf("Cannot parse search results: %s", err)
 			return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrSearchTimeout
@@ -365,18 +356,19 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 				continue
 			}
 
-			dataID, err := r.Attribute("data-id")
+			dataVed, err := r.Attribute("data-ved")
 			if err != nil {
+				logrus.Error("Cannot find `data-ved` attr")
 				continue
 			}
 
 			// If already have image with this ID
-			if _, ok := searchResultsMap[*dataID]; ok {
+			if _, ok := searchResultsMap[*dataVed]; ok {
 				continue
 			}
 
 			// Get URLs
-			link, err := r.Element("a[tabindex][role]")
+			link, err := r.Element("a:not([ping])")
 			if err != nil {
 				continue
 			}
@@ -411,7 +403,7 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 				Title:       title,
 				Description: fmt.Sprintf("Height:%v, Width:%v, Source Page: %v", imgSrc.Height, imgSrc.Width, imgSrc.PageURL),
 			}
-			searchResultsMap[*dataID] = gR
+			searchResultsMap[*dataVed] = gR
 
 			r.Remove()
 		}

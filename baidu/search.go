@@ -24,19 +24,11 @@ type imageDataJson struct {
 		Height      int
 		Width       int
 		IsCopyright int
-
-		URL []struct {
+		AdType      string `json:"adType"`
+		URL         []struct {
 			SourcePage string `json:"FromURL"`
 			Original   string `json:"ObjURL"`
 		} `json:"replaceUrl"`
-
-		// Versions []struct {
-		// 	Height        int
-		// 	Width         int
-		// 	ImgSourcePage string `json:"fromURL"`
-		// 	URL           string `json:"objURL"`
-		// 	Type          string
-		// } `json:"setList"`
 	}
 }
 
@@ -63,18 +55,12 @@ func (baid *Baidu) GetRateLimiter() *rate.Limiter {
 
 func (baid *Baidu) isCaptcha(page *rod.Page) bool {
 	_, err := page.Timeout(baid.GetSelectorTimeout()).Search("div.passMod_dialog-body")
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
 
 func (baid *Baidu) isTimeout(page *rod.Page) bool {
 	_, err := page.Timeout(baid.GetSelectorTimeout()).Search("button.timeout-button")
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
 
 func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
@@ -226,7 +212,15 @@ func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
 				Rank:        (searchPage * 30) + (i + 1),
 				URL:         img.URL[0].Original,
 				Title:       img.Title,
-				Description: fmt.Sprintf("%v,%v,%vx%x,copyright:%v", img.PictureDate, img.Type, img.Height, img.Width, img.IsCopyright)}
+				Description: fmt.Sprintf("%v,%v,%vx%x,copyright:%v", img.PictureDate, img.Type, img.Height, img.Width, img.IsCopyright),
+				Ad: func() bool {
+					if img.AdType != "0" {
+						return true
+					} else {
+						return false
+					}
+				}(),
+			}
 			searchResults = append(searchResults, res)
 		}
 
