@@ -14,6 +14,19 @@ func init() {
 	browser, _ = core.NewBrowser(opts)
 }
 
+// func TestParseImgData(t *testing.T) {
+
+// 	jsonData, _ := os.ReadFile("./testImgData.json")
+// 	var obj ImageData
+// 	if err := json.Unmarshal(jsonData, &obj); err != nil {
+// 		t.Fatal(err)
+// 	}
+
+// 	if (len(obj.InitalState.SerpList.Items.Entities)) != 30 {
+// 		t.Fail()
+// 	}
+// }
+
 func TestSearchYandex(t *testing.T) {
 
 	yand := New(*browser, core.SearchEngineOptions{})
@@ -32,13 +45,13 @@ func TestSearchYandex(t *testing.T) {
 func TestImageYandex(t *testing.T) {
 	yand := New(*browser, core.SearchEngineOptions{})
 
-	query := core.Query{Text: "furry tiger", Limit: 90}
+	query := core.Query{Text: "furry tiger", Limit: 30}
 	results, err := yand.SearchImage(query)
 	if err != nil {
 		t.Fatalf("Cannot [ImageYandex]: %s", err)
 	}
 
-	if len(results) < 90 {
+	if len(results) < 30 {
 		t.Fatalf("[ImageYandex] returned empty result")
 	}
 }

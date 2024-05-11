@@ -2,28 +2,36 @@ package yandex
 
 import (
 	"encoding/json"
+	"fmt"
+	"sort"
 	"time"
 
 	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/input"
 	"github.com/karust/openserp/core"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
 
-type YandexImageData struct {
-	SerpItem struct {
-		Freshness string
-		Snippet   struct {
-			Title     string
-			Text      string
-			URL       string
-			Domain    string
-			ShopScore int
-		}
-		ImgHref string `json:"img_href"`
-		Pos     int
-	} `json:"serp-item"`
+type ImageEntity struct {
+	ID        string `json:"id"`
+	Rank      int    `json:"pos"`
+	Width     int    `json:"origWidth"`
+	Height    int    `json:"origHeight"`
+	Title     string `json:"alt"`
+	OrigURL   string `json:"origUrl"`
+	ThumbURL  string `json:"image"`
+	Freshness string `json:"freshnessCounter"`
+	IsGIF     bool   `json:"gifLabel"`
+}
+
+type ImageData struct {
+	InitalState struct {
+		SerpList struct {
+			Items struct {
+				Entities map[string]ImageEntity `json:"entities"`
+			} `json:"items"`
+		} `json:"serpList"`
+	} `json:"initialState"`
 }
 
 type Yandex struct {
@@ -52,27 +60,13 @@ func (yand *Yandex) GetRateLimiter() *rate.Limiter {
 
 func (yand *Yandex) isCaptcha(page *rod.Page) bool {
 	_, err := page.Timeout(yand.GetSelectorTimeout()).Search("form#checkbox-captcha-form")
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
 
 // Check if nothig is found
 func (yand *Yandex) isNoResults(page *rod.Page) bool {
-	noResFound := false
-
-	_, err := page.Timeout(yand.GetSelectorTimeout()).Search("div.EmptySearchResults-Title")
-	if err == nil {
-		noResFound = true
-	}
-
-	_, err = page.Timeout(yand.GetSelectorTimeout()).Search("div>div.RequestMeta-Message")
-	if err == nil {
-		noResFound = true
-	}
-
-	return noResFound
+	_, err := page.Timeout(yand.GetSelectorTimeout()).Search("div.Correction.SearchCorrection")
+	return err == nil
 }
 
 func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.SearchResult {
@@ -181,25 +175,27 @@ func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
 func (yand *Yandex) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	logrus.Tracef("Start Yandex image search, query: %+v", query)
 
-	searchResultsMap := map[string]core.SearchResult{}
-	url, err := BuildImageURL(query)
-	if err != nil {
-		return nil, err
-	}
+	searchResults := []core.SearchResult{}
 
-	page := yand.Navigate(url)
-	if !yand.LeavePageOpen {
-		defer page.Close()
-	}
+	searchPage := 0
+	for len(searchResults) < query.Limit {
+		url, err := BuildImageURL(query, searchPage)
+		if err != nil {
+			return nil, err
+		}
+		searchPage += 1
 
-	for len(searchResultsMap) < query.Limit {
-		page.WaitLoad()
-		page.Keyboard.Press(input.End)
-		page.WaitLoad()
-		time.Sleep(time.Duration(time.Second * 2))
+		page := yand.Navigate(url)
 
-		// Get all search results in page
-		results, err := page.Timeout(yand.Timeout).Search("div.serp-item")
+		if !yand.LeavePageOpen {
+			defer page.Close()
+		}
+
+		//page.Keyboard.Press(input.End)
+		//page.WaitLoad()
+		//time.Sleep(time.Duration(time.Second * 2))
+
+		results, err := page.Timeout(yand.Timeout).Search("div[role='main'] div[data-state]")
 		if err != nil {
 			logrus.Errorf("Cannot find search results: %s", err)
 		}
@@ -208,45 +204,33 @@ func (yand *Yandex) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		if results == nil {
 			if yand.isCaptcha(page) {
 				logrus.Errorf("Yandex captcha occurred during: %s", url)
-				return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrCaptcha
+				return searchResults, core.ErrCaptcha
 			} else if yand.isNoResults(page) {
 				logrus.Errorf("No results found")
 			}
-			return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrSearchTimeout
+			return searchResults, core.ErrSearchTimeout
 		}
 
-		for i := 0; i < results.ResultCount; i++ {
-			r, err := results.Get(i, 1)
-			if err != nil {
-				logrus.Errorf("Cannot [%v] element from search result, [%v total]: %s", i, results.ResultCount, err)
-				return *core.ConvertSearchResultsMap(searchResultsMap), err
+		data, err := results.First.Attribute("data-state")
+		if err != nil {
+			return nil, err
+		}
+
+		var imgData ImageData
+		if err := json.Unmarshal([]byte(*data), &imgData); err != nil {
+			return nil, err
+		}
+
+		for id := range imgData.InitalState.SerpList.Items.Entities {
+			img := imgData.InitalState.SerpList.Items.Entities[id]
+			res := core.SearchResult{
+				Rank:        img.Rank + 1,
+				URL:         img.OrigURL,
+				Title:       img.Title,
+				Description: fmt.Sprintf("%dx%d, freshness:%s, thumb_url:%s", img.Height, img.Width, img.Freshness, img.ThumbURL),
 			}
 
-			dataAttr, err := r[0].Attribute("data-bem")
-			if err != nil {
-				continue
-			}
-
-			var data YandexImageData
-
-			err = json.Unmarshal([]byte(*dataAttr), &data)
-			if err != nil {
-				logrus.Errorf("Cannot unmarshal yandex image data: %v\nData: %v", err, *dataAttr)
-				continue
-			}
-
-			linkText := data.SerpItem.ImgHref
-			title := data.SerpItem.Snippet.Title
-			description := data.SerpItem.Snippet.Text
-
-			yR := core.SearchResult{
-				Rank:        (i + 1),
-				URL:         linkText,
-				Title:       title,
-				Description: description,
-			}
-
-			searchResultsMap[linkText+title] = yR
+			searchResults = append(searchResults, res)
 		}
 
 		if !yand.LeavePageOpen {
@@ -254,5 +238,9 @@ func (yand *Yandex) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		}
 	}
 
-	return *core.ConvertSearchResultsMap(searchResultsMap), nil
+	sort.Slice(searchResults, func(i, j int) bool {
+		return searchResults[i].Rank < searchResults[j].Rank
+	})
+
+	return searchResults, nil
 }

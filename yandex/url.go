@@ -35,14 +35,14 @@ func BuildURL(q core.Query, page int) (string, error) {
 	}
 
 	if len(params.Get("text")) == 0 {
-		return "", errors.New("Empty query built")
+		return "", errors.New("empty query built")
 	}
 
 	base.RawQuery = params.Encode()
 	return base.String(), nil
 }
 
-func BuildImageURL(q core.Query) (string, error) {
+func BuildImageURL(q core.Query, page int) (string, error) {
 	// TODO: Add other parameters
 	base, _ := url.Parse(baseURL)
 	base.Path += "images/search/"
@@ -56,11 +56,11 @@ func BuildImageURL(q core.Query) (string, error) {
 		}
 
 		params.Add("text", text)
-		//params.Add("p", fmt.Sprint(page))
+		params.Add("p", fmt.Sprint(page))
 	}
 
 	if len(params.Get("text")) == 0 {
-		return "", errors.New("Empty query built")
+		return "", errors.New("empty query built")
 	}
 
 	if q.Site != "" {
