@@ -293,7 +293,7 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 			// Get description
 			text := resEl.MustText()
 			textSliced := strings.Split(text, "\n")
-			srchRes.Description = strings.Join(textSliced[4:], "\n")
+			srchRes.Description = strings.Join(textSliced[:], "\n")
 
 		} else {
 			//fmt.Println(i, attrs)
