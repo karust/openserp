@@ -1,6 +1,8 @@
 package core
 
 import (
+	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -19,6 +21,8 @@ type BrowserOpts struct {
 	LeavePageOpen       bool          // Leave pages and browser open
 	WaitLoadTime        time.Duration // Time to wait till page loads
 	CaptchaSolverApiKey string        // 2Captcha api key
+	ProxyURL            string        // Proxy URL
+	Insecure            bool          // Allow insecure TLS connections
 
 }
 
@@ -47,9 +51,33 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	path, has := launcher.LookPath()
 	logrus.Debug("Browser found: ", has)
 
+	// Create launcher
+	l := launcher.New().Bin(path).Leakless(opts.IsLeakless).Headless(opts.IsHeadless)
+
+	// Configure proxy if specified
+	if opts.ProxyURL != "" {
+		proxyUrl, err := url.Parse(opts.ProxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid proxy URL: %v", err)
+		}
+
+		// Make sure the proxy URL includes the scheme when passed to launcher
+		// This ensures proper handling of SOCKS5 proxies
+		proxyStr := proxyUrl.String()
+		logrus.Debugf("Setting up proxy: %s", proxyStr)
+		l = l.Proxy(proxyStr)
+
+		// Check if proxy has auth credentials
+		if proxyUrl.User != nil {
+			username := proxyUrl.User.Username()
+			logrus.Debugf("Using proxy authentication: %s:****", username)
+			// We'll handle auth in the Navigate method
+		}
+	}
+
 	var err error
 	b := Browser{BrowserOpts: opts}
-	b.browserAddr, err = launcher.New().Bin(path).Leakless(opts.IsLeakless).Headless(opts.IsHeadless).Launch()
+	b.browserAddr, err = l.Launch()
 
 	if opts.CaptchaSolverApiKey != "" {
 		b.CaptchaSolver = NewSolver(opts.CaptchaSolverApiKey)
@@ -76,10 +104,27 @@ func (b *Browser) Navigate(URL string) *rod.Page {
 	b.browser.MustConnect()
 	b.browser.SetCookies(nil)
 
-	//page := b.browser.MustPage(URL)
+	// Handle proxy authentication before any navigations
+	if b.ProxyURL != "" {
+		proxyUrl, _ := url.Parse(b.ProxyURL)
+
+		// Always ignore certificate errors when using proxies
+		// This fixes the ERR_CERT_AUTHORITY_INVALID error for SOCKS5 proxies
+		b.browser.MustIgnoreCertErrors(true)
+
+		if proxyUrl.User != nil {
+			username := proxyUrl.User.Username()
+			password, _ := proxyUrl.User.Password()
+			// Launch auth handler before any navigation occurs
+			go b.browser.MustHandleAuth(username, password)()
+		}
+	} else if b.Insecure {
+		// Still respect the insecure flag if no proxy is used
+		b.browser.MustIgnoreCertErrors(true)
+	}
+
 	page := stealth.MustPage(b.browser)
 	page.MustEmulate(devices.Device{
-		//UserAgent:      uarand.GetRandom(),
 		AcceptLanguage: b.LanguageCode,
 	})
 	page.MustNavigate(URL)
@@ -89,9 +134,6 @@ func (b *Browser) Navigate(URL string) *rod.Page {
 	if b.WaitRequests {
 		wait()
 	}
-
-	// Wait till page loads
-	//time.Sleep(b.WaitLoadTime)
 
 	return page
 }
