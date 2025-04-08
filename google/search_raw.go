@@ -33,6 +33,7 @@ func googleRequest(searchURL string, query core.Query) (*http.Response, error) {
 		Transport: transport,
 		Timeout:   time.Second * 10,
 	}
+
 	req, err := http.NewRequest("GET", searchURL, nil)
 	if err != nil {
 		return nil, err
@@ -55,23 +56,49 @@ func googleResultParser(response *http.Response) ([]core.SearchResult, error) {
 	results := []core.SearchResult{}
 	rank := 1
 
-	// Get individual results
-	sel := doc.Find("div.g")
+	// Use data attributes instead of class names to find results
+	// Both old and new DOM have data-hveid and data-ved attributes
+	sel := doc.Find("div[data-hveid][data-ved]")
 
 	for i := range sel.Nodes {
 		item := sel.Eq(i)
 
-		// Find URL
-		linkTag := item.Find("a")
-		link, _ := linkTag.Attr("href")
+		// Skip items without an h3 element (which indicates a search result)
+		if item.Find("h3").Length() == 0 {
+			continue
+		}
+
+		// Find URL - look for the anchor that contains the h3 title
+		linkTag := item.Find("h3").Parent()
+		if linkTag.Is("a") == false {
+			linkTag = item.Find("h3").Closest("a")
+		}
+
+		link, exists := linkTag.Attr("href")
+		if !exists || link == "" || link == "#" {
+			continue
+		}
 		link = strings.Trim(link, " ")
 
-		// Find title
+		// Find title - this is inside the h3 element
 		titleTag := item.Find("h3")
 		title := titleTag.Text()
 
-		// Find description
-		descTag := item.Find(`div[data-sncf~="1"]`)
+		// Find description - find div with text content after the heading
+		// Using attribute selectors that match the description container
+		descTag := item.Find("div[data-sncf='1']").Find("div").First()
+		if descTag.Length() == 0 {
+			// Try another selector approach if the first one fails
+			descTag = item.Find("div.VwiC3b")
+			if descTag.Length() == 0 {
+				// As a last resort, look for any div after the title that might contain description
+				titleParent := titleTag.Parent()
+				if titleParent.Is("a") {
+					titleParent = titleParent.Parent().Parent()
+				}
+				descTag = titleParent.NextAll().First().Find("div").First()
+			}
+		}
 		desc := descTag.Text()
 
 		if link != "" && link != "#" {

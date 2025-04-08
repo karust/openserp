@@ -157,8 +157,8 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 		gogl.acceptCookies(page)
 	}
 
-	// Find all results
-	results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid]")
+	// Find all results using stable attributes
+	results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved]")
 	if err != nil {
 		logrus.Errorf("Cannot parse search results: %s", err)
 		return nil, core.ErrSearchTimeout
@@ -265,35 +265,51 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 				searchResults = append(searchResults, srchRes)
 			}
 			continue
-		} else if strings.Contains(attrs, "data-ved") && strings.Contains(attrs, "lang") {
-			// 3. Parse regular search results
-			// Get URL
-			link, err := resEl.Element("a")
+		} else if strings.Contains(attrs, "data-ved") {
+			// Parse regular search results
+			// Get title from h3
+			titleTag, err := resEl.Element("h3")
 			if err != nil {
 				continue
 			}
-			href, err := link.Property("href")
-			if err != nil {
-				logrus.Debug("No `href` tag found")
+			srchRes.Title, _ = titleTag.Text()
+
+			// Get URL from parent link of h3
+			link, err := titleTag.Parent()
+			if err == nil && link.MustMatches("a") {
+				href, _ := link.Property("href")
+				srchRes.URL = href.String()
 			}
-			srchRes.URL = href.String()
+
+			// Get description using multiple fallback strategies
+			desc := ""
+			if descTag, err := resEl.Element("div[data-sncf='1'] div"); err == nil {
+				desc = descTag.MustText()
+			} else if descTag, err := resEl.Element("div.VwiC3b"); err == nil {
+				desc = descTag.MustText()
+			} else {
+				// Structural fallback
+				parent, err := titleTag.Parent()
+				if err == nil {
+					parent, err = parent.Parent()
+					if err == nil {
+						parent, err = parent.Parent()
+						if err == nil {
+							if descTag, err := parent.Next(); err == nil {
+								if descDiv, err := descTag.Element("div"); err == nil {
+									desc = descDiv.MustText()
+								}
+							}
+						}
+					}
+				}
+			}
+			srchRes.Description = desc
+
 			rank += 1
-
-			// Get title
-			titleTag, err := link.Element("h3")
-			if err != nil {
-				continue
-			}
-
-			srchRes.Title, err = titleTag.Text()
-			if err != nil {
-				logrus.Debug("Cannot extract text from title")
-			}
-
-			// Get description
-			text := resEl.MustText()
-			textSliced := strings.Split(text, "\n")
-			srchRes.Description = strings.Join(textSliced[:], "\n")
+			srchRes.Rank = rank
+			searchResults = append(searchResults, srchRes)
+			continue
 
 		} else {
 			//fmt.Println(i, attrs)
@@ -324,7 +340,7 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		page.Mouse.Scroll(0, 1000000, 1)
 		page.WaitLoad()
 
-		results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][jsaction][jsdata]")
+		results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][jsaction]")
 		if err != nil {
 			logrus.Errorf("Cannot parse search results: %s", err)
 			return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrSearchTimeout
