@@ -77,7 +77,7 @@ GET http://127.0.0.1:7000/google/image?text=golden puppy&limit=100
 
 ## CLI <a name="cli"></a> ⌨️
 
-- Use `-h` flag to see commands.
+- Use `-h` flag to see all commands.
 - You can use `serve` command to serve API:
 
 ```bash
@@ -104,6 +104,22 @@ As a result you should get JSON output containting search results:
 ]
 ```
 
+### Proxy Support
+
+Both browser mode and raw mode support HTTP and SOCKS5 proxies with authentication:
+
+```bash
+# HTTP proxy with auth
+openserp search google "query" --proxy http://user:pass@127.0.0.1:8080
+
+# Serve with SOCKS5 proxy
+openserp serve --proxy socks5://127.0.0.1:1080
+
+# For HTTPS sites through HTTP proxy, use --insecure to ignore certificate errors
+openserp search google "query" --proxy http://127.0.0.1:8080 --insecure
+openserp search google "query" -x http://127.0.0.1:8080 -k
+```
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
@@ -111,4 +127,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Bugs + Questions 👾
 
 If you have some issues/bugs/questions, feel free to open an issue.
-
