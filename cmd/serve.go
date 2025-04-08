@@ -26,6 +26,8 @@ func serve(cmd *cobra.Command, args []string) {
 		Timeout:             time.Second * time.Duration(config.App.Timeout),
 		LeavePageOpen:       config.App.IsLeaveHead,
 		CaptchaSolverApiKey: config.Config2Capcha.ApiKey,
+		ProxyURL:            config.App.ProxyURL,
+		Insecure:            config.App.Insecure,
 	}
 
 	if config.App.IsDebug {
