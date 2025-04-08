@@ -41,6 +41,8 @@ type Query struct {
 	Site         string // Search site
 	Limit        int    // Limit the number of results
 	Answers      bool   // Include question and answers from SERP page to results with negative indexes
+	ProxyURL     string // Proxy URL for raw requests
+	Insecure     bool   // Allow insecure TLS connections
 }
 
 func (q Query) IsEmpty() bool {

@@ -1,9 +1,12 @@
 package baidu
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/corpix/uarand"
@@ -11,8 +14,27 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func baiduRequest(searchURL string) (*http.Response, error) {
-	baseClient := &http.Client{}
+func baiduRequest(searchURL string, query core.Query) (*http.Response, error) {
+	// Create HTTP transport with proxy
+	transport := &http.Transport{}
+	if query.ProxyURL != "" {
+		proxyUrl, err := url.Parse(query.ProxyURL)
+		if err != nil {
+			return nil, err
+		}
+		transport.Proxy = http.ProxyURL(proxyUrl)
+	}
+
+	// Set insecure TLS
+	if query.Insecure {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+
+	baseClient := &http.Client{
+		Transport: transport,
+		Timeout:   time.Second * 10,
+	}
+
 	req, err := http.NewRequest("GET", searchURL, nil)
 	if err != nil {
 		return nil, err
@@ -27,7 +49,7 @@ func baiduRequest(searchURL string) (*http.Response, error) {
 }
 
 func baiduResultParser(response *http.Response) ([]core.SearchResult, error) {
-	doc, err := goquery.NewDocumentFromResponse(response)
+	doc, err := goquery.NewDocumentFromReader(response.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +101,7 @@ func Search(query core.Query) ([]core.SearchResult, error) {
 	}
 	logrus.Debugf("Baidu URL built: %s", googleURL)
 
-	res, err := baiduRequest(googleURL)
+	res, err := baiduRequest(googleURL, query)
 	if err != nil {
 		return nil, err
 	}

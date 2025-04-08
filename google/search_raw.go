@@ -1,8 +1,11 @@
 package google
 
 import (
+	"crypto/tls"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/corpix/uarand"
@@ -10,8 +13,26 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func googleRequest(searchURL string) (*http.Response, error) {
-	baseClient := &http.Client{}
+func googleRequest(searchURL string, query core.Query) (*http.Response, error) {
+	// Create HTTP transport with proxy
+	transport := &http.Transport{}
+	if query.ProxyURL != "" {
+		proxyUrl, err := url.Parse(query.ProxyURL)
+		if err != nil {
+			return nil, err
+		}
+		transport.Proxy = http.ProxyURL(proxyUrl)
+	}
+
+	// Set insecure TLS
+	if query.Insecure {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+
+	baseClient := &http.Client{
+		Transport: transport,
+		Timeout:   time.Second * 10,
+	}
 	req, err := http.NewRequest("GET", searchURL, nil)
 	if err != nil {
 		return nil, err
@@ -26,7 +47,7 @@ func googleRequest(searchURL string) (*http.Response, error) {
 }
 
 func googleResultParser(response *http.Response) ([]core.SearchResult, error) {
-	doc, err := goquery.NewDocumentFromResponse(response)
+	doc, err := goquery.NewDocumentFromReader(response.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +98,7 @@ func Search(query core.Query) ([]core.SearchResult, error) {
 	}
 	logrus.Debugf("Google URL built: %s", googleURL)
 
-	res, err := googleRequest(googleURL)
+	res, err := googleRequest(googleURL, query)
 	if err != nil {
 		return nil, err
 	}

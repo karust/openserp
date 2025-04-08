@@ -26,8 +26,10 @@ func search(cmd *cobra.Command, args []string) {
 	var err error
 	engineType := args[0]
 	query := core.Query{
-		Text:  args[1],
-		Limit: 10,
+		Text:     args[1],
+		Limit:    10,
+		ProxyURL: config.App.ProxyURL,
+		Insecure: config.App.Insecure,
 	}
 	results := []core.SearchResult{}
 
