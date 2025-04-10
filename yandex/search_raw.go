@@ -89,7 +89,7 @@ func yandexResultParser(response *http.Response) ([]core.SearchResult, error) {
 	}
 
 	logrus.Tracef("Yandex search document size: %d", len(doc.Text()))
-	return results, err
+	return core.DeduplicateResults(results), err
 }
 
 func Search(query core.Query) ([]core.SearchResult, error) {

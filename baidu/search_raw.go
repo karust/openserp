@@ -113,5 +113,5 @@ func Search(query core.Query) ([]core.SearchResult, error) {
 	}
 	logrus.Debugf("Baidu Raw results : %v", results)
 
-	return results, nil
+	return core.DeduplicateResults(results), nil
 }

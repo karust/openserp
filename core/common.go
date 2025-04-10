@@ -20,6 +20,26 @@ type SearchResult struct {
 	Ad          bool   `json:"ad"`
 }
 
+func DeduplicateResults(results []SearchResult) []SearchResult {
+	unique := make(map[string]bool)
+	var deduped []SearchResult
+
+	for _, result := range results {
+		if result.URL == "" {
+			continue
+		}
+		if !unique[result.URL] {
+			unique[result.URL] = true
+			deduped = append(deduped, result)
+		}
+	}
+
+	sort.Slice(deduped, func(i, j int) bool {
+		return deduped[i].Rank < deduped[j].Rank
+	})
+	return deduped
+}
+
 func ConvertSearchResultsMap(searchResultsMap map[string]SearchResult) *[]SearchResult {
 	searchResults := []SearchResult{}
 

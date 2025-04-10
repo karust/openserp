@@ -115,7 +115,7 @@ func googleResultParser(response *http.Response) ([]core.SearchResult, error) {
 	}
 
 	logrus.Tracef("Google search document size: %d", len(doc.Text()))
-	return results, err
+	return core.DeduplicateResults(results), err
 }
 
 func Search(query core.Query) ([]core.SearchResult, error) {

@@ -132,6 +132,7 @@ func (gogl *Google) acceptCookies(page *rod.Page) {
 	btnElms[3].Click(proto.InputMouseButtonLeft, 1)
 
 }
+
 func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 	logrus.Tracef("Start Google search, query: %+v", query)
 
@@ -281,20 +282,8 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 				srchRes.URL = href.String()
 			}
 
-			// Skip if URL is empty or we've already seen this URL
+			// Skip if URL is empty
 			if srchRes.URL == "" {
-				continue
-			}
-
-			// Check for duplicates
-			isDuplicate := false
-			for _, existing := range searchResults {
-				if existing.URL == srchRes.URL {
-					isDuplicate = true
-					break
-				}
-			}
-			if isDuplicate {
 				continue
 			}
 
@@ -337,7 +326,7 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 		searchResults = append(searchResults, srchRes)
 	}
 
-	return searchResults, nil
+	return core.DeduplicateResults(searchResults), nil
 }
 
 func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {

@@ -138,7 +138,7 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 		}
 	}
 
-	return searchResults, nil
+	return core.DeduplicateResults(searchResults), nil
 }
 
 func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
@@ -231,5 +231,5 @@ func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		}
 	}
 
-	return searchResults, nil
+	return core.DeduplicateResults(searchResults), nil
 }
