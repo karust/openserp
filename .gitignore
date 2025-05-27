@@ -24,3 +24,4 @@ logrus.txt
 logs.txt
 .release
 core/test/
+.aider*
