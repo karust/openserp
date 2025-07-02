@@ -40,6 +40,8 @@ type AppConfig struct {
 	IsDebug       bool   `mapstructure:"debug"`
 	IsVerbose     bool   `mapstructure:"verbose"`
 	IsRawRequests bool   `mapstructure:"raw_requests"`
+	ProxyURL      string `mapstructure:"proxy"`
+	Insecure      bool   `mapstructure:"insecure"`
 }
 
 var config = Config{}
@@ -133,4 +135,6 @@ func init() {
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsRawRequests, "raw", "r", false, "Disable browser usage, use HTTP requests")
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsLeaveHead, "leave", "", false, "Leave browser and tabs opened after search is made")
 	RootCmd.PersistentFlags().StringVarP(&config.Config2Capcha.ApiKey, "2captcha_key", "", "", "2 captcha api key")
+	RootCmd.PersistentFlags().StringVarP(&config.App.ProxyURL, "proxy", "x", "", "HTTP or Socks5 proxy URL (e.g. http://user:pass@127.0.0.1:8080)")
+	RootCmd.PersistentFlags().BoolVarP(&config.App.Insecure, "insecure", "k", false, "Allow insecure TLS connections")
 }

@@ -169,7 +169,7 @@ func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
 		time.Sleep(yand.pageSleep)
 	}
 
-	return allResults, nil
+	return core.DeduplicateResults(allResults), nil
 }
 
 func (yand *Yandex) SearchImage(query core.Query) ([]core.SearchResult, error) {
@@ -242,5 +242,5 @@ func (yand *Yandex) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		return searchResults[i].Rank < searchResults[j].Rank
 	})
 
-	return searchResults, nil
+	return core.DeduplicateResults(searchResults), nil
 }

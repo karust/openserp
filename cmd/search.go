@@ -26,8 +26,10 @@ func search(cmd *cobra.Command, args []string) {
 	var err error
 	engineType := args[0]
 	query := core.Query{
-		Text:  args[1],
-		Limit: 10,
+		Text:     args[1],
+		Limit:    10,
+		ProxyURL: config.App.ProxyURL,
+		Insecure: config.App.Insecure,
 	}
 	results := []core.SearchResult{}
 
@@ -59,6 +61,8 @@ func searchBrowser(engineType string, query core.Query) ([]core.SearchResult, er
 		Timeout:             time.Second * time.Duration(config.App.Timeout),
 		LeavePageOpen:       config.App.IsLeaveHead,
 		CaptchaSolverApiKey: config.Config2Capcha.ApiKey,
+		ProxyURL:            config.App.ProxyURL,
+		Insecure:            config.App.Insecure,
 	}
 
 	if config.App.IsDebug {
