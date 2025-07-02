@@ -74,7 +74,10 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 		return nil, err
 	}
 
-	page := baid.Navigate(url)
+	page, err := baid.Navigate(url)
+	if err != nil {
+		return nil, err
+	}
 
 	results, err := page.Timeout(baid.Timeout).Search("div.c-container.new-pmd")
 	if err != nil {
@@ -154,7 +157,11 @@ func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		}
 
 		// Get anti-crawler cookies first, then reload page
-		page := baid.Navigate(url)
+		page, err := baid.Navigate(url)
+		if err != nil {
+			return nil, err
+		}
+
 		if !baid.LeavePageOpen {
 			defer page.Close()
 		}

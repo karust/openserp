@@ -38,13 +38,12 @@ func TestBot(t *testing.T) {
 		t.Fatalf("Error failed initializing browser: %s", err)
 	}
 
-	page := browser.Navigate("https://bot.sannysoft.com")
+	page, _ := browser.Navigate("https://bot.sannysoft.com")
 	page.MustScreenshotFullPage("./test/screenshot_bot.png")
 
-	page = browser.Navigate("https://www.whatismybrowser.com/")
+	page, _ = browser.Navigate("https://www.whatismybrowser.com/")
 	page.MustScreenshotFullPage("./test/screenshot_browser.png")
 
-	page = browser.Navigate("https://abrahamjuliot.github.io/creepjs/")
+	page, _ = browser.Navigate("https://abrahamjuliot.github.io/creepjs/")
 	page.MustScreenshotFullPage("./test/screenshot_creep.png")
-
 }

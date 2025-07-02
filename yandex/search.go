@@ -124,7 +124,10 @@ func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
 			return nil, err
 		}
 
-		page := yand.Navigate(url)
+		page, err := yand.Navigate(url)
+		if err != nil {
+			return nil, err
+		}
 
 		// Get all search results in page
 		searchRes, err := page.Timeout(yand.Timeout).Search("li.serp-item")
@@ -185,7 +188,10 @@ func (yand *Yandex) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		}
 		searchPage += 1
 
-		page := yand.Navigate(url)
+		page, err := yand.Navigate(url)
+		if err != nil {
+			return nil, err
+		}
 
 		if !yand.LeavePageOpen {
 			defer page.Close()

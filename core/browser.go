@@ -97,7 +97,7 @@ func (b *Browser) IsInitialized() bool {
 }
 
 // Open URL
-func (b *Browser) Navigate(URL string) *rod.Page {
+func (b *Browser) Navigate(URL string) (*rod.Page, error) {
 	logrus.Debug("Navigate to: ", URL)
 
 	b.browser = rod.New().ControlURL(b.browserAddr)
@@ -127,7 +127,11 @@ func (b *Browser) Navigate(URL string) *rod.Page {
 	page.MustEmulate(devices.Device{
 		AcceptLanguage: b.LanguageCode,
 	})
-	page.MustNavigate(URL)
+
+	err := page.Navigate(URL)
+	if err != nil {
+		return nil, err
+	}
 
 	wait := page.MustWaitRequestIdle()
 	// may cause bugs with google
@@ -135,7 +139,7 @@ func (b *Browser) Navigate(URL string) *rod.Page {
 		wait()
 	}
 
-	return page
+	return page, nil
 }
 
 func (b *Browser) Close() error {

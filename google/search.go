@@ -70,7 +70,7 @@ func (gogl *Google) getTotalResults(page *rod.Page) (int, error) {
 func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas string) bool {
 	logrus.Debugf("Solve google Captcha: sitekey=%s, datas=%s, url=%s", sitekey, datas, page.MustInfo().URL)
 
-	resp, err := gogl.CaptchaSolver.SolveReCaptcha2(sitekey, page.MustInfo().URL, datas)
+	resp, err := gogl.CaptchaSolver.SolveReCaptcha2(sitekey, page.MustInfo().URL)
 	if err != nil {
 		logrus.Errorf("Error solving google captcha: %s", err)
 		return false
@@ -143,7 +143,11 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	page := gogl.Navigate(url)
+	page, err := gogl.Navigate(url)
+	if err != nil {
+		return nil, err
+	}
+
 	defer gogl.close(page)
 	gogl.preparePage(page)
 
@@ -338,7 +342,11 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		return nil, err
 	}
 
-	page := gogl.Navigate(url)
+	page, err := gogl.Navigate(url)
+	if err != nil {
+		return nil, err
+	}
+
 	defer gogl.close(page)
 
 	for len(searchResultsMap) < query.Limit {
