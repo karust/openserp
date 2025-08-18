@@ -23,6 +23,7 @@ type BrowserOpts struct {
 	CaptchaSolverApiKey string        // 2Captcha api key
 	ProxyURL            string        // Proxy URL
 	Insecure            bool          // Allow insecure TLS connections
+	UseStealth          bool          // Use go-rod stealth plugin
 
 }
 
@@ -123,7 +124,13 @@ func (b *Browser) Navigate(URL string) (*rod.Page, error) {
 		b.browser.MustIgnoreCertErrors(true)
 	}
 
-	page := stealth.MustPage(b.browser)
+	var page *rod.Page
+	if b.UseStealth {
+		page = stealth.MustPage(b.browser)
+	} else {
+		page = b.browser.MustPage(URL)
+	}
+
 	page.MustEmulate(devices.Device{
 		AcceptLanguage: b.LanguageCode,
 	})

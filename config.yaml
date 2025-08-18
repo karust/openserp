@@ -7,6 +7,8 @@ app:
   head: false
   leakless: false
   leave_head: false
+  stealth: false
+  insecure: false
 
 2captcha:
   apikey: "123123123123123"
