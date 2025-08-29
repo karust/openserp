@@ -98,7 +98,11 @@ func serve(cmd *cobra.Command, args []string) {
 	baidu := baidu.New(*browser, config.BaiduConfig)
 
 	serv := core.NewServer(config.App.Host, config.App.Port, gogl, yand, baidu)
-	serv.Listen()
+
+	err = serv.Listen()
+	if err != nil {
+		logrus.Error(err)
+	}
 }
 
 func init() {

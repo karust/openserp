@@ -70,7 +70,7 @@ func (gogl *Google) getTotalResults(page *rod.Page) (int, error) {
 func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas string) bool {
 	logrus.Debugf("Solve google Captcha: sitekey=%s, datas=%s, url=%s", sitekey, datas, page.MustInfo().URL)
 
-	resp, err := gogl.CaptchaSolver.SolveReCaptcha2(sitekey, page.MustInfo().URL, datas)
+	resp, _, err := gogl.CaptchaSolver.SolveReCaptcha2(sitekey, page.MustInfo().URL, datas)
 	if err != nil {
 		logrus.Errorf("Error solving google captcha: %s", err)
 		return false

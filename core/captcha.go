@@ -14,7 +14,7 @@ func NewSolver(apikey string) *CaptchaSolver {
 	return &cs
 }
 
-func (cs *CaptchaSolver) SolveReCaptcha2(sitekey, pageUrl, dataS string) (string, error) {
+func (cs *CaptchaSolver) SolveReCaptcha2(sitekey, pageUrl, dataS string) (string, string, error) {
 	cap := api2captcha.ReCaptcha{
 		SiteKey:   sitekey,
 		Url:       pageUrl,
