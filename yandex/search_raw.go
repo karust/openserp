@@ -1,7 +1,9 @@
 package yandex
 
 import (
+	"context"
 	"crypto/tls"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -11,6 +13,8 @@ import (
 	"github.com/corpix/uarand"
 	"github.com/karust/openserp/core"
 	"github.com/sirupsen/logrus"
+
+	utls "github.com/refraction-networking/utls"
 )
 
 func yandexRequest(searchURL string, query core.Query) (*http.Response, error) {
@@ -27,6 +31,29 @@ func yandexRequest(searchURL string, query core.Query) (*http.Response, error) {
 	// Set insecure TLS
 	if query.Insecure {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+
+	transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialer := &net.Dialer{}
+		rawConn, err := dialer.DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+
+		hostname := strings.Split(addr, ":")[0]
+		config := &utls.Config{
+			ServerName:         hostname,
+			InsecureSkipVerify: query.Insecure,
+		}
+
+		uconn := utls.UClient(rawConn, config, utls.HelloChrome_Auto)
+
+		if err := uconn.Handshake(); err != nil {
+			rawConn.Close()
+			return nil, err
+		}
+
+		return uconn, nil
 	}
 
 	baseClient := &http.Client{
