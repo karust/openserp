@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/karust/openserp/baidu"
+	"github.com/karust/openserp/bing"
 	"github.com/karust/openserp/core"
 	"github.com/karust/openserp/google"
 	"github.com/karust/openserp/yandex"
@@ -96,8 +97,9 @@ func serve(cmd *cobra.Command, args []string) {
 	yand := yandex.New(*browser, config.YandexConfig)
 	gogl := google.New(*browser, config.GoogleConfig)
 	baidu := baidu.New(*browser, config.BaiduConfig)
+	bing := bing.New(*browser, config.BingConfig)
 
-	serv := core.NewServer(config.App.Host, config.App.Port, gogl, yand, baidu)
+	serv := core.NewServer(config.App.Host, config.App.Port, gogl, yand, baidu, bing)
 
 	err = serv.Listen()
 	if err != nil {

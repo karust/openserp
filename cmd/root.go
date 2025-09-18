@@ -23,6 +23,7 @@ type Config struct {
 	GoogleConfig  core.SearchEngineOptions `mapstructure:"google"`
 	YandexConfig  core.SearchEngineOptions `mapstructure:"yandex"`
 	BaiduConfig   core.SearchEngineOptions `mapstructure:"baidu"`
+	BingConfig    core.SearchEngineOptions `mapstructure:"bing"`
 }
 
 type Config2Captcha struct {
