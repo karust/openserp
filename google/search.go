@@ -11,7 +11,6 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/karust/openserp/core"
-	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
 
@@ -19,13 +18,15 @@ type Google struct {
 	core.Browser
 	core.SearchEngineOptions
 	rgxpGetDigits *regexp.Regexp
+	logger        *core.EngineLogger
 }
 
 func New(browser core.Browser, opts core.SearchEngineOptions) *Google {
 	gogl := Google{Browser: browser}
 	opts.Init()
 	gogl.SearchEngineOptions = opts
-	gogl.rgxpGetDigits = regexp.MustCompile("\\d")
+	gogl.logger = core.NewEngineLogger("Google")
+	gogl.rgxpGetDigits = regexp.MustCompile(`\d`)
 	return &gogl
 }
 
@@ -68,18 +69,18 @@ func (gogl *Google) getTotalResults(page *rod.Page) (int, error) {
 }
 
 func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas string) bool {
-	logrus.Debugf("Solve google Captcha: sitekey=%s, datas=%s, url=%s", sitekey, datas, page.MustInfo().URL)
+	gogl.logger.Debug("Solve captcha: sitekey=%s", sitekey)
 
 	resp, _, err := gogl.CaptchaSolver.SolveReCaptcha2(sitekey, page.MustInfo().URL, datas)
 	if err != nil {
-		logrus.Errorf("Error solving google captcha: %s", err)
+		gogl.logger.Error("Captcha solve failed: %s", err)
 		return false
 	}
 
-	logrus.Debug("Resp:", resp)
+	gogl.logger.Debug("Captcha response received")
 	_, err = page.Eval(fmt.Sprintf(`;(() => { document.getElementById("g-recaptcha-response").innerHTML="%s"; submitCallback(); })();`, resp))
 	if err != nil {
-		logrus.Errorf("Error setting captcha response: %s", err)
+		gogl.logger.Error("Failed to set captcha response: %s", err)
 		return false
 	}
 
@@ -94,13 +95,13 @@ func (gogl *Google) checkCaptcha(page *rod.Page) bool {
 
 	sitekey, err := captchaDiv.First.Attribute("data-sitekey")
 	if err != nil {
-		logrus.Errorf("Cannot get Google captcha sitekey: %s", err)
+		gogl.logger.Error("Cannot get captcha sitekey: %s", err)
 		return false
 	}
 
 	dataS, err := captchaDiv.First.Attribute("data-s")
 	if err != nil {
-		logrus.Errorf("Cannot get Google captcha datas: %s", err)
+		gogl.logger.Error("Cannot get captcha datas: %s", err)
 		return false
 	}
 
@@ -114,19 +115,19 @@ func (gogl *Google) preparePage(page *rod.Page) {
 	// Remove "similar queries" lists
 	_, err := page.Eval(";(() => { document.querySelectorAll(`div[data-initq]`).forEach( el => el.remove());  })();")
 	if err != nil {
-		logrus.Errorf("Error preparing the page: %s", err)
+		gogl.logger.Error("Page preparation failed: %s", err)
 	}
 }
 
 func (gogl *Google) acceptCookies(page *rod.Page) {
 	diaglogBtns, err := page.Timeout(gogl.Timeout / 10).Search("div[role='dialog'][aria-modal] button")
 	if err != nil {
-		logrus.Errorf("Cannot find cookie consent: %s", err)
+		gogl.logger.Debug("Cookie consent not found: %s", err)
 		return
 	}
 	btnElms, err := diaglogBtns.All()
 	if err != nil {
-		logrus.Errorf("Cannot get cookie consent buttons: %s", err)
+		gogl.logger.Debug("Cannot get cookie consent buttons: %s", err)
 		return
 	}
 	btnElms[3].Click(proto.InputMouseButtonLeft, 1)
@@ -134,7 +135,7 @@ func (gogl *Google) acceptCookies(page *rod.Page) {
 }
 
 func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
-	logrus.Tracef("Start Google search, query: %+v", query)
+	gogl.logger.Debug("Starting search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}
 
@@ -153,7 +154,7 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 
 	// Check first if there captcha
 	if gogl.checkCaptcha(page) {
-		logrus.Errorf("Google captcha occurred during: %s", url)
+		gogl.logger.Error("Captcha detected: %s", url)
 		return nil, core.ErrCaptcha
 	}
 
@@ -165,7 +166,7 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 	// Find all results using stable attributes
 	results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved]")
 	if err != nil {
-		logrus.Errorf("Cannot parse search results: %s", err)
+		gogl.logger.Error("Cannot parse search results: %s", err)
 		return nil, core.ErrSearchTimeout
 	}
 
@@ -175,9 +176,9 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 
 	totalResults, err := gogl.getTotalResults(page)
 	if err != nil {
-		logrus.Errorf("Error capturing total results: %v", err)
+		gogl.logger.Debug("Failed to get total results: %v", err)
 	}
-	logrus.Infof("%d SERP results", totalResults)
+	gogl.logger.Info("Found %d total results", totalResults)
 
 	searchResultElems, err := results.All()
 	if err != nil {
@@ -198,14 +199,14 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 			// Get URL
 			link, err := resEl.Element("a")
 			if err != nil {
-				logrus.Debug("No link found")
+				gogl.logger.Debug("Missing link")
 				continue
 			}
 			link.MoveMouseOut()
 
 			href, err := link.Property("href")
 			if err != nil {
-				logrus.Debug("No `href` tag found")
+				gogl.logger.Debug("Missing href")
 				continue
 			}
 			srchRes.URL = href.String()
@@ -223,17 +224,17 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 			// 2. Parse answer boxes
 			answerEls, err := resEl.Page().Search("div[data-hveid][data-ulkwtsb] div[data-q]")
 			if err != nil {
-				logrus.Debugf("Error while parsing answer box 1: %s", err.Error())
+				gogl.logger.Debug("Answer parsing failed: %s", err.Error())
 				continue
 			}
 
 			answers, err := answerEls.All()
 			if err != nil {
-				logrus.Debugf("Error while parsing answer box 2: %s", err.Error())
+				gogl.logger.Debug("Answer parsing failed: %s", err.Error())
 				continue
 			}
 
-			logrus.Infof("%d answers found", len(answers))
+			gogl.logger.Info("Found %d answers", len(answers))
 
 			// Unvail answer contents
 			for _, answ := range answers {
@@ -246,21 +247,21 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 			for i, answ := range answers {
 				answerText := strings.Split(answ.MustText(), "\n")
 				if len(answerText) < 2 {
-					logrus.Debugf("Short answer text: %s", answerText)
+					gogl.logger.Debug("Short answer text: %s", answerText)
 					continue
 				}
 
 				// Get URL
 				link, err := answ.Element("a")
 				if err != nil {
-					logrus.Debug("No answer link found")
+					gogl.logger.Debug("Missing answer link")
 					continue
 				}
 				link.MoveMouseOut()
 
 				href, err := link.Property("href")
 				if err != nil {
-					logrus.Debug("No answer `href` tag found")
+					gogl.logger.Debug("Missing answer href")
 					continue
 				}
 				srchRes.URL = href.String()
@@ -334,7 +335,7 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 }
 
 func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
-	logrus.Tracef("Start Google Image search, query: %+v", query)
+	gogl.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResultsMap := map[string]core.SearchResult{}
 	url, err := BuildImageURL(query)
@@ -356,14 +357,14 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 
 		results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][jsaction]")
 		if err != nil {
-			logrus.Errorf("Cannot parse search results: %s", err)
+			gogl.logger.Error("Cannot parse search results: %s", err)
 			return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrSearchTimeout
 		}
 
 		// Check why no results
 		if results == nil {
 			if gogl.checkCaptcha(page) {
-				logrus.Errorf("Google captcha occurred during: %s", url)
+				gogl.logger.Error("Captcha detected: %s", url)
 				return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrCaptcha
 			}
 			return *core.ConvertSearchResultsMap(searchResultsMap), err
@@ -382,13 +383,13 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 			// TODO: parse AF_initDataCallback to optimize instead of this?
 			err := r.Click(proto.InputMouseButtonRight, 1)
 			if err != nil {
-				logrus.Error("Error clicking")
+				gogl.logger.Error("Click failed")
 				continue
 			}
 
 			dataVed, err := r.Attribute("data-ved")
 			if err != nil {
-				logrus.Error("Cannot find `data-ved` attr")
+				gogl.logger.Error("Missing data-ved attribute")
 				continue
 			}
 
@@ -405,25 +406,25 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 
 			linkText, err := link.Property("href")
 			if err != nil {
-				logrus.Error("No `href` tag found")
+				gogl.logger.Error("Missing href")
 			}
 
 			imgSrc, err := parseSourceImageURL(linkText.String())
 			if err != nil {
-				logrus.Errorf("Cannot parse image href: %v", err)
+				gogl.logger.Error("Failed to parse image URL: %v", err)
 				continue
 			}
 
 			// Get title
 			titleTag, err := r.Element("h3")
 			if err != nil {
-				logrus.Error("No `h3` tag found")
+				gogl.logger.Error("Missing h3 tag")
 				continue
 			}
 
 			title, err := titleTag.Text()
 			if err != nil {
-				logrus.Error("Cannot extract text from title")
+				gogl.logger.Error("Failed to extract title")
 				title = "No title"
 			}
 
@@ -446,7 +447,7 @@ func (gogl *Google) close(page *rod.Page) {
 	if !gogl.Browser.LeavePageOpen {
 		err := page.Close()
 		if err != nil {
-			logrus.Error(err)
+			gogl.logger.Debug("Page close error: %v", err)
 		}
 	}
 }

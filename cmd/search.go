@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/karust/openserp/baidu"
+	"github.com/karust/openserp/bing"
 	"github.com/karust/openserp/core"
+	"github.com/karust/openserp/duckduckgo"
 	"github.com/karust/openserp/google"
 	"github.com/karust/openserp/yandex"
 	"github.com/sirupsen/logrus"
@@ -17,7 +19,7 @@ import (
 var searchCMD = &cobra.Command{
 	Use:     "search",
 	Aliases: []string{"find"},
-	Short:   "Search results using chosen web search engine (google, yandex, baidu)",
+	Short:   "Search results using chosen web search engine (google, yandex, baidu, bing, duckduckgo)",
 	Args:    cobra.MatchAll(cobra.OnlyValidArgs, cobra.ExactArgs(2)),
 	Run:     search,
 }
@@ -31,18 +33,24 @@ func search(cmd *cobra.Command, args []string) {
 		ProxyURL: config.App.ProxyURL,
 		Insecure: config.App.Insecure,
 	}
-	results := []core.SearchResult{}
 
+	logrus.Infof("Starting SERP search request using %s engine for query: %s", engineType, query.Text)
+
+	var results []core.SearchResult
 	if config.App.IsRawRequests {
+		logrus.Infof("Using raw requests mode for %s search", engineType)
 		results, err = searchRaw(engineType, query)
 	} else {
+		logrus.Infof("Using browser mode for %s search", engineType)
 		results, err = searchBrowser(engineType, query)
 	}
 
 	if err != nil {
-		logrus.Error(err)
+		logrus.Errorf("Error during %s search: %s", engineType, err)
 		return
 	}
+
+	logrus.Infof("Successfully completed SERP search using %s engine, returned %d results", engineType, len(results))
 
 	b, err := json.MarshalIndent(results, "", " ")
 	if err != nil {
@@ -82,6 +90,10 @@ func searchBrowser(engineType string, query core.Query) ([]core.SearchResult, er
 		engine = google.New(*browser, config.GoogleConfig)
 	case "baidu":
 		engine = baidu.New(*browser, config.BaiduConfig)
+	case "bing":
+		engine = bing.New(*browser, config.BingConfig)
+	case "duck":
+		engine = duckduckgo.New(*browser, config.DuckDuckGoConfig)
 	default:
 		logrus.Infof("No `%s` search engine found", engineType)
 	}
@@ -99,6 +111,12 @@ func searchRaw(engineType string, query core.Query) ([]core.SearchResult, error)
 		return google.Search(query)
 	case "baidu":
 		return baidu.Search(query)
+	case "bing":
+		logrus.Warn("Bing does not support raw HTTP requests mode. Please use browser mode instead.")
+		return nil, fmt.Errorf("bing does not support raw requests mode")
+	case "duck":
+		logrus.Warn("DuckDuckGo does not support raw HTTP requests mode. Please use browser mode instead.")
+		return nil, fmt.Errorf("duckduckgo does not support raw requests mode")
 	default:
 		logrus.Infof("No `%s` search engine found", engineType)
 	}

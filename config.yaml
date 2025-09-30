@@ -8,7 +8,7 @@ app:
   leakless: false
   leave_head: false
   stealth: false
-  insecure: false
+  insecure: true
 
 2captcha:
   apikey: "123123123123123"
@@ -23,5 +23,13 @@ yandex:
   rate_burst: 2
 
 baidu:
+  rate_requests: 4
+  rate_burst: 2
+
+bing:
+  rate_requests: 4
+  rate_burst: 2
+
+duckduckgo:
   rate_requests: 4
   rate_burst: 2

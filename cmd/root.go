@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/karust/openserp/core"
@@ -12,18 +13,19 @@ import (
 )
 
 const (
-	version               = "0.4.1"
+	version               = "0.5.1"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
 
 type Config struct {
-	App           AppConfig                `mapstructure:"app"`
-	Config2Capcha Config2Captcha           `mapstructure:"2captcha"`
-	GoogleConfig  core.SearchEngineOptions `mapstructure:"google"`
-	YandexConfig  core.SearchEngineOptions `mapstructure:"yandex"`
-	BaiduConfig   core.SearchEngineOptions `mapstructure:"baidu"`
-	BingConfig    core.SearchEngineOptions `mapstructure:"bing"`
+	App              AppConfig                `mapstructure:"app"`
+	Config2Capcha    Config2Captcha           `mapstructure:"2captcha"`
+	GoogleConfig     core.SearchEngineOptions `mapstructure:"google"`
+	YandexConfig     core.SearchEngineOptions `mapstructure:"yandex"`
+	BaiduConfig      core.SearchEngineOptions `mapstructure:"baidu"`
+	BingConfig       core.SearchEngineOptions `mapstructure:"bing"`
+	DuckDuckGoConfig core.SearchEngineOptions `mapstructure:"duckduckgo"`
 }
 
 type Config2Captcha struct {
@@ -47,6 +49,13 @@ type AppConfig struct {
 }
 
 var config = Config{}
+
+var flagToConfigKey = map[string]string{
+	"config":       "app.config_path",
+	"leave":        "app.leave_head",
+	"raw":          "app.raw_requests",
+	"2captcha_key": "2captcha.apikey",
+}
 
 var RootCmd = &cobra.Command{
 	Use:          "openserp",
@@ -76,13 +85,37 @@ var RootCmd = &cobra.Command{
 // Bind each cobra flag to its associated viper configuration (config file and environment variable)
 func bindFlags(cmd *cobra.Command, vpr *viper.Viper) {
 	cmd.Flags().VisitAll(func(flg *pflag.Flag) {
-		configName := "app." + flg.Name
+		configName, ok := flagToConfigKey[flg.Name]
+		if !ok {
+			configName = "app." + flg.Name
+		}
 
-		// Apply viper config value to the flag if viper has a value
+		if err := vpr.BindPFlag(configName, flg); err != nil {
+			logrus.Errorf("Unable to bind flag %s: %v", flg.Name, err)
+		}
+
 		if flg.Changed {
-			vpr.Set(configName, flg.Value)
+			val, err := parseFlagValue(flg)
+			if err != nil {
+				logrus.Errorf("Unable to parse flag %s: %v", flg.Name, err)
+				return
+			}
+			vpr.Set(configName, val)
 		}
 	})
+}
+
+func parseFlagValue(flg *pflag.Flag) (interface{}, error) {
+	switch flg.Value.Type() {
+	case "string":
+		return flg.Value.String(), nil
+	case "bool":
+		return strconv.ParseBool(flg.Value.String())
+	case "int":
+		return strconv.Atoi(flg.Value.String())
+	default:
+		return flg.Value.String(), nil
+	}
 }
 
 // Initialize Viper
@@ -93,14 +126,14 @@ func initializeConfig(cmd *cobra.Command) error {
 	v.SetConfigName(defaultConfigFilename)
 	v.AddConfigPath(".")
 
-	// 1. Config. Return an error if we cannot parse the config file.
+	// 1. Config file (lowest priority). Return an error if we cannot parse the config file.
 	err := v.ReadInConfig()
 	if err != nil {
 		err = fmt.Errorf("cannot read config: %v", err)
 		logrus.Warn(err)
 	}
 
-	// 2. Env. Bind environment variables to their equivalent keys with underscores
+	// 2. Environment variables (medium priority). Bind environment variables to their equivalent keys with underscores
 	for _, key := range v.AllKeys() {
 		envKey := envPrefix + "_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
 		err := v.BindEnv(key, envKey)
@@ -109,7 +142,7 @@ func initializeConfig(cmd *cobra.Command) error {
 		}
 	}
 
-	// 3. Cmd flags. Bind the current command's flags to viper
+	// 3. Command flags (highest priority). Bind the current command's flags to viper
 	bindFlags(cmd, v)
 
 	// Dump Viper values to config struct

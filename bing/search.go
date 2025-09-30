@@ -10,19 +10,20 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/karust/openserp/core"
-	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
 
 type Bing struct {
 	core.Browser
 	core.SearchEngineOptions
+	logger *core.EngineLogger
 }
 
 func New(browser core.Browser, opts core.SearchEngineOptions) *Bing {
 	bing := Bing{Browser: browser}
 	opts.Init()
 	bing.SearchEngineOptions = opts
+	bing.logger = core.NewEngineLogger("Bing")
 	return &bing
 }
 
@@ -44,11 +45,36 @@ func (bing *Bing) getTotalResults(page *rod.Page) (int, error) {
 }
 
 func (bing *Bing) checkCaptcha(page *rod.Page) bool {
-	captcha, err := page.Timeout(bing.GetSelectorTimeout() / 2).Element("div#bxc")
-	if err != nil {
+	if page == nil {
 		return false
 	}
-	return captcha != nil
+
+	if info, err := page.Info(); err == nil {
+		url := strings.ToLower(info.URL)
+		if strings.Contains(url, "turing") || strings.Contains(url, "captcha") {
+			return true
+		}
+	}
+
+	timeout := bing.GetSelectorTimeout() / 2
+	if timeout <= 0 {
+		timeout = time.Second * 2
+	}
+
+	selectors := []string{
+		"div.captcha",
+		"div.captcha_header",
+	}
+
+	for _, selector := range selectors {
+		has, err, _ := page.Timeout(timeout).Has(selector)
+		if err == nil && has {
+			bing.logger.Debug("Captcha detected: %s", selector)
+			return true
+		}
+	}
+
+	return false
 }
 
 func (bing *Bing) acceptCookies(page *rod.Page) {
@@ -61,13 +87,18 @@ func (bing *Bing) acceptCookies(page *rod.Page) {
 }
 
 func (bing *Bing) close(page *rod.Page) {
-	if page != nil {
-		page.Close()
+	if !bing.Browser.LeavePageOpen {
+		if page != nil {
+			err := page.Close()
+			if err != nil {
+				bing.logger.Debug("Page close error: %v", err)
+			}
+		}
 	}
 }
 
 func (bing *Bing) Search(query core.Query) ([]core.SearchResult, error) {
-	logrus.Tracef("Start Bing search, query: %+v", query)
+	bing.logger.Debug("Starting search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}
 
@@ -82,8 +113,10 @@ func (bing *Bing) Search(query core.Query) ([]core.SearchResult, error) {
 	}
 	defer bing.close(page)
 
+	page.WaitLoad()
+
 	if bing.checkCaptcha(page) {
-		logrus.Errorf("Bing captcha occurred during: %s", url)
+		bing.logger.Error("Captcha detected: %s", url)
 		return nil, core.ErrCaptcha
 	}
 
@@ -92,20 +125,20 @@ func (bing *Bing) Search(query core.Query) ([]core.SearchResult, error) {
 
 	organicElements, err := page.Timeout(bing.Timeout).Elements("li.b_algo")
 	if err != nil {
-		logrus.Errorf("Cannot parse organic results: %s", err)
+		bing.logger.Error("Cannot parse organic results: %s", err)
 		return nil, core.ErrSearchTimeout
 	}
 
 	adElements, err := page.Timeout(bing.Timeout).Elements("li.b_ad")
 	if err != nil {
-		logrus.Debug("No ad results found or error parsing ads")
+		bing.logger.Debug("No ads found")
 	}
 
 	totalResults, err := bing.getTotalResults(page)
 	if err != nil {
-		logrus.Errorf("Error capturing total results: %v", err)
+		bing.logger.Debug("Failed to get total results: %v", err)
 	}
-	logrus.Infof("%d SERP results found (%d ads)", totalResults, len(adElements))
+	bing.logger.Info("Found %d results (%d ads)", totalResults, len(adElements))
 
 	rank := 0
 	for _, result := range organicElements {
@@ -113,14 +146,14 @@ func (bing *Bing) Search(query core.Query) ([]core.SearchResult, error) {
 
 		titleElem, err := result.Element("a")
 		if err != nil {
-			logrus.Debug("No title found for result")
+			bing.logger.Debug("Missing title")
 			continue
 		}
 		srchRes.Title, _ = titleElem.Text()
 
 		href, err := titleElem.Property("href")
 		if err != nil {
-			logrus.Debug("No URL found for result")
+			bing.logger.Debug("Missing URL")
 			continue
 		}
 		srchRes.URL = href.String()
@@ -150,14 +183,14 @@ func (bing *Bing) Search(query core.Query) ([]core.SearchResult, error) {
 
 		titleElem, err := adResult.Element("h2 a")
 		if err != nil {
-			logrus.Debug("No title found for ad")
+			bing.logger.Debug("Ad missing title")
 			continue
 		}
 		srchRes.Title, _ = titleElem.Text()
 
 		href, err := titleElem.Property("href")
 		if err != nil {
-			logrus.Debug("No URL found for ad")
+			bing.logger.Debug("Ad missing URL")
 			continue
 		}
 		srchRes.URL = href.String()
@@ -188,7 +221,7 @@ type BingImageData struct {
 
 // SearchImage performs Bing image search and returns results
 func (bing *Bing) SearchImage(query core.Query) ([]core.SearchResult, error) {
-	logrus.Tracef("Start Bing image search, query: %+v", query)
+	bing.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}
 
@@ -204,9 +237,11 @@ func (bing *Bing) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	}
 	defer bing.close(page)
 
+	page.WaitLoad()
+
 	// Check for captcha
 	if bing.checkCaptcha(page) {
-		logrus.Errorf("Bing captcha occurred during image search: %s", url)
+		bing.logger.Error("Captcha detected during image search: %s", url)
 		return nil, core.ErrCaptcha
 	}
 
@@ -220,7 +255,7 @@ func (bing *Bing) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	// Find all image result containers using CSS selector
 	imageContainers, err := page.Timeout(bing.Timeout).Elements("div.iuscp, div.isv")
 	if err != nil {
-		logrus.Errorf("Cannot parse image results: %s", err)
+		bing.logger.Error("Cannot parse image results: %s", err)
 		return nil, core.ErrSearchTimeout
 	}
 
@@ -228,7 +263,7 @@ func (bing *Bing) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		return nil, errors.New("no image results found")
 	}
 
-	logrus.Infof("Found %d image result elements", len(imageContainers))
+	bing.logger.Info("Found %d image elements", len(imageContainers))
 
 	rank := 0
 	for _, c := range imageContainers {
@@ -237,21 +272,21 @@ func (bing *Bing) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		// Get the <a> element inside the div
 		linkElem, err := c.Element("a")
 		if err != nil {
-			logrus.Debug("No <a> element found in image container")
+			bing.logger.Debug("Missing <a> element")
 			continue
 		}
 
 		// Extract image metadata from m attribute (contains JSON)
 		mAttr, err := linkElem.Attribute("m")
 		if err != nil || mAttr == nil {
-			logrus.Debug("No m attribute found in image element or attribute is nil")
+			bing.logger.Debug("Missing m attribute")
 			continue
 		}
 
 		// Ensure we have valid JSON data to unmarshal
 		jsonData := []byte(*mAttr)
 		if len(jsonData) == 0 {
-			logrus.Debug("Empty JSON data in m attribute")
+			bing.logger.Debug("Empty JSON data")
 			continue
 		}
 
@@ -259,7 +294,7 @@ func (bing *Bing) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		var imgData BingImageData
 		err = json.Unmarshal(jsonData, &imgData)
 		if err != nil {
-			logrus.Debugf("Failed to parse image JSON data: %s", err)
+			bing.logger.Debug("Failed to parse JSON: %s", err)
 			continue
 		}
 

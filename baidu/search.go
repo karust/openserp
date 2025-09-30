@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/karust/openserp/core"
-	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
 
@@ -35,12 +34,14 @@ type imageDataJson struct {
 type Baidu struct {
 	core.Browser
 	core.SearchEngineOptions
+	logger *core.EngineLogger
 }
 
 func New(browser core.Browser, opts core.SearchEngineOptions) *Baidu {
 	baid := Baidu{Browser: browser}
 	opts.Init()
 	baid.SearchEngineOptions = opts
+	baid.logger = core.NewEngineLogger("Baidu")
 	return &baid
 }
 
@@ -64,7 +65,7 @@ func (baid *Baidu) isTimeout(page *rod.Page) bool {
 }
 
 func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
-	logrus.Tracef("Start Baidu search, query: %+v", query)
+	baid.logger.Debug("Starting search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}
 
@@ -82,7 +83,7 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 	results, err := page.Timeout(baid.Timeout).Search("div.c-container.new-pmd")
 	if err != nil {
 		defer page.Close()
-		logrus.Errorf("Cannot parse search results: %s", err)
+		baid.logger.Error("Cannot parse search results: %s", err)
 		return nil, core.ErrSearchTimeout
 	}
 
@@ -91,10 +92,10 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 		defer page.Close()
 
 		if baid.isCaptcha(page) {
-			logrus.Errorf("Baidu captcha occurred during: %s", url)
+			baid.logger.Error("Captcha detected: %s", url)
 			return nil, core.ErrCaptcha
 		} else if baid.isTimeout(page) {
-			logrus.Errorf("Baidu timeout occurred during: %s", url)
+			baid.logger.Error("Timeout occurred: %s", url)
 			return nil, core.ErrCaptcha
 		}
 		return nil, nil
@@ -113,13 +114,13 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 		}
 		linkText, err := link.Property("href")
 		if err != nil {
-			logrus.Error("No `href` tag found")
+			baid.logger.Error("Missing href tag")
 		}
 
 		// Get title
 		title, err := link.Text()
 		if err != nil {
-			logrus.Error("Cannot extract text from title")
+			baid.logger.Error("Failed to extract title")
 			title = "No title"
 		}
 
@@ -134,10 +135,10 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 		searchResults = append(searchResults, gR)
 	}
 
-	if !baid.LeavePageOpen {
+	if !baid.Browser.LeavePageOpen {
 		err = page.Close()
 		if err != nil {
-			logrus.Error(err)
+			baid.logger.Error("Page close error: %v", err)
 		}
 	}
 
@@ -145,7 +146,7 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 }
 
 func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
-	logrus.Tracef("Start Baidu Image search, query: %+v", query)
+	baid.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}
 	searchPage := 0
@@ -162,7 +163,7 @@ func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
 			return nil, err
 		}
 
-		if !baid.LeavePageOpen {
+		if !baid.Browser.LeavePageOpen {
 			defer page.Close()
 		}
 		page.Reload()
@@ -171,7 +172,7 @@ func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		result, err := page.Timeout(baid.Timeout).Search("body > pre")
 		if err != nil {
 			defer page.Close()
-			logrus.Errorf("Cannot parse search results: %s", err)
+			baid.logger.Error("Cannot parse search results: %s", err)
 			return nil, core.ErrSearchTimeout
 		}
 
@@ -180,10 +181,10 @@ func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
 			defer page.Close()
 
 			if baid.isCaptcha(page) {
-				logrus.Errorf("Baidu captcha occurred during: %s", url)
+				baid.logger.Error("Captcha detected: %s", url)
 				return nil, core.ErrCaptcha
 			} else if baid.isTimeout(page) {
-				logrus.Errorf("Baidu timeout occurred during: %s", url)
+				baid.logger.Error("Timeout occurred: %s", url)
 				return nil, core.ErrCaptcha
 			}
 			return nil, nil
@@ -207,7 +208,7 @@ func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
 
 		err = json.Unmarshal([]byte(fixedJson), &data)
 		if err != nil {
-			logrus.Errorf("Cannot unmarshal JSON: %v\nData: %v", err, jsonText)
+			baid.logger.Error("Failed to unmarshal JSON: %v", err)
 			return nil, err
 		}
 
@@ -233,7 +234,7 @@ func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
 
 		searchPage += 1
 
-		if !baid.LeavePageOpen {
+		if !baid.Browser.LeavePageOpen {
 			page.Close()
 		}
 	}

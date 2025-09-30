@@ -2,6 +2,7 @@ package bing
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -47,7 +48,7 @@ func BuildURL(q core.Query) (string, error) {
 		params.Add("count", strconv.Itoa(q.Limit))
 	}
 
-	// Set search date range (convert from Google format to Bing format)
+	// Set search date range - Bing supports date filtering via query text
 	if q.DateInterval != "" {
 		intervals := strings.Split(q.DateInterval, "..")
 		if len(intervals) != 2 {
@@ -65,9 +66,14 @@ func BuildURL(q core.Query) (string, error) {
 			return "", errors.New("invalid end date format, expected YYYYMMDD")
 		}
 
-		// Bing uses filters parameter with specific date format
-		dateFilter := "ex1:\"ez5_" + startDate.Format("2006-01-02") + "_" + endDate.Format("2006-01-02") + "\""
-		params.Add("filters", dateFilter)
+		// Add date range to the search query text (Bing supports this format)
+		dateRange := fmt.Sprintf(" after:%s before:%s",
+			startDate.Format("2006-01-02"),
+			endDate.Format("2006-01-02"))
+
+		// Update the query text to include date range
+		currentQuery := params.Get("q")
+		params.Set("q", currentQuery+dateRange)
 	}
 
 	// Bing-specific parameters for consistent results

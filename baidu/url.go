@@ -13,7 +13,7 @@ import (
 )
 
 func dateToTimestamp(date string) (int64, error) {
-	layout := "20060201"
+	layout := "20060102"
 	t, err := time.Parse(layout, date)
 	if err != nil {
 		return 0, err
@@ -55,12 +55,12 @@ func BuildURL(q core.Query) (string, error) {
 
 	if q.LangCode != "" {
 		//params.Add("rqlang", q.LangCode)
-		logrus.Warn("Baidu's Language specific search not supported yet")
+		logrus.Warn("Language search not supported")
 	}
 
 	if q.Filetype != "" {
 		//params.Add("ft", q.Filetype)
-		logrus.Warn("Baidu's File search not supported yet")
+		logrus.Warn("File search not supported")
 	}
 
 	if q.Limit != 0 {
