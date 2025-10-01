@@ -175,15 +175,7 @@ func (ddg *DuckDuckGo) Search(query core.Query) ([]core.SearchResult, error) {
 			return nil, err
 		}
 
-		// Navigate to a page that can detect headless browsers
-		page, err := ddg.Navigate("https://localhost:9001/?spjs_test_redirect=true")
-		page.WaitLoad()
-		if err != nil {
-			ddg.logger.Fatal("Error navigating to bot detection site: %s", err)
-		}
-		page.MustScreenshotFullPage("./ddg_headless1.png")
-
-		page, err = ddg.Navigate(url)
+		page, err := ddg.Navigate(url)
 		if err != nil {
 			return nil, err
 		}

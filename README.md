@@ -57,6 +57,37 @@ curl "http://localhost:7000/mega/search?text=golang&engines=google,bing&limit=5"
 curl "http://localhost:7000/mega/search?text=golang&lang=EN&site=github.com&limit=8"
 ```
 
+- API response example:
+
+```json
+[
+  {
+    "rank": 1,
+    "url": "https://en.wikipedia.org/wiki/Golden_Retriever",
+    "title": "Golden Retriever - Wikipedia",
+    "description": "The Golden Retriever is a Scottish breed of retriever dog of medium size. It is characterised by a gentle and affectionate nature and a striking golden coat. It is a working dog, and registration is subject to successful completion of a working trial. [2] It is commonly kept as a companion dog and is among the most frequently registered breeds in several Western countries; some may compete in ...",
+    "ad": false,
+    "engine": "duckduckgo"
+  },
+  {
+    "rank": 2,
+    "url": "https://www.bing.com/ck/a?!&&p=6f15ac4589858d0a104cd6f55cc8e91e8d8d6da91f905b626921f67f2323a467JmltdHM9MTc1OTE5MDQwMA&ptn=3&ver=2&hsh=4&fclid=2357c2f4-6131-68de-359f-d48c607c691d&u=a1aHR0cHM6Ly93d3cuZ29sZGVucmV0cmlldmVyZm9ydW0uY29tL3RocmVhZHMvdW5kZXJzdGFuZGluZy13aHktZ29sZGVuLXJldHJpZXZlciVFMiU4MCU5OXMtbGlmZXNwYW4taGFsdmVkLWluLXRoZS1sYXN0LTM1LXllYXJzLjM1NzMyMi8&ntb=1",
+    "title": "Golden Retriever Dog Forums\nhttps://www.goldenretrieverforum.com › threads › understanding-why-g…",
+    "description": "Oct 20, 2024 · Back in the 1970s, Golden Retrievers routinely lived until 16 and 17 years old, they are now living until 9 or 10 years old. Golden Retrievers seem to be dying mostly of bone …",
+    "ad": false,
+    "engine": "bing"
+  },
+  {
+    "rank": 3,
+    "url": "http://www.baidu.com/link?url=2544q3ugc68j0scVxdpWCSX-gl2AmuCy1l7uRR3loIfS1hmJWMiJKW4MDGWoZrLE7X-ybu1L7T8PspoL7iy_dK",
+    "title": "golden retrievers是什么意思_golden retrievers怎么读_解释_用法...",
+    "description": "\n\n2025年9月21日golden retrievers 读音:美英 golden retrievers基本解释 金毛猎犬 分词解释 golden金(黄)色的 retrievers寻猎物犬( retriever的名词复数 ) 词组短语 golden retrieversfor sale出售金毛寻回犬 golden retrieversnear me我附近的金毛寻回犬 golden retrieverspuppies金毛寻回犬幼犬...\ndanci.gei6.com/golden...retrievers...",
+    "ad": false,
+    "engine": "baidu"
+  }
+]
+```
+
 ### Megaimage (Image Results)
 
 ```bash
