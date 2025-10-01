@@ -2,6 +2,7 @@ package duckduckgo
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -36,9 +37,11 @@ func (ddg *DuckDuckGo) GetRateLimiter() *rate.Limiter {
 }
 
 func (ddg *DuckDuckGo) isCaptcha(page *rod.Page) bool {
-	// DuckDuckGo rarely shows captchas, but we can check for common patterns
-	_, err := page.Timeout(ddg.GetSelectorTimeout()).Search("div[class*='captcha']")
-	return err == nil
+	html, err := page.Timeout(ddg.GetSelectorTimeout()).HTML()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(html, "bots user")
 }
 
 // Check if no results are found
@@ -165,16 +168,22 @@ func (ddg *DuckDuckGo) Search(query core.Query) ([]core.SearchResult, error) {
 
 	allResults := []core.SearchResult{}
 	searchPage := 0
-	maxPages := 5              // Prevent infinite loops
-	consecutiveEmptyPages := 0 // Track consecutive pages with no valid results
 
-	for len(allResults) < query.Limit && searchPage < maxPages {
+	for len(allResults) < query.Limit {
 		url, err := BuildURL(query)
 		if err != nil {
 			return nil, err
 		}
 
-		page, err := ddg.Navigate(url)
+		// Navigate to a page that can detect headless browsers
+		page, err := ddg.Navigate("https://localhost:9001/?spjs_test_redirect=true")
+		page.WaitLoad()
+		if err != nil {
+			ddg.logger.Fatal("Error navigating to bot detection site: %s", err)
+		}
+		page.MustScreenshotFullPage("./ddg_headless1.png")
+
+		page, err = ddg.Navigate(url)
 		if err != nil {
 			return nil, err
 		}
@@ -200,6 +209,8 @@ func (ddg *DuckDuckGo) Search(query core.Query) ([]core.SearchResult, error) {
 				break
 			}
 		}
+
+		page.MustScreenshotFullPage("./duck.png")
 		if searchErr != nil {
 			defer page.Close()
 			ddg.logger.Error("Cannot parse search results: %s", searchErr)
@@ -227,22 +238,12 @@ func (ddg *DuckDuckGo) Search(query core.Query) ([]core.SearchResult, error) {
 
 		r := ddg.parseResults(elements, searchPage)
 
-		// Track consecutive empty pages
 		if len(r) == 0 {
-			consecutiveEmptyPages++
-			ddg.logger.Debug("No valid results found on page %d (consecutive empty: %d)", searchPage, consecutiveEmptyPages)
-
-			// Break if we have too many consecutive empty pages
-			if consecutiveEmptyPages >= 2 {
-				ddg.logger.Warn("Too many consecutive empty pages, stopping search")
-				break
-			}
-		} else {
-			consecutiveEmptyPages = 0 // Reset counter when we find results
+			ddg.logger.Debug("No valid results found on page %d", searchPage)
+			return nil, core.ErrSearchTimeout
 		}
 
 		allResults = append(allResults, r...)
-
 		searchPage++
 
 		if !ddg.Browser.LeavePageOpen {

@@ -3,11 +3,13 @@ package core
 import (
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/devices"
 	"github.com/go-rod/rod/lib/launcher"
+	"github.com/go-rod/rod/lib/proto"
 	"github.com/go-rod/stealth"
 	"github.com/sirupsen/logrus"
 )
@@ -53,7 +55,8 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	logrus.Debug("Browser found: ", has)
 
 	// Create launcher
-	l := launcher.New().Bin(path).Leakless(opts.IsLeakless).Headless(opts.IsHeadless)
+	l := launcher.New().Bin(path).Leakless(opts.IsLeakless).Headless(opts.IsHeadless).Set("disable-blink-features", "AutomationControlled").
+		Delete("enable-automation")
 
 	// Configure proxy if specified
 	if opts.ProxyURL != "" {
@@ -124,28 +127,52 @@ func (b *Browser) Navigate(URL string) (*rod.Page, error) {
 		b.browser.MustIgnoreCertErrors(true)
 	}
 
+	ua := strings.ReplaceAll(b.browser.MustVersion().UserAgent, "HeadlessChrome/", "Chrome/")
+
 	var page *rod.Page
+
 	if b.UseStealth {
 		page = stealth.MustPage(b.browser)
-	} else {
-		page = b.browser.MustPage(URL)
-	}
+		page.MustEmulate(devices.Device{
+			AcceptLanguage: b.LanguageCode,
+			UserAgent:      ua,
+		})
 
-	page.MustEmulate(devices.Device{
-		AcceptLanguage: b.LanguageCode,
-	})
+	} else {
+		page = b.browser.MustPage("about:blank")
+
+		page.MustEmulate(devices.Device{
+			AcceptLanguage: b.LanguageCode,
+			UserAgent:      ua,
+		})
+
+		proto.EmulationSetDeviceMetricsOverride{
+			Width:             1920,
+			Height:            1080,
+			DeviceScaleFactor: 1,
+			Mobile:            false,
+			ScreenWidth:       &[]int{1920}[0],
+			ScreenHeight:      &[]int{1080}[0],
+		}.Call(page)
+	}
+	//EnableCustomStealth(page)
 
 	err := page.Navigate(URL)
 	if err != nil {
 		return nil, err
 	}
 
+	// Avoid panics from MustWaitLoad when the target navigates/closes mid-wait
+	if werr := page.WaitLoad(); werr != nil {
+		logrus.Debugf("WaitLoad returned early: %v", werr)
+	}
 	wait := page.MustWaitRequestIdle()
 	// may cause bugs with google
 	if b.WaitRequests {
 		wait()
 	}
 
+	time.Sleep(2 * time.Second)
 	return page, nil
 }
 
