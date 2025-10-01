@@ -82,7 +82,7 @@ func serve(cmd *cobra.Command, args []string) {
 		CaptchaSolverApiKey: config.Config2Capcha.ApiKey,
 		ProxyURL:            config.App.ProxyURL,
 		Insecure:            config.App.Insecure,
-		UseStealth:          config.App.IsBrowserHead,
+		UseStealth:          config.App.IsStealth,
 	}
 
 	if config.App.IsDebug {

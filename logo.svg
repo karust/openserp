@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" role="img" aria-labelledby="title desc">
+  <title id="title">OpenSERP – Multi‑Engine API Logo</title>
+  <desc id="desc">Professional banner-like logo with a unified search bar and chips for Google, Bing, DuckDuckGo, Yandex and Baidu, plus an API caption.</desc>
+
+  <defs>
+    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#F5F7FB"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-30%" width="120%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-opacity="0.18"/>
+    </filter>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.18"/>
+    </filter>
+    <style>
+      .muted{fill:#5F6B7A}
+      .chip-label{font:700 14px Inter,Segoe UI,Arial,sans-serif;fill:#1F2937}
+      .api{font:800 44px "Segoe UI",Inter,Arial,sans-serif;fill:#EA4335}
+      .title{font:800 46px Inter,Segoe UI,Arial,sans-serif;letter-spacing:0.2px}
+    </style>
+  </defs>
+
+  <!-- Top brand title similar to the provided mock but neutral -->
+  <g transform="translate(640,58)" text-anchor="middle">
+    <text class="title" x="0" y="0">
+      <tspan fill="#4285F4">O</tspan><tspan fill="#EA4335">p</tspan><tspan fill="#FBBC04">e</tspan><tspan fill="#4285F4">n</tspan><tspan fill="#34A853">S</tspan><tspan fill="#EA4335">E</tspan><tspan fill="#4285F4">R</tspan><tspan fill="#FBBC04">P</tspan>
+    </text>
+  </g>
+
+  <!-- Main unified search bar -->
+  <g transform="translate(160,100)">
+    <rect x="0" y="0" rx="28" ry="28" width="960" height="60" fill="url(#bar)" filter="url(#shadow)"/>
+    <!-- left magnifier -->
+    <g class="muted" transform="translate(22,18)">
+      <circle cx="14" cy="14" r="10" fill="none" stroke="#98A2B3" stroke-width="3"/>
+      <rect x="22" y="22" width="12" height="4" rx="2" fill="#98A2B3" transform="rotate(45 28 24)"/>
+    </g>
+    <!-- placeholder text -->
+    <text x="70" y="37" font="500 18px Inter,Segoe UI,Arial" fill="#5F6B7A">Search across Google, Bing, DuckDuckGo, Yandex, Baidu…</text>
+    <!-- right icons -->
+    <g transform="translate(880,13)" class="muted">
+      <rect x="48" y="-2" width="1" height="36" fill="#E5E7EB"/>
+      <circle cx="18" cy="17" r="8" fill="#E5E7EB"/>
+      <rect x="12" y="8" width="12" height="6" rx="3" fill="#98A2B3"/>
+      <circle cx="18" cy="17" r="3" fill="#98A2B3"/>
+      <!-- microphone glyph -->
+      <rect x="62" y="6" width="8" height="16" rx="4" fill="#98A2B3"/>
+      <rect x="60" y="24" width="12" height="3" rx="1.5" fill="#98A2B3"/>
+    </g>
+  </g>
+
+  <!-- Engine chips (brand colored, accessible, non-trademark glyphs) -->
+  <g transform="translate(640,88)" text-anchor="middle" dominant-baseline="middle">
+    <!-- layout positions -->
+    <g transform="translate(-420,-8)">
+      <rect rx="14" ry="14" width="120" height="28" fill="#FFFFFF" stroke="#E5E7EB" filter="url(#soft)"/>
+      <circle cx="16" cy="14" r="8" fill="#4285F4"/>
+      <text class="chip-label" x="78" y="17">Google</text>
+    </g>
+
+    <g transform="translate(-260,-8)">
+      <rect rx="14" ry="14" width="110" height="28" fill="#FFFFFF" stroke="#E5E7EB" filter="url(#soft)"/>
+      <circle cx="16" cy="14" r="8" fill="#008373"/>
+      <text class="chip-label" x="70" y="17">Bing</text>
+    </g>
+
+    <g transform="translate(-100,-8)">
+      <rect rx="14" ry="14" width="150" height="28" fill="#FFFFFF" stroke="#E5E7EB" filter="url(#soft)"/>
+      <circle cx="16" cy="14" r="8" fill="#DE5833"/>
+      <text class="chip-label" x="90" y="17">DuckDuckGo</text>
+    </g>
+
+    <g transform="translate(90,-8)">
+      <rect rx="14" ry="14" width="120" height="28" fill="#FFFFFF" stroke="#E5E7EB" filter="url(#soft)"/>
+      <circle cx="16" cy="14" r="8" fill="#FC3F1D"/>
+      <text class="chip-label" x="78" y="17">Yandex</text>
+    </g>
+
+    <g transform="translate(250,-8)">
+      <rect rx="14" ry="14" width="115" height="28" fill="#FFFFFF" stroke="#E5E7EB" filter="url(#soft)"/>
+      <circle cx="16" cy="14" r="8" fill="#2932E1"/>
+      <text class="chip-label" x="72" y="17">Baidu</text>
+    </g>
+  </g>
+
+  <!-- API caption -->
+  <g transform="translate(640,232)" text-anchor="middle">
+    <text class="api">API</text>
+  </g>
+</svg>
+
+
