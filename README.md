@@ -3,8 +3,10 @@
 ![OpenSERP](/logo.svg)
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/karust/openserp)](https://goreportcard.com/report/github.com/karust/openserp)
-[![Go Reference](https://pkg.go.dev/badge/github.com/karust/openserp.svg)](https://pkg.go.dev/github.com/karust/openserp)
-[![release](https://img.shields.io/github/release-pre/karust/openserp.svg)](https://github.com/karust/openserp/releases)
+[![Go Reference](https://pkg.go.dev/badge/github/karust/openserp?style=for-the-badge)](https://pkg.go.dev/github.com/karust/openserp)
+[![release](https://img.shields.io/github/release/karust/openserp)](https://github.com/karust/openserp/releases)
+
+<!--[![Docker Pulls](https://img.shields.io/docker/pulls/karust/openserp)](https://hub.docker.com/repository/docker/karust/openserp)-->
 
 **OpenSERP** provides free API access to multiple search engines including **[Google, Yandex, Baidu, Bing, DuckDuckGo]**. Get comprehensive search results without expensive API subscriptions!
 
@@ -12,6 +14,7 @@
 
 - 🔍 **Multi-Engine Support**: Google, Yandex, Baidu, Bing, DuckDuckGo...
 - 🌐 **Megasearch**: Aggregate results from multiple engines simultaneously
+- 🖼 **Images**: Image search is also available!
 - 🎯 **Advanced Filtering**: Language, date range, file type, site-specific searches
 - 🌍 **Proxy Support**: HTTP/SOCKS5 proxy support
 - 🐳 **Docker Ready**: Easy deployment with Docker
@@ -51,10 +54,10 @@ go build -o openserp .
 curl "http://localhost:7000/mega/search?text=golang&limit=10"
 
 # Pick specific engines
-curl "http://localhost:7000/mega/search?text=golang&engines=google,bing&limit=5"
+curl "http://localhost:7000/mega/search?text=golang&engines=duckduckgo,bing&limit=15"
 
 # Advanced filtering
-curl "http://localhost:7000/mega/search?text=golang&lang=EN&site=github.com&limit=8"
+curl "http://localhost:7000/mega/search?text=Donald+Trump&engines=duckduckgo,bing&limit=20&date=20251005..20251005&lang=EN"
 ```
 
 - API response example:
@@ -93,12 +96,6 @@ curl "http://localhost:7000/mega/search?text=golang&lang=EN&site=github.com&limi
 ```bash
 # Search images across ALL engines
 curl "http://localhost:7000/mega/image?text=golang logo&limit=20"
-
-# Pick specific engines for images
-curl "http://localhost:7000/mega/image?text=golang&engines=google,bing&limit=15"
-
-# Language-specific image search
-curl "http://localhost:7000/mega/image?text=golang&lang=EN&limit=10"
 ```
 
 ### Available Engines

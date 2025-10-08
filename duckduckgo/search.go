@@ -170,7 +170,7 @@ func (ddg *DuckDuckGo) Search(query core.Query) ([]core.SearchResult, error) {
 	searchPage := 0
 
 	for len(allResults) < query.Limit {
-		url, err := BuildURL(query)
+		url, err := BuildURL(query, searchPage)
 		if err != nil {
 			return nil, err
 		}
@@ -202,7 +202,6 @@ func (ddg *DuckDuckGo) Search(query core.Query) ([]core.SearchResult, error) {
 			}
 		}
 
-		page.MustScreenshotFullPage("./duck.png")
 		if searchErr != nil {
 			defer page.Close()
 			ddg.logger.Error("Cannot parse search results: %s", searchErr)
@@ -246,11 +245,24 @@ func (ddg *DuckDuckGo) Search(query core.Query) ([]core.SearchResult, error) {
 			}
 		}
 
+		// Break if we've reached or exceeded the limit
+		if len(allResults) >= query.Limit {
+			break
+		}
+
 		time.Sleep(ddg.pageSleep)
 	}
 
-	ddg.logger.Info("Search completed: %d results", len(allResults))
-	return core.DeduplicateResults(allResults), nil
+	// Deduplicate results
+	deduped := core.DeduplicateResults(allResults)
+
+	// Trim to exact limit if necessary
+	if len(deduped) > query.Limit {
+		deduped = deduped[:query.Limit]
+	}
+
+	ddg.logger.Info("Search completed: %d results", len(deduped))
+	return deduped, nil
 }
 
 func (ddg *DuckDuckGo) SearchImage(query core.Query) ([]core.SearchResult, error) {

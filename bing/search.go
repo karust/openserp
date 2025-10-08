@@ -204,7 +204,32 @@ func (bing *Bing) Search(query core.Query) ([]core.SearchResult, error) {
 		searchResults = append(searchResults, srchRes)
 	}
 
-	return core.DeduplicateResults(searchResults), nil
+	// Deduplicate results
+	deduped := core.DeduplicateResults(searchResults)
+
+	// Trim to exact limit if necessary (only organic results, not ads)
+	if query.Limit > 0 {
+		organicResults := []core.SearchResult{}
+		adResults := []core.SearchResult{}
+
+		for _, result := range deduped {
+			if result.Ad {
+				adResults = append(adResults, result)
+			} else {
+				organicResults = append(organicResults, result)
+			}
+		}
+
+		// Trim organic results to limit
+		if len(organicResults) > query.Limit {
+			organicResults = organicResults[:query.Limit]
+		}
+
+		// Combine back: organic results + ads
+		deduped = append(organicResults, adResults...)
+	}
+
+	return deduped, nil
 }
 
 // BingImageData represents the JSON structure in the m attribute of image elements
