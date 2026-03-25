@@ -3,9 +3,11 @@ package core
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
@@ -24,6 +26,7 @@ type Server struct {
 	app           *fiber.App
 	addr          string
 	searchEngines []SearchEngine
+	startTime     time.Time
 }
 
 func NewServer(host string, port int, searchEngines ...SearchEngine) *Server {
@@ -32,7 +35,11 @@ func NewServer(host string, port int, searchEngines ...SearchEngine) *Server {
 		app:           fiber.New(),
 		addr:          addr,
 		searchEngines: searchEngines,
+		startTime:     time.Now(),
 	}
+
+	// Health endpoint used by orchestration probes.
+	serv.app.Get("/health", serv.handleHealthCheck)
 
 	for _, engine := range searchEngines {
 		locEngine := engine
@@ -368,6 +375,69 @@ func (s *Server) deduplicateMegaResults(results []MegaSearchResult) []MegaSearch
 	})
 
 	return deduped
+}
+
+type HealthStatus struct {
+	Status  string                 `json:"status"`
+	Uptime  string                 `json:"uptime"`
+	Engines []EngineHealth         `json:"engines"`
+	System  map[string]interface{} `json:"system"`
+}
+
+type EngineHealth struct {
+	Name        string `json:"name"`
+	Initialized bool   `json:"initialized"`
+	Status      string `json:"status"`
+}
+
+// handleHealthCheck returns current service and engine status.
+// Degraded state stays HTTP 200 to avoid unnecessary restarts in orchestrators.
+func (s *Server) handleHealthCheck(c *fiber.Ctx) error {
+	engines := make([]EngineHealth, 0, len(s.searchEngines))
+	availableEngines := 0
+
+	for _, engine := range s.searchEngines {
+		status := "ready"
+		if !engine.IsInitialized() {
+			status = "not_initialized"
+		} else {
+			availableEngines++
+		}
+
+		engines = append(engines, EngineHealth{
+			Name:        engine.Name(),
+			Initialized: engine.IsInitialized(),
+			Status:      status,
+		})
+	}
+
+	overallStatus := "healthy"
+	totalEngines := len(s.searchEngines)
+	switch {
+	case totalEngines == 0 || availableEngines == 0:
+		overallStatus = "unhealthy"
+	case availableEngines < totalEngines:
+		overallStatus = "degraded"
+	}
+
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	health := HealthStatus{
+		Status:  overallStatus,
+		Uptime:  time.Since(s.startTime).Round(time.Second).String(),
+		Engines: engines,
+		System: map[string]interface{}{
+			"goroutines": runtime.NumGoroutine(),
+			"memory_mb":  memStats.Alloc / 1024 / 1024,
+			"go_version": runtime.Version(),
+		},
+	}
+
+	if overallStatus == "unhealthy" {
+		c.Status(fiber.StatusServiceUnavailable)
+	}
+	return c.JSON(health)
 }
 
 func (s *Server) Listen() error {
