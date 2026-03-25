@@ -1,25 +1,41 @@
 app:
-  host: 0.0.0.0
-  port: 7000
-  debug: false
-  verbose: true
-  timeout: 15
-  head: false
-  leakless: false
-  leave_head: false
-  stealth: false
-  insecure: true
-
+  host: 0.0.0.0 # API host to bind
+  port: 7000 # API port to bind
+  debug: false # Enable debug logs and force browser UI mode
+  verbose: true # Enable info-level request logs
+  timeout: 15 # Browser/search timeout in seconds
+  head: false # Show browser UI (headful mode)
+  leakless: false # Force browser process cleanup after request
+  leave_head: false # Keep tabs open after request for debugging
+  stealth: false # Enable stealth browser plugin
+  insecure: true # Allow insecure TLS connections
+  proxy: "" # Optional HTTP/SOCKS5 proxy URL
   # Optional custom browser binary path (chrome/chromium/edge..)
   #browser_path: "C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe"
+
+resilience:
+  max_retries: 3 # Retry attempts per engine request (0 disables retries)
+  allow_endpoint_fallback: false # Keep dedicated endpoints engine-pure by default
+
+circuit_breaker:
+  failures: 5 # Consecutive failures required to open circuit
+  recovery_seconds: 60 # Wait time before moving open circuit to half-open
+  successes: 2 # Consecutive half-open successes required to close circuit
+
+cors:
+  enabled: true
+  allow_origins: "*"
+  allow_methods: "GET, POST, OPTIONS"
+  allow_headers: "Origin, Content-Type, Accept, Authorization"
+  max_age: 86400 # Browser preflight cache in seconds
 
 2captcha:
   apikey: "123123123123123"
 
 google:
-  rate_requests: 4 # Number of requests per Minute
-  rate_burst: 2 # Number of non-ratelimited requests per Minute
-  captcha: true
+  rate_requests: 4 # Allowed average requests per minute
+  rate_burst: 2 # Burst requests before limiter applies
+  captcha: true # Enable captcha solver path
 
 yandex:
   rate_requests: 4

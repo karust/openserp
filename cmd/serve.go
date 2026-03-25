@@ -63,9 +63,34 @@ var serveCMD = &cobra.Command{
 }
 
 func serve(cmd *cobra.Command, args []string) {
+	corsCfg := core.DefaultCORSConfig()
+	corsCfg.AllowOrigins = config.CORS.AllowOrigins
+	corsCfg.AllowMethods = config.CORS.AllowMethods
+	corsCfg.AllowHeaders = config.CORS.AllowHeaders
+	corsCfg.MaxAge = config.CORS.MaxAge
+
+	serverOpts := core.ServerOptions{
+		EnableCORS:            config.CORS.Enabled,
+		CORS:                  corsCfg,
+		AllowEndpointFallback: config.Resilience.AllowEndpointFallback,
+		Resilience: core.ResilientConfig{
+			Retry: core.RetryConfig{
+				MaxRetries:     config.Resilience.MaxRetries,
+				InitialBackoff: 1 * time.Second,
+				MaxBackoff:     30 * time.Second,
+				BackoffFactor:  2.0,
+			},
+			CircuitBreaker: core.CircuitBreakerConfig{
+				FailureThreshold: config.CircuitBreaker.Failures,
+				RecoveryTimeout:  time.Duration(config.CircuitBreaker.RecoverySeconds) * time.Second,
+				SuccessThreshold: config.CircuitBreaker.Successes,
+			},
+		},
+	}
+
 	if config.App.IsRawRequests {
 		logrus.Warn("Browserless results are very inconsistent or may not even work!")
-		serv := core.NewServer(config.App.Host, config.App.Port,
+		serv := core.NewServerWithOptions(config.App.Host, config.App.Port, serverOpts,
 			&rawEngine{name: "google"},
 			&rawEngine{name: "yandex"},
 			&rawEngine{name: "baidu"},
@@ -102,7 +127,7 @@ func serve(cmd *cobra.Command, args []string) {
 	bing := bing.New(*browser, config.BingConfig)
 	ddg := duckduckgo.New(*browser, config.DuckDuckGoConfig)
 
-	serv := core.NewServer(config.App.Host, config.App.Port, gogl, yand, baidu, bing, ddg)
+	serv := core.NewServerWithOptions(config.App.Host, config.App.Port, serverOpts, gogl, yand, baidu, bing, ddg)
 
 	err = serv.Listen()
 	if err != nil {

@@ -20,6 +20,9 @@ const (
 
 type Config struct {
 	App              AppConfig                `mapstructure:"app"`
+	Resilience       ResilienceConfig         `mapstructure:"resilience"`
+	CircuitBreaker   CircuitBreakerConfig     `mapstructure:"circuit_breaker"`
+	CORS             CORSConfig               `mapstructure:"cors"`
 	Config2Capcha    Config2Captcha           `mapstructure:"2captcha"`
 	GoogleConfig     core.SearchEngineOptions `mapstructure:"google"`
 	YandexConfig     core.SearchEngineOptions `mapstructure:"yandex"`
@@ -49,14 +52,38 @@ type AppConfig struct {
 	IsStealth     bool   `mapstructure:"stealth"`
 }
 
+type ResilienceConfig struct {
+	MaxRetries            int  `mapstructure:"max_retries"`
+	AllowEndpointFallback bool `mapstructure:"allow_endpoint_fallback"`
+}
+
+type CircuitBreakerConfig struct {
+	Failures        int `mapstructure:"failures"`
+	RecoverySeconds int `mapstructure:"recovery_seconds"`
+	Successes       int `mapstructure:"successes"`
+}
+
+type CORSConfig struct {
+	Enabled      bool   `mapstructure:"enabled"`
+	AllowOrigins string `mapstructure:"allow_origins"`
+	AllowMethods string `mapstructure:"allow_methods"`
+	AllowHeaders string `mapstructure:"allow_headers"`
+	MaxAge       int    `mapstructure:"max_age"`
+}
+
 var config = Config{}
 
 var flagToConfigKey = map[string]string{
-	"config":       "app.config_path",
-	"browser-path": "app.browser_path",
-	"leave":        "app.leave_head",
-	"raw":          "app.raw_requests",
-	"2captcha_key": "2captcha.apikey",
+	"config":                  "app.config_path",
+	"browser-path":            "app.browser_path",
+	"leave":                   "app.leave_head",
+	"raw":                     "app.raw_requests",
+	"2captcha_key":            "2captcha.apikey",
+	"max_retries":             "resilience.max_retries",
+	"allow_endpoint_fallback": "resilience.allow_endpoint_fallback",
+	"cb_failures":             "circuit_breaker.failures",
+	"cb_recovery":             "circuit_breaker.recovery_seconds",
+	"cb_successes":            "circuit_breaker.successes",
 }
 
 var RootCmd = &cobra.Command{
@@ -123,6 +150,7 @@ func parseFlagValue(flg *pflag.Flag) (interface{}, error) {
 // Initialize Viper
 func initializeConfig(cmd *cobra.Command) error {
 	v := viper.New()
+	setConfigDefaults(v)
 
 	// Base name of the config file, without the file extension
 	v.SetConfigName(defaultConfigFilename)
@@ -160,6 +188,20 @@ func initializeConfig(cmd *cobra.Command) error {
 	return nil
 }
 
+func setConfigDefaults(v *viper.Viper) {
+	// Keep stage2 defaults stable even when config file is absent.
+	v.SetDefault("resilience.max_retries", 3)
+	v.SetDefault("resilience.allow_endpoint_fallback", false)
+	v.SetDefault("circuit_breaker.failures", 5)
+	v.SetDefault("circuit_breaker.recovery_seconds", 60)
+	v.SetDefault("circuit_breaker.successes", 2)
+	v.SetDefault("cors.enabled", true)
+	v.SetDefault("cors.allow_origins", "*")
+	v.SetDefault("cors.allow_methods", "GET, POST, OPTIONS")
+	v.SetDefault("cors.allow_headers", "Origin, Content-Type, Accept, Authorization")
+	v.SetDefault("cors.max_age", 86400)
+}
+
 func init() {
 	RootCmd.PersistentFlags().IntVarP(&config.App.Port, "port", "p", 7070, "Port number to run server")
 	RootCmd.PersistentFlags().StringVarP(&config.App.Host, "host", "a", "127.0.0.1", "Host address to run server")
@@ -176,4 +218,9 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&config.App.ProxyURL, "proxy", "x", "", "HTTP or Socks5 proxy URL (e.g. http://user:pass@127.0.0.1:8080)")
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsStealth, "stealth", "s", false, "Use stealth browser plugin")
 	RootCmd.PersistentFlags().BoolVarP(&config.App.Insecure, "insecure", "k", false, "Allow insecure TLS connections")
+	RootCmd.PersistentFlags().IntVar(&config.Resilience.MaxRetries, "max_retries", 3, "Max retry attempts per search engine (0 to disable)")
+	RootCmd.PersistentFlags().BoolVar(&config.Resilience.AllowEndpointFallback, "allow_endpoint_fallback", false, "Allow dedicated endpoints to fallback to other engines")
+	RootCmd.PersistentFlags().IntVar(&config.CircuitBreaker.Failures, "cb_failures", 5, "Consecutive failures before circuit breaker opens")
+	RootCmd.PersistentFlags().IntVar(&config.CircuitBreaker.RecoverySeconds, "cb_recovery", 60, "Seconds before retrying an engine with open circuit")
+	RootCmd.PersistentFlags().IntVar(&config.CircuitBreaker.Successes, "cb_successes", 2, "Consecutive successful half-open checks needed to close circuit")
 }

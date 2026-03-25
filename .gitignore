@@ -25,3 +25,5 @@ logs.txt
 .release
 core/test/
 .aider*
+.gocache/
+openserp
