@@ -1,12 +1,11 @@
 package core
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -26,12 +25,15 @@ type Server struct {
 	app           *fiber.App
 	addr          string
 	searchEngines []SearchEngine
+	cache         *ResponseCache
 	resilient     *ResilientSearcher
 	startTime     time.Time
 	opts          ServerOptions
 }
 
 type ServerOptions struct {
+	CacheTTL              time.Duration
+	CacheMaxSize          int
 	EnableCORS            bool
 	CORS                  CORSConfig
 	AllowEndpointFallback bool
@@ -40,6 +42,8 @@ type ServerOptions struct {
 
 func DefaultServerOptions() ServerOptions {
 	return ServerOptions{
+		CacheTTL:              5 * time.Minute,
+		CacheMaxSize:          1000,
 		EnableCORS:            true,
 		CORS:                  DefaultCORSConfig(),
 		AllowEndpointFallback: false,
@@ -69,6 +73,10 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 	if opts.AllowEndpointFallback {
 		logrus.Warn("Dedicated endpoint fallback is enabled")
 	}
+	if opts.CacheTTL > 0 && opts.CacheMaxSize > 0 {
+		serv.cache = NewResponseCache(opts.CacheTTL, opts.CacheMaxSize)
+		logrus.Infof("Response cache enabled: TTL=%s, MaxSize=%d", opts.CacheTTL, opts.CacheMaxSize)
+	}
 
 	if opts.EnableCORS {
 		app.Use(CORSMiddleware(opts.CORS))
@@ -76,6 +84,7 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 	app.Use(RequestLoggerMiddleware())
 
 	app.Get("/health", serv.handleHealthCheck)
+	app.Get("/cache/stats", serv.handleCacheStats)
 	app.Get("/resilience/stats", serv.handleResilienceStats)
 
 	for _, engine := range searchEngines {
@@ -115,6 +124,16 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 	}
 	logrus.Infof("Starting SERP %s request using %s engine for query: %s", action, engine.Name(), q.Text)
 
+	if hit, err := s.tryServeCacheHit(
+		c,
+		cacheHitCandidate{
+			key:        BuildCacheKey(engine.Name(), action, q),
+			logMessage: fmt.Sprintf("Cache hit for %s %s: %s", engine.Name(), action, q.Text),
+		},
+	); hit || err != nil {
+		return err
+	}
+
 	var (
 		res        []SearchResult
 		usedEngine string
@@ -145,6 +164,25 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		}
 		logrus.Errorf("Error during resilient %s %s: %s", engine.Name(), action, searchErr)
 		return fiber.NewError(fiber.StatusServiceUnavailable, errToReturn.Error())
+	}
+
+	cacheStatus := ""
+	// Avoid caching fallback-served responses so the requested engine can recover
+	// without the endpoint continuing to serve another engine until TTL expiry.
+	if s.cache != nil {
+		cacheStatus = "BYPASS"
+		switch {
+		case usedEngine != engine.Name():
+			s.cache.RecordBypass()
+		case len(res) == 0:
+			s.cache.RecordBypass()
+		default:
+			cacheKey := BuildCacheKey(engine.Name(), action, q)
+			if s.cacheJSON(cacheKey, res) {
+				cacheStatus = "MISS"
+			}
+		}
+		c.Set("X-Cache", cacheStatus)
 	}
 
 	if usedEngine != "" && usedEngine != engine.Name() {
@@ -241,40 +279,30 @@ func (s *Server) handleResilienceStats(c *fiber.Ctx) error {
 	})
 }
 
+func (s *Server) handleCacheStats(c *fiber.Ctx) error {
+	if s.cache == nil {
+		return c.JSON(map[string]interface{}{"status": false})
+	}
+	return c.JSON(s.cache.Stats())
+}
+
 type MegaSearchResult struct {
 	SearchResult
 	Engine string `json:"engine"`
 }
 
 func (s *Server) handleMegaSearch(c *fiber.Ctx) error {
-	q := Query{}
-	if err := q.InitFromContext(c); err != nil {
-		logrus.Errorf("Error while setting megasearch query: %s", err)
-		return err
-	}
-
-	enginesToUse := s.resolveEngines(c.Query("engines", ""))
-	if len(enginesToUse) == 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "No valid search engines specified")
-	}
-
-	engineNames := make([]string, len(enginesToUse))
-	for i, engine := range enginesToUse {
-		engineNames[i] = engine.Name()
-	}
-	logrus.Infof("Starting SERP megasearch request using engines: %s for query: %s", strings.Join(engineNames, ", "), q.Text)
-
-	results := s.resilient.SearchAllParallel(q, enginesToUse)
-	dedupedResults := s.deduplicateMegaResults(results)
-
-	logrus.Infof("Successfully completed SERP megasearch using %d engines, returned %d deduplicated results", len(enginesToUse), len(dedupedResults))
-	return c.JSON(dedupedResults)
+	return s.handleMegaEndpoint(c, "search", s.resilient.SearchAllParallel)
 }
 
 func (s *Server) handleMegaImage(c *fiber.Ctx) error {
+	return s.handleMegaEndpoint(c, "image", s.resilient.SearchAllImageParallel)
+}
+
+func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(Query, []SearchEngine) []MegaSearchResult) error {
 	q := Query{}
 	if err := q.InitFromContext(c); err != nil {
-		logrus.Errorf("Error while setting megasearch image query: %s", err)
+		logrus.Errorf("Error while setting mega %s query: %s", action, err)
 		return err
 	}
 
@@ -287,12 +315,34 @@ func (s *Server) handleMegaImage(c *fiber.Ctx) error {
 	for i, engine := range enginesToUse {
 		engineNames[i] = engine.Name()
 	}
-	logrus.Infof("Starting SERP megasearch image request using engines: %s for query: %s", strings.Join(engineNames, ", "), q.Text)
+	engineNamesJoined := strings.Join(engineNames, ",")
+	logrus.Infof("Starting SERP mega %s request using engines: %s for query: %s", action, engineNamesJoined, q.Text)
 
-	results := s.resilient.SearchAllImageParallel(q, enginesToUse)
+	cacheHitCandidates := []cacheHitCandidate{
+		{
+			key:        s.buildMegaCacheKey(action, enginesToUse, q),
+			logMessage: fmt.Sprintf("Cache hit for mega %s: engines=%s query=%s", action, engineNamesJoined, q.Text),
+		},
+	}
+	cacheableEngines := s.megaCacheableEngines(enginesToUse)
+	if len(cacheableEngines) > 0 && len(cacheableEngines) < len(enginesToUse) {
+		cacheHitCandidates = append(cacheHitCandidates, cacheHitCandidate{
+			key:        s.buildMegaCacheKey(action, cacheableEngines, q),
+			logMessage: fmt.Sprintf("Cache hit for mega %s partial set: engines=%s query=%s", action, engineNamesJoined, q.Text),
+		})
+	}
+	if hit, err := s.tryServeCacheHit(c, cacheHitCandidates...); hit || err != nil {
+		return err
+	}
+
+	results := run(q, enginesToUse)
 	dedupedResults := s.deduplicateMegaResults(results)
 
-	logrus.Infof("Successfully completed SERP megasearch image using %d engines, returned %d deduplicated results", len(enginesToUse), len(dedupedResults))
+	if s.cache != nil {
+		c.Set("X-Cache", s.cacheMegaResults(action, enginesToUse, q, dedupedResults))
+	}
+
+	logrus.Infof("Successfully completed SERP mega %s using %d engines, returned %d deduplicated results", action, len(enginesToUse), len(dedupedResults))
 	return c.JSON(dedupedResults)
 }
 
@@ -328,97 +378,22 @@ func (s *Server) resolveEngines(enginesParam string) []SearchEngine {
 	}
 
 	var enginesToUse []SearchEngine
+	seen := make(map[string]bool)
 	engineNames := strings.Split(enginesParam, ",")
 	for _, engineName := range engineNames {
 		engineName = strings.TrimSpace(strings.ToLower(engineName))
+		if engineName == "" || seen[engineName] {
+			continue
+		}
 		for _, engine := range s.searchEngines {
 			if strings.ToLower(engine.Name()) == engineName {
 				enginesToUse = append(enginesToUse, engine)
+				seen[engineName] = true
 				break
 			}
 		}
 	}
 	return enginesToUse
-}
-
-func (s *Server) searchSelectedEngines(q Query, engines []SearchEngine) []MegaSearchResult {
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var allResults []MegaSearchResult
-
-	for _, engine := range engines {
-		wg.Add(1)
-		go func(eng SearchEngine) {
-			defer wg.Done()
-
-			limiter := eng.GetRateLimiter()
-			if limiter != nil {
-				err := limiter.Wait(context.Background())
-				if err != nil {
-					logrus.Errorf("Ratelimiter error during %s megasearch: %s", eng.Name(), err)
-				}
-			}
-
-			results, err := eng.Search(q)
-			if err != nil {
-				logrus.Errorf("Error during %s megasearch: %s", eng.Name(), err)
-				return
-			}
-
-			mu.Lock()
-			for _, result := range results {
-				megaResult := MegaSearchResult{
-					SearchResult: result,
-					Engine:       eng.Name(),
-				}
-				allResults = append(allResults, megaResult)
-			}
-			mu.Unlock()
-		}(engine)
-	}
-
-	wg.Wait()
-	return allResults
-}
-
-func (s *Server) searchSelectedEnginesImage(q Query, engines []SearchEngine) []MegaSearchResult {
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var allResults []MegaSearchResult
-
-	for _, engine := range engines {
-		wg.Add(1)
-		go func(eng SearchEngine) {
-			defer wg.Done()
-
-			limiter := eng.GetRateLimiter()
-			if limiter != nil {
-				err := limiter.Wait(context.Background())
-				if err != nil {
-					logrus.Errorf("Ratelimiter error during %s megasearch image: %s", eng.Name(), err)
-				}
-			}
-
-			results, err := eng.SearchImage(q)
-			if err != nil {
-				logrus.Errorf("Error during %s megasearch image: %s", eng.Name(), err)
-				return
-			}
-
-			mu.Lock()
-			for _, result := range results {
-				megaResult := MegaSearchResult{
-					SearchResult: result,
-					Engine:       eng.Name(),
-				}
-				allResults = append(allResults, megaResult)
-			}
-			mu.Unlock()
-		}(engine)
-	}
-
-	wg.Wait()
-	return allResults
 }
 
 func (s *Server) deduplicateMegaResults(results []MegaSearchResult) []MegaSearchResult {
@@ -442,6 +417,105 @@ func (s *Server) deduplicateMegaResults(results []MegaSearchResult) []MegaSearch
 		return deduped[i].Rank < deduped[j].Rank
 	})
 	return deduped
+}
+
+type cacheHitCandidate struct {
+	key        string
+	logMessage string
+}
+
+func (s *Server) tryServeCacheHit(c *fiber.Ctx, candidates ...cacheHitCandidate) (bool, error) {
+	if s.cache == nil {
+		return false, nil
+	}
+	for _, candidate := range candidates {
+		cached, ok := s.cache.Get(candidate.key)
+		if !ok {
+			continue
+		}
+		c.Set("Content-Type", "application/json")
+		c.Set("X-Cache", "HIT")
+		logrus.Info(candidate.logMessage)
+		return true, c.Send(cached)
+	}
+	return false, nil
+}
+
+func (s *Server) cacheJSON(cacheKey string, payload interface{}) bool {
+	if s.cache == nil {
+		return false
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		s.cache.RecordBypass()
+		return false
+	}
+	s.cache.Set(cacheKey, data)
+	return true
+}
+
+func (s *Server) cacheMegaResults(action string, enginesToUse []SearchEngine, q Query, dedupedResults []MegaSearchResult) string {
+	cacheStatus := "BYPASS"
+	if s.cache == nil {
+		return cacheStatus
+	}
+	if len(dedupedResults) == 0 {
+		s.cache.RecordBypass()
+		return cacheStatus
+	}
+
+	cacheEngines := s.megaCacheableEngines(enginesToUse)
+	if len(cacheEngines) == 0 {
+		s.cache.RecordBypass()
+		return cacheStatus
+	}
+
+	if s.cacheJSON(s.buildMegaCacheKey(action, cacheEngines, q), dedupedResults) {
+		return "MISS"
+	}
+	return cacheStatus
+}
+
+func (s *Server) buildMegaCacheKey(action string, engines []SearchEngine, q Query) string {
+	names := make([]string, 0, len(engines))
+	for _, eng := range engines {
+		names = append(names, strings.ToLower(strings.TrimSpace(eng.Name())))
+	}
+	sort.Strings(names)
+
+	// Deduplicate engine names in key to keep cache stable when order differs
+	// or repeated names are passed in the engines query parameter.
+	uniq := names[:0]
+	last := ""
+	for _, name := range names {
+		if name == last {
+			continue
+		}
+		uniq = append(uniq, name)
+		last = name
+	}
+
+	return BuildCacheKey("mega:"+strings.Join(uniq, ","), action, q)
+}
+
+func (s *Server) megaCacheableEngines(engines []SearchEngine) []SearchEngine {
+	open := make(map[string]bool)
+	for _, stat := range s.resilient.GetCircuitBreakerStats() {
+		name, _ := stat["engine"].(string)
+		state, _ := stat["state"].(string)
+		if strings.EqualFold(state, "open") {
+			open[strings.ToLower(strings.TrimSpace(name))] = true
+		}
+	}
+
+	cacheable := make([]SearchEngine, 0, len(engines))
+	for _, eng := range engines {
+		if open[strings.ToLower(strings.TrimSpace(eng.Name()))] {
+			continue
+		}
+		cacheable = append(cacheable, eng)
+	}
+	return cacheable
 }
 
 func (s *Server) Listen() error {

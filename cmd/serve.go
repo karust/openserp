@@ -70,6 +70,8 @@ func serve(cmd *cobra.Command, args []string) {
 	corsCfg.MaxAge = config.CORS.MaxAge
 
 	serverOpts := core.ServerOptions{
+		CacheTTL:              time.Duration(config.Cache.TTLSeconds) * time.Second,
+		CacheMaxSize:          config.Cache.MaxSize,
 		EnableCORS:            config.CORS.Enabled,
 		CORS:                  corsCfg,
 		AllowEndpointFallback: config.Resilience.AllowEndpointFallback,

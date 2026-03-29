@@ -9,9 +9,15 @@ app:
   leave_head: false # Keep tabs open after request for debugging
   stealth: false # Enable stealth browser plugin
   insecure: true # Allow insecure TLS connections
-  proxy: "" # Optional HTTP/SOCKS5 proxy URL
-  # Optional custom browser binary path (chrome/chromium/edge..)
+
+  # HTTP/SOCKS5 proxy URL
+  #proxy: "http://127.0.0.1:1"
+  # Custom browser binary path (chrome/chromium/edge..)
   #browser_path: "C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe"
+
+cache:
+  ttl_seconds: 60 # Dedicated endpoint cache TTL in seconds (0 disables cache)
+  max_size: 1000 # Maximum cached dedicated responses before oldest-entry eviction
 
 resilience:
   max_retries: 3 # Retry attempts per engine request (0 disables retries)

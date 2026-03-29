@@ -21,6 +21,7 @@ type engineMock struct {
 
 	mu          sync.Mutex
 	searchCalls int
+	imageCalls  int
 }
 
 func (e *engineMock) Name() string { return e.name }
@@ -40,6 +41,9 @@ func (e *engineMock) Search(q Query) ([]SearchResult, error) {
 }
 
 func (e *engineMock) SearchImage(q Query) ([]SearchResult, error) {
+	e.mu.Lock()
+	e.imageCalls++
+	e.mu.Unlock()
 	if e.imageFn != nil {
 		return e.imageFn(q)
 	}
@@ -109,6 +113,251 @@ func TestDedicatedEndpointNoFallbackByDefault(t *testing.T) {
 	}
 }
 
+func TestDedicatedEndpointCachesSearchResults(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+
+	opts := DefaultServerOptions()
+	opts.AllowEndpointFallback = false
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.CacheTTL = time.Minute
+	opts.CacheMaxSize = 10
+	srv := NewServerWithOptions("127.0.0.1", 7073, opts, engine)
+
+	first := request(t, srv, "/google/search?text=golang")
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("expected first request to succeed, got %d", first.StatusCode)
+	}
+	if got := first.Header.Get("X-Cache"); got != "MISS" {
+		t.Fatalf("expected cache MISS on first request, got %q", got)
+	}
+
+	second := request(t, srv, "/google/search?text=golang")
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("expected second request to succeed, got %d", second.StatusCode)
+	}
+	if got := second.Header.Get("X-Cache"); got != "HIT" {
+		t.Fatalf("expected cache HIT on second request, got %q", got)
+	}
+	if engine.searchCalls != 1 {
+		t.Fatalf("expected engine to be called once, got %d", engine.searchCalls)
+	}
+}
+
+func TestDedicatedEndpointCachesImageResults(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+
+	opts := DefaultServerOptions()
+	opts.AllowEndpointFallback = false
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.CacheTTL = time.Minute
+	opts.CacheMaxSize = 10
+	srv := NewServerWithOptions("127.0.0.1", 7074, opts, engine)
+
+	first := request(t, srv, "/google/image?text=golang")
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("expected first image request to succeed, got %d", first.StatusCode)
+	}
+	if got := first.Header.Get("X-Cache"); got != "MISS" {
+		t.Fatalf("expected cache MISS on first image request, got %q", got)
+	}
+
+	second := request(t, srv, "/google/image?text=golang")
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("expected second image request to succeed, got %d", second.StatusCode)
+	}
+	if got := second.Header.Get("X-Cache"); got != "HIT" {
+		t.Fatalf("expected cache HIT on second image request, got %q", got)
+	}
+	if engine.imageCalls != 1 {
+		t.Fatalf("expected image engine to be called once, got %d", engine.imageCalls)
+	}
+}
+
+func TestDedicatedEndpointFallbackBypassesCache(t *testing.T) {
+	primary := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(q Query) ([]SearchResult, error) {
+			return nil, errors.New("primary failed")
+		},
+	}
+	fallback := &engineMock{name: "yandex", initialized: true}
+
+	opts := DefaultServerOptions()
+	opts.AllowEndpointFallback = true
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.CacheTTL = time.Minute
+	opts.CacheMaxSize = 10
+	srv := NewServerWithOptions("127.0.0.1", 7078, opts, primary, fallback)
+
+	first := request(t, srv, "/google/search?text=golang")
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("expected first fallback request to succeed, got %d", first.StatusCode)
+	}
+	if got := first.Header.Get("X-Cache"); got != "BYPASS" {
+		t.Fatalf("expected bypass on fallback response, got %q", got)
+	}
+	if got := first.Header.Get("X-Fallback-Engine"); got != "yandex" {
+		t.Fatalf("expected fallback engine header, got %q", got)
+	}
+
+	second := request(t, srv, "/google/search?text=golang")
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("expected repeated fallback request to succeed, got %d", second.StatusCode)
+	}
+	if got := second.Header.Get("X-Cache"); got != "BYPASS" {
+		t.Fatalf("expected repeated fallback request to bypass cache, got %q", got)
+	}
+	if got := second.Header.Get("X-Fallback-Engine"); got != "yandex" {
+		t.Fatalf("expected fallback engine header on repeated request, got %q", got)
+	}
+	if primary.searchCalls != 2 || fallback.searchCalls != 2 {
+		t.Fatalf("expected repeated live fallback calls, got primary=%d fallback=%d", primary.searchCalls, fallback.searchCalls)
+	}
+}
+
+func TestMegaSearchCachesWholeQueryWithEngineOrderNormalization(t *testing.T) {
+	google := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(q Query) ([]SearchResult, error) {
+			return []SearchResult{{Rank: 1, URL: "https://example.com/shared", Title: "shared"}}, nil
+		},
+	}
+	yandex := &engineMock{
+		name:        "yandex",
+		initialized: true,
+		searchFn: func(q Query) ([]SearchResult, error) {
+			return []SearchResult{{Rank: 1, URL: "https://example.com/shared", Title: "shared"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.CacheTTL = time.Minute
+	opts.CacheMaxSize = 10
+	srv := NewServerWithOptions("127.0.0.1", 7083, opts, google, yandex)
+
+	first := request(t, srv, "/mega/search?text=golang&engines=yandex,google")
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("expected first mega request to succeed, got %d", first.StatusCode)
+	}
+	if got := first.Header.Get("X-Cache"); got != "MISS" {
+		t.Fatalf("expected cache MISS on first mega request, got %q", got)
+	}
+
+	second := request(t, srv, "/mega/search?text=golang&engines=google,yandex")
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("expected second mega request to succeed, got %d", second.StatusCode)
+	}
+	if got := second.Header.Get("X-Cache"); got != "HIT" {
+		t.Fatalf("expected cache HIT on reordered mega request, got %q", got)
+	}
+
+	if google.searchCalls != 1 || yandex.searchCalls != 1 {
+		t.Fatalf("expected one live mega call per engine before cache hit, got google=%d yandex=%d", google.searchCalls, yandex.searchCalls)
+	}
+}
+
+func TestMegaImageCachesWholeQueryWithEngineOrderNormalization(t *testing.T) {
+	google := &engineMock{
+		name:        "google",
+		initialized: true,
+		imageFn: func(q Query) ([]SearchResult, error) {
+			return []SearchResult{{Rank: 1, URL: "https://img.example.com/shared", Title: "shared"}}, nil
+		},
+	}
+	yandex := &engineMock{
+		name:        "yandex",
+		initialized: true,
+		imageFn: func(q Query) ([]SearchResult, error) {
+			return []SearchResult{{Rank: 1, URL: "https://img.example.com/shared", Title: "shared"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.CacheTTL = time.Minute
+	opts.CacheMaxSize = 10
+	srv := NewServerWithOptions("127.0.0.1", 7084, opts, google, yandex)
+
+	first := request(t, srv, "/mega/image?text=golang+logo&engines=yandex,google")
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("expected first mega image request to succeed, got %d", first.StatusCode)
+	}
+	if got := first.Header.Get("X-Cache"); got != "MISS" {
+		t.Fatalf("expected cache MISS on first mega image request, got %q", got)
+	}
+
+	second := request(t, srv, "/mega/image?text=golang+logo&engines=google,yandex")
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("expected second mega image request to succeed, got %d", second.StatusCode)
+	}
+	if got := second.Header.Get("X-Cache"); got != "HIT" {
+		t.Fatalf("expected cache HIT on reordered mega image request, got %q", got)
+	}
+
+	if google.imageCalls != 1 || yandex.imageCalls != 1 {
+		t.Fatalf("expected one live mega image call per engine before cache hit, got google=%d yandex=%d", google.imageCalls, yandex.imageCalls)
+	}
+}
+
+func TestMegaSearchDeduplicatesRepeatedEngineNames(t *testing.T) {
+	google := &engineMock{name: "google", initialized: true}
+	yandex := &engineMock{name: "yandex", initialized: true}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7085, opts, google, yandex)
+
+	resp := request(t, srv, "/mega/search?text=golang&engines=google,google,yandex,google")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected mega request to succeed, got %d", resp.StatusCode)
+	}
+	if google.searchCalls != 1 || yandex.searchCalls != 1 {
+		t.Fatalf("expected deduplicated engine execution, got google=%d yandex=%d", google.searchCalls, yandex.searchCalls)
+	}
+}
+
+func TestMegaSearchCachesForHealthySubsetWhenOneCircuitIsOpen(t *testing.T) {
+	google := &engineMock{name: "google", initialized: true}
+	bing := &engineMock{
+		name:        "bing",
+		initialized: true,
+		searchFn: func(q Query) ([]SearchResult, error) {
+			return nil, errors.New("bing failed")
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.Resilience.CircuitBreaker.FailureThreshold = 1
+	opts.Resilience.CircuitBreaker.RecoveryTimeout = 5 * time.Minute
+	opts.CacheTTL = time.Minute
+	opts.CacheMaxSize = 10
+	srv := NewServerWithOptions("127.0.0.1", 7086, opts, google, bing)
+
+	first := request(t, srv, "/mega/search?text=golang&engines=google,bing")
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("expected first mega request to succeed with partial results, got %d", first.StatusCode)
+	}
+	if got := first.Header.Get("X-Cache"); got != "MISS" {
+		t.Fatalf("expected first response to populate cache, got %q", got)
+	}
+
+	second := request(t, srv, "/mega/search?text=golang&engines=google,bing")
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("expected second mega request to succeed, got %d", second.StatusCode)
+	}
+	if got := second.Header.Get("X-Cache"); got != "HIT" {
+		t.Fatalf("expected second response to hit subset cache, got %q", got)
+	}
+
+	if google.searchCalls != 1 || bing.searchCalls != 1 {
+		t.Fatalf("expected subset cache hit to avoid new engine calls, got google=%d bing=%d", google.searchCalls, bing.searchCalls)
+	}
+}
+
 func TestResilienceStatsContainsRetryInWhenCircuitOpen(t *testing.T) {
 	primary := &engineMock{
 		name:        "google",
@@ -122,7 +371,7 @@ func TestResilienceStatsContainsRetryInWhenCircuitOpen(t *testing.T) {
 	opts.Resilience.Retry.MaxRetries = 0
 	opts.Resilience.CircuitBreaker.FailureThreshold = 1
 	opts.Resilience.CircuitBreaker.RecoveryTimeout = 5 * time.Minute
-	srv := NewServerWithOptions("127.0.0.1", 7074, opts, primary)
+	srv := NewServerWithOptions("127.0.0.1", 7075, opts, primary)
 
 	_ = request(t, srv, "/google/search?text=golang")
 	statsResp := request(t, srv, "/resilience/stats")
@@ -168,7 +417,7 @@ func TestRetryAppliesRateLimiterOnEachAttempt(t *testing.T) {
 	opts.Resilience.Retry.InitialBackoff = 0
 	opts.Resilience.Retry.MaxBackoff = 0
 	opts.Resilience.Retry.BackoffFactor = 1
-	srv := NewServerWithOptions("127.0.0.1", 7075, opts, engine)
+	srv := NewServerWithOptions("127.0.0.1", 7076, opts, engine)
 
 	start := time.Now()
 	resp := request(t, srv, "/google/search?text=golang")
@@ -185,6 +434,78 @@ func TestRetryAppliesRateLimiterOnEachAttempt(t *testing.T) {
 	}
 }
 
+func TestCacheStatsDisabled(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+
+	opts := DefaultServerOptions()
+	opts.CacheTTL = 0
+	opts.CacheMaxSize = 0
+	srv := NewServerWithOptions("127.0.0.1", 7079, opts, engine)
+
+	resp := request(t, srv, "/cache/stats")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected disabled cache stats to return 200, got %d", resp.StatusCode)
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode cache stats: %v", err)
+	}
+	if payload["status"] != false {
+		t.Fatalf("expected disabled status, got %#v", payload)
+	}
+}
+
+func TestCacheStatsReflectActivity(t *testing.T) {
+	primary := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(q Query) ([]SearchResult, error) {
+			if q.Text == "fallback" {
+				return nil, errors.New("fallback path")
+			}
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+	fallback := &engineMock{name: "yandex", initialized: true}
+
+	opts := DefaultServerOptions()
+	opts.AllowEndpointFallback = true
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.CacheTTL = time.Minute
+	opts.CacheMaxSize = 10
+	srv := NewServerWithOptions("127.0.0.1", 7080, opts, primary, fallback)
+
+	_ = request(t, srv, "/google/search?text=golang")
+	_ = request(t, srv, "/google/search?text=golang")
+	_ = request(t, srv, "/google/search?text=fallback")
+
+	resp := request(t, srv, "/cache/stats")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected cache stats endpoint to return 200, got %d", resp.StatusCode)
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode cache stats response: %v", err)
+	}
+	if got := payload["status"].(bool); got != true {
+		t.Fatalf("expected enabled status, got %v", got)
+	}
+	if got := payload["entries"].(float64); got != 1 {
+		t.Fatalf("expected 1 cache entry, got %v", got)
+	}
+	if got := payload["hits"].(float64); got != 1 {
+		t.Fatalf("expected 1 cache hit, got %v", got)
+	}
+	if got := payload["misses"].(float64); got != 2 {
+		t.Fatalf("expected 2 cache misses, got %v", got)
+	}
+	if got := payload["bypasses"].(float64); got != 1 {
+		t.Fatalf("expected 1 bypass, got %v", got)
+	}
+}
+
 // Server-level CORS tests are intentionally smoke-level:
 // they verify middleware registration and option wiring, not header semantics.
 func TestServerOptions_WiresCustomCORSConfig(t *testing.T) {
@@ -198,7 +519,7 @@ func TestServerOptions_WiresCustomCORSConfig(t *testing.T) {
 		MaxAge:       600,
 	}
 
-	srv := NewServerWithOptions("127.0.0.1", 7076, opts, engine)
+	srv := NewServerWithOptions("127.0.0.1", 7081, opts, engine)
 	resp := request(t, srv, "/health")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -214,7 +535,7 @@ func TestServerOptions_DisableCORSMiddleware(t *testing.T) {
 	opts := DefaultServerOptions()
 	opts.EnableCORS = false
 
-	srv := NewServerWithOptions("127.0.0.1", 7077, opts, engine)
+	srv := NewServerWithOptions("127.0.0.1", 7082, opts, engine)
 	resp := request(t, srv, "/health")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)

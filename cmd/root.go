@@ -20,6 +20,7 @@ const (
 
 type Config struct {
 	App              AppConfig                `mapstructure:"app"`
+	Cache            CacheConfig              `mapstructure:"cache"`
 	Resilience       ResilienceConfig         `mapstructure:"resilience"`
 	CircuitBreaker   CircuitBreakerConfig     `mapstructure:"circuit_breaker"`
 	CORS             CORSConfig               `mapstructure:"cors"`
@@ -52,6 +53,11 @@ type AppConfig struct {
 	IsStealth     bool   `mapstructure:"stealth"`
 }
 
+type CacheConfig struct {
+	TTLSeconds int `mapstructure:"ttl_seconds"`
+	MaxSize    int `mapstructure:"max_size"`
+}
+
 type ResilienceConfig struct {
 	MaxRetries            int  `mapstructure:"max_retries"`
 	AllowEndpointFallback bool `mapstructure:"allow_endpoint_fallback"`
@@ -79,6 +85,8 @@ var flagToConfigKey = map[string]string{
 	"leave":                   "app.leave_head",
 	"raw":                     "app.raw_requests",
 	"2captcha_key":            "2captcha.apikey",
+	"cache_ttl":               "cache.ttl_seconds",
+	"cache_max_size":          "cache.max_size",
 	"max_retries":             "resilience.max_retries",
 	"allow_endpoint_fallback": "resilience.allow_endpoint_fallback",
 	"cb_failures":             "circuit_breaker.failures",
@@ -189,6 +197,8 @@ func initializeConfig(cmd *cobra.Command) error {
 }
 
 func setConfigDefaults(v *viper.Viper) {
+	v.SetDefault("cache.ttl_seconds", 300)
+	v.SetDefault("cache.max_size", 1000)
 	// Keep stage2 defaults stable even when config file is absent.
 	v.SetDefault("resilience.max_retries", 3)
 	v.SetDefault("resilience.allow_endpoint_fallback", false)
@@ -218,6 +228,8 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&config.App.ProxyURL, "proxy", "x", "", "HTTP or Socks5 proxy URL (e.g. http://user:pass@127.0.0.1:8080)")
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsStealth, "stealth", "s", false, "Use stealth browser plugin")
 	RootCmd.PersistentFlags().BoolVarP(&config.App.Insecure, "insecure", "k", false, "Allow insecure TLS connections")
+	RootCmd.PersistentFlags().IntVar(&config.Cache.TTLSeconds, "cache_ttl", 300, "Cache TTL in seconds (0 to disable)")
+	RootCmd.PersistentFlags().IntVar(&config.Cache.MaxSize, "cache_max_size", 1000, "Maximum number of cached responses")
 	RootCmd.PersistentFlags().IntVar(&config.Resilience.MaxRetries, "max_retries", 3, "Max retry attempts per search engine (0 to disable)")
 	RootCmd.PersistentFlags().BoolVar(&config.Resilience.AllowEndpointFallback, "allow_endpoint_fallback", false, "Allow dedicated endpoints to fallback to other engines")
 	RootCmd.PersistentFlags().IntVar(&config.CircuitBreaker.Failures, "cb_failures", 5, "Consecutive failures before circuit breaker opens")

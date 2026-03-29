@@ -95,11 +95,11 @@ func RequestLoggerMiddleware() fiber.Handler {
 
 		entry := logrus.WithFields(logFields)
 		if status >= 500 {
-			entry.Error("Request failed")
+			entry.Errorf("%s - request failed", c.Path())
 		} else if status >= 400 {
-			entry.Warn("Request error")
+			entry.Warnf("%s - request error", c.Path())
 		} else {
-			entry.Info("Request completed")
+			entry.Infof("%s - request completed", c.Path())
 		}
 
 		return err
