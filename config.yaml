@@ -15,6 +15,13 @@ app:
   # Custom browser binary path (chrome/chromium/edge..)
   #browser_path: "C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe"
 
+proxy_pool:
+  # List of proxy URLs for raw-mode resilient rotation.
+  # Browser mode still uses only app.proxy in stage 4.
+  #urls:
+  #  - "socks5h://127.0.0.1:1080"
+  failure_threshold: 3 # Disable a proxy after this many consecutive request failures
+
 cache:
   ttl_seconds: 60 # Dedicated endpoint cache TTL in seconds (0 disables cache)
   max_size: 1000 # Maximum cached dedicated responses before oldest-entry eviction

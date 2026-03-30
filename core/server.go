@@ -276,6 +276,7 @@ func (s *Server) handleHealthCheck(c *fiber.Ctx) error {
 func (s *Server) handleResilienceStats(c *fiber.Ctx) error {
 	return c.JSON(map[string]interface{}{
 		"circuit_breakers": s.resilient.GetCircuitBreakerStats(),
+		"proxy":            s.resilient.GetProxyStats(),
 	})
 }
 

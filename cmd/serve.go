@@ -21,8 +21,6 @@ type rawEngine struct {
 }
 
 func (r *rawEngine) Search(q core.Query) ([]core.SearchResult, error) {
-	// Inject proxy settings from config
-	q.ProxyURL = config.App.ProxyURL
 	q.Insecure = config.App.Insecure
 
 	switch r.name {
@@ -69,6 +67,16 @@ func serve(cmd *cobra.Command, args []string) {
 	corsCfg.AllowHeaders = config.CORS.AllowHeaders
 	corsCfg.MaxAge = config.CORS.MaxAge
 
+	proxyCfg := core.ProxyConfig{
+		Runtime:              core.ProxyRuntimeBrowser,
+		StaticURL:            config.App.ProxyURL,
+		PoolURLs:             config.ProxyPool.URLs,
+		PoolFailureThreshold: config.ProxyPool.FailureThreshold,
+	}
+	if config.App.IsRawRequests {
+		proxyCfg.Runtime = core.ProxyRuntimeRaw
+	}
+
 	serverOpts := core.ServerOptions{
 		CacheTTL:              time.Duration(config.Cache.TTLSeconds) * time.Second,
 		CacheMaxSize:          config.Cache.MaxSize,
@@ -87,6 +95,7 @@ func serve(cmd *cobra.Command, args []string) {
 				RecoveryTimeout:  time.Duration(config.CircuitBreaker.RecoverySeconds) * time.Second,
 				SuccessThreshold: config.CircuitBreaker.Successes,
 			},
+			Proxy: proxyCfg,
 		},
 	}
 

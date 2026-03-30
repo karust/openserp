@@ -13,13 +13,14 @@ import (
 )
 
 const (
-	version               = "0.5.6"
+	version               = "0.5.9"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
 
 type Config struct {
 	App              AppConfig                `mapstructure:"app"`
+	ProxyPool        ProxyPoolConfig          `mapstructure:"proxy_pool"`
 	Cache            CacheConfig              `mapstructure:"cache"`
 	Resilience       ResilienceConfig         `mapstructure:"resilience"`
 	CircuitBreaker   CircuitBreakerConfig     `mapstructure:"circuit_breaker"`
@@ -51,6 +52,11 @@ type AppConfig struct {
 	ProxyURL      string `mapstructure:"proxy"`
 	Insecure      bool   `mapstructure:"insecure"`
 	IsStealth     bool   `mapstructure:"stealth"`
+}
+
+type ProxyPoolConfig struct {
+	URLs             []string `mapstructure:"urls"`
+	FailureThreshold int      `mapstructure:"failure_threshold"`
 }
 
 type CacheConfig struct {
@@ -189,6 +195,19 @@ func initializeConfig(cmd *cobra.Command) error {
 		return fmt.Errorf("cannot unmarshall config: %v", err)
 	}
 
+	config.App.ProxyURL, err = core.NormalizeProxyURL(config.App.ProxyURL)
+	if err != nil {
+		return fmt.Errorf("invalid app.proxy: %w", err)
+	}
+
+	config.ProxyPool.URLs, err = core.NormalizeProxyURLs(config.ProxyPool.URLs)
+	if err != nil {
+		return fmt.Errorf("invalid proxy_pool.urls: %w", err)
+	}
+	if config.ProxyPool.FailureThreshold <= 0 {
+		config.ProxyPool.FailureThreshold = core.DefaultProxyPoolFailureThreshold
+	}
+
 	if config.App.IsDebug {
 		logrus.Debug("Viper config:")
 		v.Debug()
@@ -197,6 +216,8 @@ func initializeConfig(cmd *cobra.Command) error {
 }
 
 func setConfigDefaults(v *viper.Viper) {
+	v.SetDefault("proxy_pool.urls", []string{})
+	v.SetDefault("proxy_pool.failure_threshold", core.DefaultProxyPoolFailureThreshold)
 	v.SetDefault("cache.ttl_seconds", 300)
 	v.SetDefault("cache.max_size", 1000)
 	// Keep stage2 defaults stable even when config file is absent.
@@ -225,7 +246,7 @@ func init() {
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsRawRequests, "raw", "r", false, "Disable browser usage, use HTTP requests")
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsLeaveHead, "leave", "", false, "Leave browser and tabs opened after search is made")
 	RootCmd.PersistentFlags().StringVarP(&config.Config2Capcha.ApiKey, "2captcha_key", "", "", "2 captcha api key")
-	RootCmd.PersistentFlags().StringVarP(&config.App.ProxyURL, "proxy", "x", "", "HTTP or Socks5 proxy URL (e.g. http://user:pass@127.0.0.1:8080)")
+	RootCmd.PersistentFlags().StringVarP(&config.App.ProxyURL, "proxy", "x", "", "HTTP/HTTPS/SOCKS5/SOCKS5H proxy URL (e.g. socks5h://127.0.0.1:1080)")
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsStealth, "stealth", "s", false, "Use stealth browser plugin")
 	RootCmd.PersistentFlags().BoolVarP(&config.App.Insecure, "insecure", "k", false, "Allow insecure TLS connections")
 	RootCmd.PersistentFlags().IntVar(&config.Cache.TTLSeconds, "cache_ttl", 300, "Cache TTL in seconds (0 to disable)")

@@ -402,6 +402,164 @@ func TestResilienceStatsContainsRetryInWhenCircuitOpen(t *testing.T) {
 	}
 }
 
+func TestResilienceStatsReportProxyModes(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+
+	tests := []struct {
+		name         string
+		proxyCfg     ProxyConfig
+		wantMode     string
+		wantRuntime  string
+		wantSource   string
+		wantRotation bool
+		wantPool     bool
+	}{
+		{
+			name:         "disabled raw",
+			proxyCfg:     ProxyConfig{Runtime: ProxyRuntimeRaw},
+			wantMode:     ProxyModeDisabled,
+			wantRuntime:  ProxyRuntimeRaw,
+			wantSource:   "none",
+			wantRotation: false,
+			wantPool:     false,
+		},
+		{
+			name: "static raw",
+			proxyCfg: ProxyConfig{
+				Runtime:   ProxyRuntimeRaw,
+				StaticURL: "socks5h://127.0.0.1:1080",
+			},
+			wantMode:     ProxyModeStatic,
+			wantRuntime:  ProxyRuntimeRaw,
+			wantSource:   "app.proxy",
+			wantRotation: false,
+			wantPool:     false,
+		},
+		{
+			name: "pool raw",
+			proxyCfg: ProxyConfig{
+				Runtime:              ProxyRuntimeRaw,
+				PoolURLs:             []string{"http://proxy1:8080", "http://proxy2:8080"},
+				PoolFailureThreshold: 2,
+			},
+			wantMode:     ProxyModePool,
+			wantRuntime:  ProxyRuntimeRaw,
+			wantSource:   "proxy_pool.urls",
+			wantRotation: true,
+			wantPool:     true,
+		},
+		{
+			name: "pool browser inactive",
+			proxyCfg: ProxyConfig{
+				Runtime:              ProxyRuntimeBrowser,
+				PoolURLs:             []string{"http://proxy1:8080", "http://proxy2:8080"},
+				PoolFailureThreshold: 2,
+			},
+			wantMode:     ProxyModePool,
+			wantRuntime:  ProxyRuntimeBrowser,
+			wantSource:   "proxy_pool.urls",
+			wantRotation: false,
+			wantPool:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := DefaultServerOptions()
+			opts.Resilience.Proxy = tt.proxyCfg
+
+			srv := NewServerWithOptions("127.0.0.1", 7090, opts, engine)
+			resp := request(t, srv, "/resilience/stats")
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("expected 200, got %d", resp.StatusCode)
+			}
+
+			var stats map[string]interface{}
+			if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+				t.Fatalf("decode stats response: %v", err)
+			}
+
+			proxy, ok := stats["proxy"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("expected proxy stats object, got %#v", stats["proxy"])
+			}
+			if got := proxy["mode"]; got != tt.wantMode {
+				t.Fatalf("expected mode %q, got %#v", tt.wantMode, got)
+			}
+			if got := proxy["runtime"]; got != tt.wantRuntime {
+				t.Fatalf("expected runtime %q, got %#v", tt.wantRuntime, got)
+			}
+			if got := proxy["source"]; got != tt.wantSource {
+				t.Fatalf("expected source %q, got %#v", tt.wantSource, got)
+			}
+			if got := proxy["rotation_active"]; got != tt.wantRotation {
+				t.Fatalf("expected rotation_active=%v, got %#v", tt.wantRotation, got)
+			}
+
+			_, hasPool := proxy["pool"]
+			if hasPool != tt.wantPool {
+				t.Fatalf("expected pool presence=%v, got %v", tt.wantPool, hasPool)
+			}
+		})
+	}
+}
+
+func TestResilientRawProxyPoolRotatesOnRetry(t *testing.T) {
+	var attemptedProxies []string
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(q Query) ([]SearchResult, error) {
+			attemptedProxies = append(attemptedProxies, q.ProxyURL)
+			if q.ProxyURL == "http://bad-proxy:8080" {
+				return nil, errors.New("proxy failed")
+			}
+			return []SearchResult{{Rank: 1, URL: "https://example.com/success", Title: "ok"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 1
+	opts.Resilience.Retry.InitialBackoff = 0
+	opts.Resilience.Retry.MaxBackoff = 0
+	opts.Resilience.Retry.BackoffFactor = 1
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime:              ProxyRuntimeRaw,
+		PoolURLs:             []string{"http://bad-proxy:8080", "http://good-proxy:8080"},
+		PoolFailureThreshold: 1,
+	}
+
+	srv := NewServerWithOptions("127.0.0.1", 7091, opts, engine)
+	resp := request(t, srv, "/google/search?text=golang")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected search to recover through rotated proxy, got %d", resp.StatusCode)
+	}
+	if len(attemptedProxies) != 2 {
+		t.Fatalf("expected 2 attempts, got %d", len(attemptedProxies))
+	}
+	if attemptedProxies[0] != "http://bad-proxy:8080" || attemptedProxies[1] != "http://good-proxy:8080" {
+		t.Fatalf("unexpected proxy rotation order: %#v", attemptedProxies)
+	}
+
+	statsResp := request(t, srv, "/resilience/stats")
+	var stats map[string]interface{}
+	if err := json.NewDecoder(statsResp.Body).Decode(&stats); err != nil {
+		t.Fatalf("decode stats response: %v", err)
+	}
+	proxy := stats["proxy"].(map[string]interface{})
+	if got := proxy["mode"]; got != ProxyModePool {
+		t.Fatalf("expected pool mode, got %#v", got)
+	}
+
+	pool := proxy["pool"].(map[string]interface{})
+	if got := pool["active"].(float64); got != 1 {
+		t.Fatalf("expected 1 active proxy, got %v", got)
+	}
+	if got := pool["disabled"].(float64); got != 1 {
+		t.Fatalf("expected 1 disabled proxy, got %v", got)
+	}
+}
+
 func TestRetryAppliesRateLimiterOnEachAttempt(t *testing.T) {
 	engine := &engineMock{
 		name:        "google",

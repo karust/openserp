@@ -13,26 +13,53 @@ type ResilientSearcher struct {
 	engines   []SearchEngine
 	cbManager *CircuitBreakerManager
 	retryCfg  RetryConfig
+	proxyCfg  ProxyConfig
+	proxyPool *ProxyPool
 }
 
 type ResilientConfig struct {
 	Retry          RetryConfig
 	CircuitBreaker CircuitBreakerConfig
+	Proxy          ProxyConfig
 }
 
 func DefaultResilientConfig() ResilientConfig {
 	return ResilientConfig{
 		Retry:          DefaultRetryConfig(),
 		CircuitBreaker: DefaultCircuitBreakerConfig(),
+		Proxy:          DefaultProxyConfig(),
 	}
 }
 
 func NewResilientSearcher(engines []SearchEngine, cfg ResilientConfig) *ResilientSearcher {
-	return &ResilientSearcher{
+	proxyCfg, err := NormalizeProxyConfig(cfg.Proxy)
+	if err != nil {
+		logrus.Errorf("Invalid proxy config, disabling proxy support: %v", err)
+		proxyCfg = DefaultProxyConfig()
+	}
+
+	rs := &ResilientSearcher{
 		engines:   engines,
 		cbManager: NewCircuitBreakerManager(cfg.CircuitBreaker),
 		retryCfg:  cfg.Retry,
+		proxyCfg:  proxyCfg,
 	}
+
+	if len(proxyCfg.PoolURLs) > 0 {
+		pool, err := NewProxyPool(proxyCfg.PoolURLs, proxyCfg.PoolFailureThreshold)
+		if err != nil {
+			logrus.Errorf("Invalid proxy pool config, disabling proxy rotation: %v", err)
+		} else {
+			rs.proxyPool = pool
+			if proxyCfg.Runtime == ProxyRuntimeBrowser {
+				logrus.Warn("Proxy pool configured in browser runtime; pool remains observability-only until browser proxy rotation is implemented")
+			} else {
+				logrus.Infof("Proxy rotation enabled with %d proxies", pool.Size())
+			}
+		}
+	}
+
+	return rs
 }
 
 // SearchPrimary keeps dedicated endpoints engine-pure (no fallback).
@@ -111,7 +138,11 @@ func (rs *ResilientSearcher) searchWithProtection(engine SearchEngine, q Query) 
 				return nil, err
 			}
 		}
-		return engine.Search(q)
+
+		attemptQuery, attemptProxy, reportToPool := rs.prepareAttemptQuery(q)
+		results, err := engine.Search(attemptQuery)
+		rs.reportProxyAttempt(attemptProxy, reportToPool, err)
+		return results, err
 	})
 
 	if result.Err != nil {
@@ -136,7 +167,11 @@ func (rs *ResilientSearcher) searchImageWithProtection(engine SearchEngine, q Qu
 				return nil, err
 			}
 		}
-		return engine.SearchImage(q)
+
+		attemptQuery, attemptProxy, reportToPool := rs.prepareAttemptQuery(q)
+		results, err := engine.SearchImage(attemptQuery)
+		rs.reportProxyAttempt(attemptProxy, reportToPool, err)
+		return results, err
 	})
 
 	if result.Err != nil {
@@ -227,6 +262,90 @@ func (rs *ResilientSearcher) SearchAllImageParallel(q Query, engines []SearchEng
 
 func (rs *ResilientSearcher) GetCircuitBreakerStats() []map[string]interface{} {
 	return rs.cbManager.AllStats()
+}
+
+func (rs *ResilientSearcher) GetProxyPool() *ProxyPool {
+	return rs.proxyPool
+}
+
+func (rs *ResilientSearcher) GetProxyStats() map[string]interface{} {
+	mode, source, rotationActive := rs.proxyMode()
+
+	stats := map[string]interface{}{
+		"mode":            mode,
+		"runtime":         rs.proxyCfg.Runtime,
+		"source":          source,
+		"rotation_active": rotationActive,
+	}
+
+	if rs.proxyPool != nil {
+		poolStats := rs.proxyPool.Stats()
+		stats["pool"] = map[string]interface{}{
+			"failure_threshold": poolStats.FailureThreshold,
+			"total":             poolStats.Total,
+			"active":            poolStats.Active,
+			"disabled":          poolStats.Disabled,
+		}
+	}
+
+	return stats
+}
+
+func (rs *ResilientSearcher) prepareAttemptQuery(q Query) (Query, string, bool) {
+	attemptQuery := q
+	if rs.proxyCfg.Runtime != ProxyRuntimeRaw {
+		return attemptQuery, "", false
+	}
+
+	if rs.proxyPool != nil {
+		proxyURL := rs.proxyPool.Next()
+		if proxyURL != "" {
+			attemptQuery.ProxyURL = proxyURL
+			return attemptQuery, proxyURL, true
+		}
+	}
+
+	attemptQuery.ProxyURL = rs.proxyCfg.StaticURL
+	return attemptQuery, "", false
+}
+
+func (rs *ResilientSearcher) reportProxyAttempt(proxyURL string, reportToPool bool, err error) {
+	if !reportToPool || rs.proxyPool == nil || proxyURL == "" {
+		return
+	}
+
+	if err != nil {
+		rs.proxyPool.ReportFailure(proxyURL)
+		return
+	}
+
+	rs.proxyPool.ReportSuccess(proxyURL)
+}
+
+func (rs *ResilientSearcher) proxyMode() (string, string, bool) {
+	hasStatic := rs.proxyCfg.StaticURL != ""
+	hasPool := rs.proxyPool != nil
+
+	switch rs.proxyCfg.Runtime {
+	case ProxyRuntimeRaw:
+		switch {
+		case hasPool:
+			return ProxyModePool, "proxy_pool.urls", true
+		case hasStatic:
+			return ProxyModeStatic, "app.proxy", false
+		default:
+			return ProxyModeDisabled, "none", false
+		}
+	default:
+		switch {
+		case hasStatic:
+			return ProxyModeStatic, "app.proxy", false
+		case hasPool:
+			return ProxyModePool, "proxy_pool.urls", false
+		default:
+			return ProxyModeDisabled, "none", false
+		}
+	}
 }
 
 var ErrAllEnginesFailed = fmt.Errorf("all search engines failed")

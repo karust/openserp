@@ -1,65 +1,20 @@
 package baidu
 
 import (
-	"context"
-	"crypto/tls"
 	"fmt"
-	"net"
 	"net/http"
-	"net/url"
 	"strings"
-	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/corpix/uarand"
 	"github.com/karust/openserp/core"
 	"github.com/sirupsen/logrus"
-
-	utls "github.com/refraction-networking/utls"
 )
 
 func baiduRequest(searchURL string, query core.Query) (*http.Response, error) {
-	// Create HTTP transport with proxy
-	transport := &http.Transport{}
-	if query.ProxyURL != "" {
-		proxyUrl, err := url.Parse(query.ProxyURL)
-		if err != nil {
-			return nil, err
-		}
-		transport.Proxy = http.ProxyURL(proxyUrl)
-	}
-
-	// Set insecure TLS
-	if query.Insecure {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	}
-
-	transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		dialer := &net.Dialer{}
-		rawConn, err := dialer.DialContext(ctx, network, addr)
-		if err != nil {
-			return nil, err
-		}
-
-		hostname := strings.Split(addr, ":")[0]
-		config := &utls.Config{
-			ServerName:         hostname,
-			InsecureSkipVerify: query.Insecure,
-		}
-
-		uconn := utls.UClient(rawConn, config, utls.HelloChrome_Auto)
-
-		if err := uconn.Handshake(); err != nil {
-			rawConn.Close()
-			return nil, err
-		}
-
-		return uconn, nil
-	}
-
-	baseClient := &http.Client{
-		Transport: transport,
-		Timeout:   time.Second * 10,
+	baseClient, err := core.NewRawHTTPClient(query)
+	if err != nil {
+		return nil, err
 	}
 
 	req, err := http.NewRequest("GET", searchURL, nil)

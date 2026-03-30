@@ -27,3 +27,4 @@ core/test/
 .aider*
 .gocache/
 openserp
+.gomodcache/

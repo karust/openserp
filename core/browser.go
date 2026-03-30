@@ -68,6 +68,12 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 
 	// Configure proxy if specified
 	if opts.ProxyURL != "" {
+		normalizedProxyURL, err := NormalizeProxyURL(opts.ProxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid proxy URL: %v", err)
+		}
+		opts.ProxyURL = normalizedProxyURL
+
 		proxyUrl, err := url.Parse(opts.ProxyURL)
 		if err != nil {
 			return nil, fmt.Errorf("invalid proxy URL: %v", err)
