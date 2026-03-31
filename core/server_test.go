@@ -216,6 +216,34 @@ func TestDedicatedEndpointFallbackBypassesCache(t *testing.T) {
 	}
 }
 
+func TestDedicatedEndpointFallbackDoesNotBypassProxyPolicy(t *testing.T) {
+	primary := &engineMock{name: "google", initialized: true}
+	fallback := &engineMock{name: "yandex", initialized: true}
+
+	opts := DefaultServerOptions()
+	opts.AllowEndpointFallback = true
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			Entries: []ProxyEntryConfig{},
+		},
+		EnginePolicies: map[string]string{"google": "missing"},
+	}
+
+	srv := NewServerWithOptions("127.0.0.1", 7103, opts, primary, fallback)
+	resp := request(t, srv, "/google/search?text=golang")
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected fail-closed 503 when primary proxy policy cannot be satisfied, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Fallback-Engine"); got != "" {
+		t.Fatalf("unexpected fallback header when proxy policy fails closed: %q", got)
+	}
+	if fallback.searchCalls != 0 {
+		t.Fatalf("fallback engine should not be called when proxy policy fails closed, got %d calls", fallback.searchCalls)
+	}
+}
+
 func TestMegaSearchCachesWholeQueryWithEngineOrderNormalization(t *testing.T) {
 	google := &engineMock{
 		name:        "google",
@@ -374,7 +402,7 @@ func TestResilienceStatsContainsRetryInWhenCircuitOpen(t *testing.T) {
 	srv := NewServerWithOptions("127.0.0.1", 7075, opts, primary)
 
 	_ = request(t, srv, "/google/search?text=golang")
-	statsResp := request(t, srv, "/resilience/stats")
+	statsResp := request(t, srv, "/stats/cb")
 	if statsResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected stats endpoint to return 200, got %d", statsResp.StatusCode)
 	}
@@ -402,105 +430,87 @@ func TestResilienceStatsContainsRetryInWhenCircuitOpen(t *testing.T) {
 	}
 }
 
-func TestResilienceStatsReportProxyModes(t *testing.T) {
+func TestStatsEndpointsContract(t *testing.T) {
 	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	srv := NewServerWithOptions("127.0.0.1", 7090, opts, engine)
 
-	tests := []struct {
-		name         string
-		proxyCfg     ProxyConfig
-		wantMode     string
-		wantRuntime  string
-		wantSource   string
-		wantRotation bool
-		wantPool     bool
-	}{
-		{
-			name:         "disabled raw",
-			proxyCfg:     ProxyConfig{Runtime: ProxyRuntimeRaw},
-			wantMode:     ProxyModeDisabled,
-			wantRuntime:  ProxyRuntimeRaw,
-			wantSource:   "none",
-			wantRotation: false,
-			wantPool:     false,
-		},
-		{
-			name: "static raw",
-			proxyCfg: ProxyConfig{
-				Runtime:   ProxyRuntimeRaw,
-				StaticURL: "socks5h://127.0.0.1:1080",
-			},
-			wantMode:     ProxyModeStatic,
-			wantRuntime:  ProxyRuntimeRaw,
-			wantSource:   "app.proxy",
-			wantRotation: false,
-			wantPool:     false,
-		},
-		{
-			name: "pool raw",
-			proxyCfg: ProxyConfig{
-				Runtime:              ProxyRuntimeRaw,
-				PoolURLs:             []string{"http://proxy1:8080", "http://proxy2:8080"},
-				PoolFailureThreshold: 2,
-			},
-			wantMode:     ProxyModePool,
-			wantRuntime:  ProxyRuntimeRaw,
-			wantSource:   "proxy_pool.urls",
-			wantRotation: true,
-			wantPool:     true,
-		},
-		{
-			name: "pool browser inactive",
-			proxyCfg: ProxyConfig{
-				Runtime:              ProxyRuntimeBrowser,
-				PoolURLs:             []string{"http://proxy1:8080", "http://proxy2:8080"},
-				PoolFailureThreshold: 2,
-			},
-			wantMode:     ProxyModePool,
-			wantRuntime:  ProxyRuntimeBrowser,
-			wantSource:   "proxy_pool.urls",
-			wantRotation: false,
-			wantPool:     true,
-		},
+	for _, path := range []string{"/stats", "/stats/cache", "/stats/proxy", "/stats/cb"} {
+		resp := request(t, srv, path)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected %s to return 200, got %d", path, resp.StatusCode)
+		}
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			opts := DefaultServerOptions()
-			opts.Resilience.Proxy = tt.proxyCfg
+	for _, oldPath := range []string{"/cache/stats", "/resilience/stats"} {
+		resp := request(t, srv, oldPath)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected %s to return 404, got %d", oldPath, resp.StatusCode)
+		}
+	}
+}
 
-			srv := NewServerWithOptions("127.0.0.1", 7090, opts, engine)
-			resp := request(t, srv, "/resilience/stats")
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("expected 200, got %d", resp.StatusCode)
-			}
+func TestStatsProxyV2Payload(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			Entries: []ProxyEntryConfig{
+				{URL: "http://user:pass@proxy1:8080", Tags: []string{"default", "us"}},
+				{URL: "http://proxy2:8080", Tags: []string{"default"}},
+			},
+			Health: ProxiesHealthConfig{FailureThreshold: 1},
+		},
+		EnginePolicies: map[string]string{"google": "default"},
+	}
 
-			var stats map[string]interface{}
-			if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
-				t.Fatalf("decode stats response: %v", err)
-			}
+	srv := NewServerWithOptions("127.0.0.1", 7092, opts, engine)
+	resp := request(t, srv, "/stats/proxy")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected /stats/proxy to return 200, got %d", resp.StatusCode)
+	}
 
-			proxy, ok := stats["proxy"].(map[string]interface{})
-			if !ok {
-				t.Fatalf("expected proxy stats object, got %#v", stats["proxy"])
-			}
-			if got := proxy["mode"]; got != tt.wantMode {
-				t.Fatalf("expected mode %q, got %#v", tt.wantMode, got)
-			}
-			if got := proxy["runtime"]; got != tt.wantRuntime {
-				t.Fatalf("expected runtime %q, got %#v", tt.wantRuntime, got)
-			}
-			if got := proxy["source"]; got != tt.wantSource {
-				t.Fatalf("expected source %q, got %#v", tt.wantSource, got)
-			}
-			if got := proxy["rotation_active"]; got != tt.wantRotation {
-				t.Fatalf("expected rotation_active=%v, got %#v", tt.wantRotation, got)
-			}
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode /stats/proxy response: %v", err)
+	}
 
-			_, hasPool := proxy["pool"]
-			if hasPool != tt.wantPool {
-				t.Fatalf("expected pool presence=%v, got %v", tt.wantPool, hasPool)
-			}
-		})
+	if got := payload["configured_count"].(float64); got != 2 {
+		t.Fatalf("expected configured_count=2, got %v", got)
+	}
+	if got := payload["healthy_count"].(float64); got != 2 {
+		t.Fatalf("expected healthy_count=2, got %v", got)
+	}
+	if got := payload["unhealthy_count"].(float64); got != 0 {
+		t.Fatalf("expected unhealthy_count=0, got %v", got)
+	}
+
+	if _, exists := payload["defaults"]; exists {
+		t.Fatalf("defaults must not be exposed in proxy stats payload")
+	}
+
+	entries := payload["entries"].([]interface{})
+	first := entries[0].(map[string]interface{})
+	if got := first["proxy"].(string); got == "http://user:pass@proxy1:8080" {
+		t.Fatalf("expected masked proxy, got %q", got)
+	}
+	if _, exists := payload["runtime"]; exists {
+		t.Fatalf("runtime must not be exposed in V2 stats payload")
+	}
+	if _, exists := payload["source"]; exists {
+		t.Fatalf("source must not be exposed in V2 stats payload")
+	}
+	engines := payload["engines"].(map[string]interface{})
+	google := engines["google"].(map[string]interface{})
+	if _, exists := google["mode"]; exists {
+		t.Fatalf("engine mode must not be exposed in proxy stats payload")
+	}
+	if got := google["tag"]; got != "default" {
+		t.Fatalf("expected engine tag default, got %#v", got)
+	}
+	if got := google["selected_proxy"]; got != "pooled" {
+		t.Fatalf("expected pooled engine proxy stats, got %#v", got)
 	}
 }
 
@@ -524,9 +534,15 @@ func TestResilientRawProxyPoolRotatesOnRetry(t *testing.T) {
 	opts.Resilience.Retry.MaxBackoff = 0
 	opts.Resilience.Retry.BackoffFactor = 1
 	opts.Resilience.Proxy = ProxyConfig{
-		Runtime:              ProxyRuntimeRaw,
-		PoolURLs:             []string{"http://bad-proxy:8080", "http://good-proxy:8080"},
-		PoolFailureThreshold: 1,
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			Entries: []ProxyEntryConfig{
+				{URL: "http://bad-proxy:8080", Tags: []string{"default"}},
+				{URL: "http://good-proxy:8080", Tags: []string{"default"}},
+			},
+			Health: ProxiesHealthConfig{FailureThreshold: 1},
+		},
+		EnginePolicies: map[string]string{"google": "default"},
 	}
 
 	srv := NewServerWithOptions("127.0.0.1", 7091, opts, engine)
@@ -541,22 +557,217 @@ func TestResilientRawProxyPoolRotatesOnRetry(t *testing.T) {
 		t.Fatalf("unexpected proxy rotation order: %#v", attemptedProxies)
 	}
 
-	statsResp := request(t, srv, "/resilience/stats")
+	statsResp := request(t, srv, "/stats/proxy")
 	var stats map[string]interface{}
 	if err := json.NewDecoder(statsResp.Body).Decode(&stats); err != nil {
 		t.Fatalf("decode stats response: %v", err)
 	}
-	proxy := stats["proxy"].(map[string]interface{})
-	if got := proxy["mode"]; got != ProxyModePool {
-		t.Fatalf("expected pool mode, got %#v", got)
+	if got := stats["healthy_count"].(float64); got != 1 {
+		t.Fatalf("expected healthy_count=1, got %v", got)
+	}
+	if got := stats["unhealthy_count"].(float64); got != 1 {
+		t.Fatalf("expected unhealthy_count=1, got %v", got)
+	}
+}
+
+func TestProxyHeadersDirectAndTagPool(t *testing.T) {
+	directEngine := &engineMock{name: "google", initialized: true}
+	directSrv := NewServerWithOptions("127.0.0.1", 7093, DefaultServerOptions(), directEngine)
+
+	directResp := request(t, directSrv, "/google/search?text=golang")
+	if directResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected direct request to succeed, got %d", directResp.StatusCode)
+	}
+	if got := directResp.Header.Get("X-Proxy-Mode"); got != ProxyModeOff {
+		t.Fatalf("expected X-Proxy-Mode=%s, got %q", ProxyModeOff, got)
+	}
+	if got := directResp.Header.Get("X-Proxy-Tag"); got != "" {
+		t.Fatalf("expected empty X-Proxy-Tag in off mode, got %q", got)
+	}
+	if got := directResp.Header.Get("X-Proxy-Used"); got != "direct" {
+		t.Fatalf("expected X-Proxy-Used=direct, got %q", got)
 	}
 
-	pool := proxy["pool"].(map[string]interface{})
-	if got := pool["active"].(float64); got != 1 {
-		t.Fatalf("expected 1 active proxy, got %v", got)
+	proxiedEngine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			Entries: []ProxyEntryConfig{
+				{URL: "http://proxy1:8080", Tags: []string{"default"}},
+			},
+		},
+		EnginePolicies: map[string]string{"google": "default"},
 	}
-	if got := pool["disabled"].(float64); got != 1 {
-		t.Fatalf("expected 1 disabled proxy, got %v", got)
+	proxiedSrv := NewServerWithOptions("127.0.0.1", 7094, opts, proxiedEngine)
+	proxiedResp := request(t, proxiedSrv, "/google/search?text=golang")
+	if proxiedResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected proxied request to succeed, got %d", proxiedResp.StatusCode)
+	}
+	if got := proxiedResp.Header.Get("X-Proxy-Mode"); got != ProxyModeTagPool {
+		t.Fatalf("expected X-Proxy-Mode=%s, got %q", ProxyModeTagPool, got)
+	}
+	if got := proxiedResp.Header.Get("X-Proxy-Tag"); got != "default" {
+		t.Fatalf("expected X-Proxy-Tag=default, got %q", got)
+	}
+	if got := proxiedResp.Header.Get("X-Proxy-Used"); got != "http://proxy1:8080" {
+		t.Fatalf("expected masked selected proxy, got %q", got)
+	}
+}
+
+func TestGlobalProxyForcesAllEnginesRaw(t *testing.T) {
+	var googleProxy string
+	var yandexProxy string
+
+	googleEngine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(q Query) ([]SearchResult, error) {
+			googleProxy = q.ProxyURL
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+	yandexEngine := &engineMock{
+		name:        "yandex",
+		initialized: true,
+		searchFn: func(q Query) ([]SearchResult, error) {
+			yandexProxy = q.ProxyURL
+			return []SearchResult{{Rank: 1, URL: "https://example.com/yandex", Title: "yandex"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			Global: "http://global-proxy:8080",
+		},
+		EnginePolicies: map[string]string{
+			"google": "us",
+		},
+	}
+
+	srv := NewServerWithOptions("127.0.0.1", 7097, opts, googleEngine, yandexEngine)
+	if resp := request(t, srv, "/google/search?text=golang"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected google request to succeed, got %d", resp.StatusCode)
+	}
+	if resp := request(t, srv, "/yandex/search?text=golang"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected yandex request to succeed, got %d", resp.StatusCode)
+	}
+
+	if googleProxy != "http://global-proxy:8080" {
+		t.Fatalf("expected google to use global proxy, got %q", googleProxy)
+	}
+	if yandexProxy != "http://global-proxy:8080" {
+		t.Fatalf("expected yandex to use global proxy, got %q", yandexProxy)
+	}
+}
+
+func TestBrowserProxyPoolRotatesPerRequest(t *testing.T) {
+	var attemptedProxies []string
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(q Query) ([]SearchResult, error) {
+			attemptedProxies = append(attemptedProxies, q.ProxyURL)
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeBrowser,
+		Proxies: ProxiesConfig{
+			Entries: []ProxyEntryConfig{
+				{URL: "http://proxy1:8080", Tags: []string{"default"}},
+				{URL: "http://proxy2:8080", Tags: []string{"default"}},
+			},
+		},
+		EnginePolicies: map[string]string{"google": "default"},
+	}
+
+	srv := NewServerWithOptions("127.0.0.1", 7098, opts, engine)
+	if resp := request(t, srv, "/google/search?text=golang"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected first browser-style request to succeed, got %d", resp.StatusCode)
+	}
+	if resp := request(t, srv, "/google/search?text=golang+2"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected second browser-style request to succeed, got %d", resp.StatusCode)
+	}
+
+	if len(attemptedProxies) != 2 {
+		t.Fatalf("expected 2 browser-style proxy attempts, got %d", len(attemptedProxies))
+	}
+	if attemptedProxies[0] != "http://proxy1:8080" || attemptedProxies[1] != "http://proxy2:8080" {
+		t.Fatalf("expected browser proxy rotation order, got %#v", attemptedProxies)
+	}
+}
+
+func TestProxyFailClosedWhenNoHealthyProxy(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			Entries: []ProxyEntryConfig{},
+		},
+		EnginePolicies: map[string]string{"google": "missing"},
+	}
+
+	srv := NewServerWithOptions("127.0.0.1", 7095, opts, engine)
+	resp := request(t, srv, "/google/search?text=golang")
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected fail-closed 503 when no healthy proxy exists, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Proxy-Mode"); got != ProxyModeTagPool {
+		t.Fatalf("expected X-Proxy-Mode=%s on fail-closed response, got %q", ProxyModeTagPool, got)
+	}
+}
+
+func TestEngineOverrideProxyBehaviorRaw(t *testing.T) {
+	var googleProxy string
+	var yandexProxy string
+
+	googleEngine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(q Query) ([]SearchResult, error) {
+			googleProxy = q.ProxyURL
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+	yandexEngine := &engineMock{
+		name:        "yandex",
+		initialized: true,
+		searchFn: func(q Query) ([]SearchResult, error) {
+			yandexProxy = q.ProxyURL
+			return []SearchResult{{Rank: 1, URL: "https://example.com/yandex", Title: "yandex"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			Entries: []ProxyEntryConfig{
+				{URL: "http://proxy-us:8080", Tags: []string{"us"}},
+			},
+		},
+		EnginePolicies: map[string]string{"google": "us"},
+	}
+
+	srv := NewServerWithOptions("127.0.0.1", 7096, opts, googleEngine, yandexEngine)
+	if resp := request(t, srv, "/google/search?text=golang"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected google request to succeed, got %d", resp.StatusCode)
+	}
+	if resp := request(t, srv, "/yandex/search?text=golang"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected yandex request to succeed, got %d", resp.StatusCode)
+	}
+
+	if googleProxy == "" {
+		t.Fatalf("expected proxied google request, got empty proxy")
+	}
+	if yandexProxy != "" {
+		t.Fatalf("expected direct yandex request, got proxy %q", yandexProxy)
 	}
 }
 
@@ -600,7 +811,7 @@ func TestCacheStatsDisabled(t *testing.T) {
 	opts.CacheMaxSize = 0
 	srv := NewServerWithOptions("127.0.0.1", 7079, opts, engine)
 
-	resp := request(t, srv, "/cache/stats")
+	resp := request(t, srv, "/stats/cache")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected disabled cache stats to return 200, got %d", resp.StatusCode)
 	}
@@ -638,7 +849,7 @@ func TestCacheStatsReflectActivity(t *testing.T) {
 	_ = request(t, srv, "/google/search?text=golang")
 	_ = request(t, srv, "/google/search?text=fallback")
 
-	resp := request(t, srv, "/cache/stats")
+	resp := request(t, srv, "/stats/cache")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected cache stats endpoint to return 200, got %d", resp.StatusCode)
 	}

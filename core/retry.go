@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -33,7 +34,7 @@ type RetryResult struct {
 }
 
 // RetryableSearch executes searchFn with exponential backoff retries.
-// CAPTCHA errors are not retried.
+// CAPTCHA and proxy-unavailable errors are not retried.
 func RetryableSearch(cfg RetryConfig, engineName string, searchFn func() ([]SearchResult, error)) RetryResult {
 	if cfg.BackoffFactor <= 0 {
 		cfg.BackoffFactor = 2.0
@@ -60,8 +61,16 @@ func RetryableSearch(cfg RetryConfig, engineName string, searchFn func() ([]Sear
 		}
 
 		lastErr = err
-		if err == ErrCaptcha {
+		if errors.Is(err, ErrCaptcha) {
 			logrus.Warnf("[%s] CAPTCHA detected, skipping retries", engineName)
+			return RetryResult{
+				Err:      err,
+				Attempts: attempt + 1,
+				Engine:   engineName,
+			}
+		}
+		if errors.Is(err, ErrProxyUnavailable) {
+			logrus.Warnf("[%s] Proxy unavailable, skipping retries", engineName)
 			return RetryResult{
 				Err:      err,
 				Attempts: attempt + 1,

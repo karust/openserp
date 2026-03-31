@@ -1,6 +1,8 @@
 package core
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -79,17 +81,16 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 			return nil, fmt.Errorf("invalid proxy URL: %v", err)
 		}
 
-		// Make sure the proxy URL includes the scheme when passed to launcher
-		// This ensures proper handling of SOCKS5 proxies
-		proxyStr := proxyUrl.String()
-		logrus.Debugf("Setting up proxy: %s", proxyStr)
+		// Chrome's proxy-server flag must not contain credentials.
+		// Auth (if needed) is handled separately via DevTools auth callbacks.
+		proxyStr := proxyURLForBrowserLaunch(proxyUrl)
+		logrus.Debugf("Setting up proxy: %s", MaskProxyURL(proxyStr))
 		l = l.Proxy(proxyStr)
 
 		// Check if proxy has auth credentials
 		if proxyUrl.User != nil {
 			username := proxyUrl.User.Username()
-			logrus.Debugf("Using proxy authentication: %s:****", username)
-			// We'll handle auth in the Navigate method
+			logrus.Debugf("Proxy credentials configured for %s proxy: %s:****", proxyUrl.Scheme, username)
 		}
 	}
 
@@ -102,6 +103,23 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	}
 
 	return &b, err
+}
+
+func proxyURLForBrowserLaunch(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	clone := *u
+	// Chrome expects socks5 scheme in --proxy-server; socks5h is not accepted.
+	if clone.Scheme == "socks5h" {
+		clone.Scheme = "socks5"
+	}
+	clone.User = nil
+	clone.Path = ""
+	clone.RawPath = ""
+	clone.RawQuery = ""
+	clone.Fragment = ""
+	return clone.String()
 }
 
 func validateBrowserBinaryPath(path string) error {
@@ -146,9 +164,14 @@ func (b *Browser) IsInitialized() bool {
 func (b *Browser) Navigate(URL string) (*rod.Page, error) {
 	logrus.Debug("Navigate to: ", URL)
 
-	b.browser = rod.New().ControlURL(b.browserAddr)
-	b.browser.MustConnect()
-	b.browser.SetCookies(nil)
+	browser := rod.New().ControlURL(b.browserAddr).Timeout(b.Timeout)
+	if err := browser.Connect(); err != nil {
+		return nil, fmt.Errorf("browser connect failed: %w", err)
+	}
+	b.browser = browser
+	if err := b.browser.SetCookies(nil); err != nil {
+		return nil, fmt.Errorf("browser cookie reset failed: %w", err)
+	}
 
 	// Handle proxy authentication before any navigations
 	if b.ProxyURL != "" {
@@ -156,39 +179,66 @@ func (b *Browser) Navigate(URL string) (*rod.Page, error) {
 
 		// Always ignore certificate errors when using proxies
 		// This fixes the ERR_CERT_AUTHORITY_INVALID error for SOCKS5 proxies
-		b.browser.MustIgnoreCertErrors(true)
+		if err := b.browser.IgnoreCertErrors(true); err != nil {
+			return nil, fmt.Errorf("configure proxy cert handling failed: %w", err)
+		}
 
-		if proxyUrl.User != nil {
+		if proxyUrl.User != nil && (proxyUrl.Scheme == "http" || proxyUrl.Scheme == "https") {
 			username := proxyUrl.User.Username()
 			password, _ := proxyUrl.User.Password()
 			// Launch auth handler before any navigation occurs
-			go b.browser.MustHandleAuth(username, password)()
+			go func() {
+				if err := b.browser.HandleAuth(username, password)(); err != nil {
+					logrus.Debugf("Proxy auth handler stopped: %v", err)
+				}
+			}()
+		} else if proxyUrl.User != nil && (proxyUrl.Scheme == "socks5" || proxyUrl.Scheme == "socks5h") {
+			// This callback handles HTTP proxy auth challenges; it doesn't authenticate SOCKS proxies.
+			logrus.Debug("SOCKS proxy credentials are not handled by browser auth callback")
 		}
 	} else if b.Insecure {
 		// Still respect the insecure flag if no proxy is used
-		b.browser.MustIgnoreCertErrors(true)
+		if err := b.browser.IgnoreCertErrors(true); err != nil {
+			return nil, fmt.Errorf("configure insecure mode failed: %w", err)
+		}
 	}
 
-	ua := strings.ReplaceAll(b.browser.MustVersion().UserAgent, "HeadlessChrome/", "Chrome/")
+	version, err := b.browser.Version()
+	if err != nil {
+		return nil, fmt.Errorf("read browser version failed: %w", err)
+	}
+	ua := strings.ReplaceAll(version.UserAgent, "HeadlessChrome/", "Chrome/")
 
 	var page *rod.Page
 
 	if b.UseStealth {
-		page = stealth.MustPage(b.browser)
-		page.MustEmulate(devices.Device{
+		page, err = stealth.Page(b.browser)
+		if err != nil {
+			return nil, fmt.Errorf("create stealth page failed: %w", err)
+		}
+		err = page.Emulate(devices.Device{
 			AcceptLanguage: b.LanguageCode,
 			UserAgent:      ua,
 		})
+		if err != nil {
+			return nil, fmt.Errorf("emulate stealth page failed: %w", err)
+		}
 
 	} else {
-		page = b.browser.MustPage("about:blank")
+		page, err = b.browser.Page(proto.TargetCreateTarget{URL: "about:blank"})
+		if err != nil {
+			return nil, fmt.Errorf("create page failed: %w", err)
+		}
 
-		page.MustEmulate(devices.Device{
+		err = page.Emulate(devices.Device{
 			AcceptLanguage: b.LanguageCode,
 			UserAgent:      ua,
 		})
+		if err != nil {
+			return nil, fmt.Errorf("emulate page failed: %w", err)
+		}
 
-		proto.EmulationSetDeviceMetricsOverride{
+		err = proto.EmulationSetDeviceMetricsOverride{
 			Width:             1920,
 			Height:            1080,
 			DeviceScaleFactor: 1,
@@ -196,25 +246,37 @@ func (b *Browser) Navigate(URL string) (*rod.Page, error) {
 			ScreenWidth:       &[]int{1920}[0],
 			ScreenHeight:      &[]int{1080}[0],
 		}.Call(page)
+		if err != nil {
+			return nil, fmt.Errorf("set device metrics failed: %w", err)
+		}
 	}
 	//EnableCustomStealth(page)
 
-	err := page.Navigate(URL)
+	timedPage := page.Timeout(b.Timeout)
+
+	err = timedPage.Navigate(URL)
 	if err != nil {
 		return nil, err
 	}
 
 	// Avoid panics from MustWaitLoad when the target navigates/closes mid-wait
-	if werr := page.WaitLoad(); werr != nil {
-		logrus.Debugf("WaitLoad returned early: %v", werr)
+	if werr := timedPage.WaitLoad(); werr != nil {
+		if errors.Is(werr, context.DeadlineExceeded) {
+			// Some engines keep loading background resources while the DOM is already usable.
+			// Treat load timeout as non-fatal and let engine-specific selector timeouts decide.
+			logrus.Debugf("WaitLoad timed out after %s; continuing with partial page state", b.Timeout)
+		} else {
+			logrus.Debugf("WaitLoad returned early: %v", werr)
+		}
 	}
-	wait := page.MustWaitRequestIdle()
+
 	// may cause bugs with google
 	if b.WaitRequests {
+		wait := timedPage.WaitRequestIdle(300*time.Millisecond, nil, nil, nil)
 		wait()
 	}
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(b.WaitLoadTime)
 	return page, nil
 }
 

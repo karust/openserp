@@ -25,25 +25,46 @@ var searchCMD = &cobra.Command{
 }
 
 func search(cmd *cobra.Command, args []string) {
-	var err error
-	engineType := args[0]
+	engineType := normalizeEngineArg(args[0])
 	query := core.Query{
 		Text:     args[1],
 		Limit:    10,
 		Filter:   true,
-		ProxyURL: config.App.ProxyURL,
-		Insecure: config.App.Insecure,
+		Insecure: config.Server.Insecure,
+	}
+
+	proxyRuntime := core.ProxyRuntimeBrowser
+	if config.Server.IsRawRequests {
+		proxyRuntime = core.ProxyRuntimeRaw
+	}
+
+	proxyCfg, err := buildNormalizedProxyConfig(proxyRuntime)
+	if err != nil {
+		logrus.Errorf("Error validating proxy config: %v", err)
+		return
+	}
+
+	policy := resolveEngineProxyPolicy(proxyCfg, engineType)
+
+	selectedProxy, err := selectCLIProxy(proxyCfg, policy)
+	if err != nil {
+		logrus.Errorf("Error selecting proxy for %s: %v", engineType, err)
+		return
+	}
+
+	if config.Server.IsRawRequests {
+		query.ProxyURL = selectedProxy
 	}
 
 	logrus.Infof("Starting SERP search request using %s engine for query: %s", engineType, query.Text)
 
 	var results []core.SearchResult
-	if config.App.IsRawRequests {
+	if config.Server.IsRawRequests {
 		logrus.Infof("Using raw requests mode for %s search", engineType)
 		results, err = searchRaw(engineType, query)
 	} else {
 		logrus.Infof("Using browser mode for %s search", engineType)
-		results, err = searchBrowser(engineType, query)
+		results, err = searchBrowser(engineType, query, selectedProxy)
 	}
 
 	if err != nil {
@@ -61,43 +82,51 @@ func search(cmd *cobra.Command, args []string) {
 
 	fmt.Println(string(b))
 }
-func searchBrowser(engineType string, query core.Query) ([]core.SearchResult, error) {
+
+func searchBrowser(engineType string, query core.Query, browserProxyURL string) ([]core.SearchResult, error) {
 	var engine core.SearchEngine
+	if core.IsAuthenticatedSocksProxyURL(browserProxyURL) {
+		return nil, fmt.Errorf(
+			"%w: browser runtime does not support authenticated SOCKS proxy %s",
+			core.ErrProxyUnavailable,
+			core.MaskProxyURL(browserProxyURL),
+		)
+	}
 
 	opts := core.BrowserOpts{
-		IsHeadless:          !config.App.IsBrowserHead, // Disable headless if browser head mode is set
+		IsHeadless:          !config.App.IsBrowserHead,
 		IsLeakless:          config.App.IsLeakless,
 		Timeout:             time.Second * time.Duration(config.App.Timeout),
 		LeavePageOpen:       config.App.IsLeaveHead,
 		CaptchaSolverApiKey: config.Config2Capcha.ApiKey,
 		BrowserPath:         config.App.BrowserPath,
-		ProxyURL:            config.App.ProxyURL,
-		Insecure:            config.App.Insecure,
+		ProxyURL:            browserProxyURL,
+		Insecure:            config.Server.Insecure,
 		UseStealth:          config.App.IsStealth,
 	}
 
-	if config.App.IsDebug {
+	if config.Server.IsDebug {
 		opts.IsHeadless = false
 	}
 
 	browser, err := core.NewBrowser(opts)
 	if err != nil {
-		logrus.Error(err)
+		return nil, err
 	}
 
 	switch strings.ToLower(engineType) {
 	case "yandex":
-		engine = yandex.New(*browser, config.YandexConfig)
+		engine = yandex.New(*browser, config.YandexConfig.SearchEngineOptions)
 	case "google":
-		engine = google.New(*browser, config.GoogleConfig)
+		engine = google.New(*browser, config.GoogleConfig.SearchEngineOptions)
 	case "baidu":
-		engine = baidu.New(*browser, config.BaiduConfig)
+		engine = baidu.New(*browser, config.BaiduConfig.SearchEngineOptions)
 	case "bing":
-		engine = bing.New(*browser, config.BingConfig)
-	case "duck":
-		engine = duckduckgo.New(*browser, config.DuckDuckGoConfig)
+		engine = bing.New(*browser, config.BingConfig.SearchEngineOptions)
+	case "duckduckgo":
+		engine = duckduckgo.New(*browser, config.DuckDuckGoConfig.SearchEngineOptions)
 	default:
-		logrus.Infof("No `%s` search engine found", engineType)
+		return nil, fmt.Errorf("no %q search engine found", engineType)
 	}
 
 	return engine.Search(query)
@@ -116,13 +145,42 @@ func searchRaw(engineType string, query core.Query) ([]core.SearchResult, error)
 	case "bing":
 		logrus.Warn("Bing does not support raw HTTP requests mode. Please use browser mode instead.")
 		return nil, fmt.Errorf("bing does not support raw requests mode")
-	case "duck":
+	case "duckduckgo":
 		logrus.Warn("DuckDuckGo does not support raw HTTP requests mode. Please use browser mode instead.")
 		return nil, fmt.Errorf("duckduckgo does not support raw requests mode")
 	default:
-		logrus.Infof("No `%s` search engine found", engineType)
+		return nil, fmt.Errorf("no %q search engine found", engineType)
 	}
-	return nil, nil
+}
+
+func selectCLIProxy(proxyCfg core.ProxyConfig, policy core.ProxyPolicy) (string, error) {
+	if policy.Mode == core.ProxyModeOff {
+		return "", nil
+	}
+
+	if global := strings.TrimSpace(proxyCfg.Proxies.Global); global != "" {
+		return global, nil
+	}
+
+	if proxyCfg.Registry == nil {
+		return "", fmt.Errorf("%w: no proxy registry configured", core.ErrProxyUnavailable)
+	}
+
+	selected := proxyCfg.Registry.NextByTag(policy.Tag)
+	if selected == "" {
+		return "", fmt.Errorf("%w: no healthy proxy available for tag %q", core.ErrProxyUnavailable, policy.Tag)
+	}
+
+	return selected, nil
+}
+
+func normalizeEngineArg(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "duck":
+		return "duckduckgo"
+	default:
+		return strings.ToLower(strings.TrimSpace(raw))
+	}
 }
 
 func init() {

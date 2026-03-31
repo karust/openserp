@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/karust/openserp/testutil"
 	"golang.org/x/time/rate"
 )
 
@@ -99,6 +100,7 @@ func (e *proxyIntegrationEngine) SearchImage(q Query) ([]SearchResult, error) {
 
 func proxyIntegrationConfig(t *testing.T) proxyIntegrationURLs {
 	t.Helper()
+	testutil.RequireIntegration(t)
 
 	if os.Getenv(proxyIntegrationEnabledEnv) != "1" {
 		t.Skipf("set %s=1 to run proxy integration tests", proxyIntegrationEnabledEnv)
@@ -144,9 +146,17 @@ func assertProxyPoolRotation(t *testing.T, targetURL string, pool []string) {
 	opts.Resilience.Retry.MaxBackoff = 0
 	opts.Resilience.Retry.BackoffFactor = 1
 	opts.Resilience.Proxy = ProxyConfig{
-		Runtime:              ProxyRuntimeRaw,
-		PoolURLs:             pool,
-		PoolFailureThreshold: 1,
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			Health: ProxiesHealthConfig{FailureThreshold: 1},
+		},
+		EnginePolicies: map[string]string{"google": "default"},
+	}
+	for _, proxyURL := range pool {
+		opts.Resilience.Proxy.Proxies.Entries = append(opts.Resilience.Proxy.Proxies.Entries, ProxyEntryConfig{
+			URL:  proxyURL,
+			Tags: []string{"default"},
+		})
 	}
 
 	srv := NewServerWithOptions("127.0.0.1", 7190, opts, engine)
@@ -162,19 +172,17 @@ func assertProxyPoolRotation(t *testing.T, targetURL string, pool []string) {
 		t.Fatalf("unexpected proxy rotation order: %#v", engine.proxies)
 	}
 
-	statsResp := request(t, srv, "/resilience/stats")
+	statsResp := request(t, srv, "/stats/proxy")
 	var stats map[string]interface{}
 	if err := json.NewDecoder(statsResp.Body).Decode(&stats); err != nil {
 		t.Fatalf("decode stats: %v", err)
 	}
 
-	proxyStats := stats["proxy"].(map[string]interface{})
-	poolStats := proxyStats["pool"].(map[string]interface{})
-	if got := poolStats["active"].(float64); got != 1 {
-		t.Fatalf("expected 1 active proxy, got %v", got)
+	if got := stats["healthy_count"].(float64); got != 1 {
+		t.Fatalf("expected healthy_count=1, got %v", got)
 	}
-	if got := poolStats["disabled"].(float64); got != 1 {
-		t.Fatalf("expected 1 disabled proxy, got %v", got)
+	if got := stats["unhealthy_count"].(float64); got != 1 {
+		t.Fatalf("expected unhealthy_count=1, got %v", got)
 	}
 }
 

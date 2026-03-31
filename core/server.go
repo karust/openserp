@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime"
 	"sort"
@@ -84,8 +85,10 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 	app.Use(RequestLoggerMiddleware())
 
 	app.Get("/health", serv.handleHealthCheck)
-	app.Get("/cache/stats", serv.handleCacheStats)
-	app.Get("/resilience/stats", serv.handleResilienceStats)
+	app.Get("/stats", serv.handleStats)
+	app.Get("/stats/cache", serv.handleCacheStats)
+	app.Get("/stats/proxy", serv.handleProxyStats)
+	app.Get("/stats/cb", serv.handleCircuitBreakerStats)
 
 	for _, engine := range searchEngines {
 		locEngine := engine
@@ -137,22 +140,24 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 	var (
 		res        []SearchResult
 		usedEngine string
+		proxyMeta  ProxyExecutionMeta
 		searchErr  error
 	)
 
 	if isImage {
 		if s.opts.AllowEndpointFallback {
-			res, usedEngine, searchErr = s.resilient.SearchImageWithFallback(engine, q)
+			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchImageWithFallback(engine, q)
 		} else {
-			res, usedEngine, searchErr = s.resilient.SearchImagePrimary(engine, q)
+			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchImagePrimary(engine, q)
 		}
 	} else {
 		if s.opts.AllowEndpointFallback {
-			res, usedEngine, searchErr = s.resilient.SearchWithFallback(engine, q)
+			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchWithFallback(engine, q)
 		} else {
-			res, usedEngine, searchErr = s.resilient.SearchPrimary(engine, q)
+			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchPrimary(engine, q)
 		}
 	}
+	s.applyProxyHeaders(c, proxyMeta)
 
 	if searchErr != nil {
 		errToReturn := searchErr
@@ -161,6 +166,10 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 			errToReturn = fmt.Errorf("captcha found, please stop sending requests for a while: %w", searchErr)
 		case ErrSearchTimeout:
 			errToReturn = fmt.Errorf("%s", searchErr)
+		default:
+			if errors.Is(searchErr, ErrProxyUnavailable) {
+				errToReturn = fmt.Errorf("%s", searchErr)
+			}
 		}
 		logrus.Errorf("Error during resilient %s %s: %s", engine.Name(), action, searchErr)
 		return fiber.NewError(fiber.StatusServiceUnavailable, errToReturn.Error())
@@ -273,18 +282,26 @@ func (s *Server) handleHealthCheck(c *fiber.Ctx) error {
 	return c.JSON(health)
 }
 
-func (s *Server) handleResilienceStats(c *fiber.Ctx) error {
+func (s *Server) handleStats(c *fiber.Ctx) error {
 	return c.JSON(map[string]interface{}{
-		"circuit_breakers": s.resilient.GetCircuitBreakerStats(),
+		"cache":            s.cacheStatsPayload(),
 		"proxy":            s.resilient.GetProxyStats(),
+		"circuit_breakers": s.resilient.GetCircuitBreakerStats(),
 	})
 }
 
 func (s *Server) handleCacheStats(c *fiber.Ctx) error {
-	if s.cache == nil {
-		return c.JSON(map[string]interface{}{"status": false})
-	}
-	return c.JSON(s.cache.Stats())
+	return c.JSON(s.cacheStatsPayload())
+}
+
+func (s *Server) handleProxyStats(c *fiber.Ctx) error {
+	return c.JSON(s.resilient.GetProxyStats())
+}
+
+func (s *Server) handleCircuitBreakerStats(c *fiber.Ctx) error {
+	return c.JSON(map[string]interface{}{
+		"circuit_breakers": s.resilient.GetCircuitBreakerStats(),
+	})
 }
 
 type MegaSearchResult struct {
@@ -317,6 +334,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(Query,
 		engineNames[i] = engine.Name()
 	}
 	engineNamesJoined := strings.Join(engineNames, ",")
+	s.applyProxyHeaders(c, s.resilient.ResolveMegaProxyMeta(enginesToUse))
 	logrus.Infof("Starting SERP mega %s request using engines: %s for query: %s", action, engineNamesJoined, q.Text)
 
 	cacheHitCandidates := []cacheHitCandidate{
@@ -517,6 +535,32 @@ func (s *Server) megaCacheableEngines(engines []SearchEngine) []SearchEngine {
 		cacheable = append(cacheable, eng)
 	}
 	return cacheable
+}
+
+func (s *Server) cacheStatsPayload() interface{} {
+	if s.cache == nil {
+		return map[string]interface{}{"status": false}
+	}
+	return s.cache.Stats()
+}
+
+func (s *Server) applyProxyHeaders(c *fiber.Ctx, meta ProxyExecutionMeta) {
+	mode := meta.Mode
+	if mode == "" {
+		mode = ProxyModeOff
+	}
+
+	tag := meta.Tag
+	used := meta.Used
+
+	if mode == ProxyModeOff {
+		tag = ""
+		used = "direct"
+	}
+
+	c.Set("X-Proxy-Mode", mode)
+	c.Set("X-Proxy-Tag", tag)
+	c.Set("X-Proxy-Used", used)
 }
 
 func (s *Server) Listen() error {

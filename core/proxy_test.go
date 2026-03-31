@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -50,74 +51,191 @@ func TestNormalizeProxyURL(t *testing.T) {
 	}
 }
 
-func TestNormalizeProxyConfigDefaultsAndDeduplicates(t *testing.T) {
-	cfg, err := NormalizeProxyConfig(ProxyConfig{
-		Runtime:   "RAW",
-		StaticURL: " socks5h://127.0.0.1:1080 ",
-		PoolURLs: []string{
-			"",
-			"http://proxy-one:8080",
-			"http://proxy-one:8080",
-			"socks5://proxy-two:1080",
+func TestNormalizeProxiesConfigDefaultsAndDeduplicates(t *testing.T) {
+	cfg, err := NormalizeProxiesConfig(ProxiesConfig{
+		Global: " HTTP://proxy-global:8080 ",
+		Entries: []ProxyEntryConfig{
+			{URL: " http://proxy-one:8080 ", Tags: []string{"default", "us"}},
+			{URL: "http://proxy-one:8080", Tags: []string{"de", "us"}},
+			{URL: "socks5://proxy-two:1080", Tags: []string{"default"}},
 		},
 	})
 	if err != nil {
-		t.Fatalf("normalize config: %v", err)
+		t.Fatalf("normalize proxies config: %v", err)
 	}
 
-	if cfg.Runtime != ProxyRuntimeRaw {
-		t.Fatalf("expected raw runtime, got %s", cfg.Runtime)
+	if cfg.Global != "http://proxy-global:8080" {
+		t.Fatalf("expected normalized global proxy, got %q", cfg.Global)
 	}
-	if cfg.StaticURL != "socks5h://127.0.0.1:1080" {
-		t.Fatalf("unexpected static proxy: %s", cfg.StaticURL)
+	if cfg.Health.FailureThreshold != DefaultProxyFailureThreshold {
+		t.Fatalf("expected default failure threshold %d, got %d", DefaultProxyFailureThreshold, cfg.Health.FailureThreshold)
 	}
-	if cfg.PoolFailureThreshold != DefaultProxyPoolFailureThreshold {
-		t.Fatalf("expected default threshold %d, got %d", DefaultProxyPoolFailureThreshold, cfg.PoolFailureThreshold)
+	if len(cfg.Entries) != 2 {
+		t.Fatalf("expected 2 deduplicated entries, got %d", len(cfg.Entries))
 	}
-	if len(cfg.PoolURLs) != 2 {
-		t.Fatalf("expected 2 deduplicated pool URLs, got %d", len(cfg.PoolURLs))
+	if cfg.Entries[0].URL != "http://proxy-one:8080" {
+		t.Fatalf("unexpected normalized URL for first entry: %s", cfg.Entries[0].URL)
+	}
+	if len(cfg.Entries[0].Tags) != 3 {
+		t.Fatalf("expected merged tags in first entry, got %#v", cfg.Entries[0].Tags)
 	}
 }
 
-func TestProxyPoolRoundRobinAndFailureRecovery(t *testing.T) {
-	pool, err := NewProxyPool([]string{"http://proxy1:8080", "http://proxy2:8080"}, 2)
-	if err != nil {
-		t.Fatalf("new proxy pool: %v", err)
+func TestNormalizeProxiesConfigRejectsInvalidEntries(t *testing.T) {
+	_, err := NormalizeProxiesConfig(ProxiesConfig{
+		Entries: []ProxyEntryConfig{{URL: "ftp://proxy:21", Tags: []string{"default"}}},
+	})
+	if err == nil {
+		t.Fatal("expected invalid scheme error")
 	}
 
-	if got := pool.Next(); got != "http://proxy1:8080" {
+	_, err = NormalizeProxiesConfig(ProxiesConfig{
+		Entries: []ProxyEntryConfig{{URL: "http://proxy:8080", Tags: []string{" "}}},
+	})
+	if err == nil {
+		t.Fatal("expected empty tags error")
+	}
+
+	_, err = NormalizeProxiesConfig(ProxiesConfig{
+		Global:  "ftp://proxy:21",
+		Entries: []ProxyEntryConfig{{URL: "http://proxy:8080", Tags: []string{"default"}}},
+	})
+	if err == nil {
+		t.Fatal("expected invalid global proxy scheme error")
+	}
+}
+
+func TestResolveEffectiveProxyPolicy(t *testing.T) {
+	offPolicy := ResolveEffectiveProxyPolicy("", "")
+	if offPolicy.Mode != ProxyModeOff {
+		t.Fatalf("expected mode off, got %s", offPolicy.Mode)
+	}
+	if offPolicy.Tag != "" {
+		t.Fatalf("expected empty tag for off mode, got %q", offPolicy.Tag)
+	}
+
+	tagOnlyPolicy := ResolveEffectiveProxyPolicy("", "US")
+	if tagOnlyPolicy.Mode != ProxyModeTagPool || tagOnlyPolicy.Tag != "us" {
+		t.Fatalf("unexpected effective policy with tag override: %#v", tagOnlyPolicy)
+	}
+
+	globalPolicy := ResolveEffectiveProxyPolicy("http://proxy-global:8080", "eu")
+	if globalPolicy.Mode != ProxyModeTagPool || globalPolicy.Tag != "" {
+		t.Fatalf("expected global proxy to ignore engine tags, got %#v", globalPolicy)
+	}
+}
+
+func TestProxyRegistryRoundRobinAndFailureRecovery(t *testing.T) {
+	registry, err := NewProxyRegistry([]ProxyEntryConfig{
+		{URL: "http://proxy1:8080", Tags: []string{"default"}},
+		{URL: "http://proxy2:8080", Tags: []string{"default"}},
+	}, 2)
+	if err != nil {
+		t.Fatalf("new proxy registry: %v", err)
+	}
+
+	if got := registry.NextByTag("default"); got != "http://proxy1:8080" {
 		t.Fatalf("expected first proxy1, got %s", got)
 	}
-	if got := pool.Next(); got != "http://proxy2:8080" {
+	if got := registry.NextByTag("default"); got != "http://proxy2:8080" {
 		t.Fatalf("expected second proxy2, got %s", got)
 	}
 
-	pool.ReportFailure("http://proxy1:8080")
-	pool.ReportFailure("http://proxy1:8080")
-	if got := pool.Next(); got != "http://proxy2:8080" {
+	registry.ReportFailure("http://proxy1:8080")
+	registry.ReportFailure("http://proxy1:8080")
+	if got := registry.NextByTag("default"); got != "http://proxy2:8080" {
 		t.Fatalf("expected proxy2 while proxy1 disabled, got %s", got)
 	}
 
-	pool.ReportFailure("http://proxy2:8080")
-	pool.ReportFailure("http://proxy2:8080")
-	if got := pool.Next(); got != "http://proxy1:8080" {
-		t.Fatalf("expected pool reset to proxy1 after exhaustion, got %s", got)
+	registry.ReportFailure("http://proxy2:8080")
+	registry.ReportFailure("http://proxy2:8080")
+	if got := registry.NextByTag("default"); got != "http://proxy1:8080" {
+		t.Fatalf("expected tag pool reset to proxy1 after exhaustion, got %s", got)
 	}
 
-	pool.ReportFailure("http://proxy1:8080")
-	pool.ReportSuccess("http://proxy1:8080")
-	stats := pool.Stats()
-	if stats.Disabled != 0 {
-		t.Fatalf("expected no disabled proxies after recovery, got %d", stats.Disabled)
+	registry.ReportFailure("http://proxy1:8080")
+	registry.ReportSuccess("http://proxy1:8080")
+	stats := registry.BuildStats()
+	if stats.UnhealthyCount != 0 {
+		t.Fatalf("expected no unhealthy proxies after success recovery, got %d", stats.UnhealthyCount)
 	}
-	if stats.Active != 2 {
-		t.Fatalf("expected both proxies active, got %d", stats.Active)
+	if stats.HealthyCount != 2 {
+		t.Fatalf("expected two healthy proxies, got %d", stats.HealthyCount)
 	}
 }
 
 func TestMaskProxyURLRedactsCredentials(t *testing.T) {
 	if got := MaskProxyURL("http://user:pass@127.0.0.1:8080"); got != "http://127.0.0.1:8080" {
 		t.Fatalf("unexpected masked proxy value: %s", got)
+	}
+}
+
+func TestProxyURLForBrowserLaunchStripsCredentials(t *testing.T) {
+	u, err := url.Parse("http://user:pass@127.0.0.1:18888")
+	if err != nil {
+		t.Fatalf("parse proxy URL: %v", err)
+	}
+
+	got := proxyURLForBrowserLaunch(u)
+	want := "http://127.0.0.1:18888"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestProxyURLForBrowserLaunchNormalizesSocks5h(t *testing.T) {
+	u, err := url.Parse("socks5h://test:test@127.0.0.1:19080")
+	if err != nil {
+		t.Fatalf("parse proxy URL: %v", err)
+	}
+
+	got := proxyURLForBrowserLaunch(u)
+	want := "socks5://127.0.0.1:19080"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestProxyStatsMaskCredentials(t *testing.T) {
+	registry, err := NewProxyRegistry([]ProxyEntryConfig{
+		{URL: "http://user:pass@proxy.example:8080", Tags: []string{"default"}},
+	}, 1)
+	if err != nil {
+		t.Fatalf("new proxy registry: %v", err)
+	}
+
+	stats := registry.BuildStats()
+	if len(stats.Entries) != 1 {
+		t.Fatalf("expected one proxy stats entry, got %d", len(stats.Entries))
+	}
+	if got := stats.Entries[0].Proxy; got != "http://proxy.example:8080" {
+		t.Fatalf("expected masked proxy in stats, got %q", got)
+	}
+}
+
+func TestNormalizeProxyTag(t *testing.T) {
+	tag, err := NormalizeProxyTag(" US ")
+	if err != nil {
+		t.Fatalf("normalize proxy tag: %v", err)
+	}
+	if tag != "us" {
+		t.Fatalf("expected normalized tag us, got %q", tag)
+	}
+
+	if _, err := NormalizeProxyTag("   "); err == nil {
+		t.Fatal("expected empty proxy tag validation error")
+	}
+}
+
+func TestIsAuthenticatedSocksProxyURL(t *testing.T) {
+	if !IsAuthenticatedSocksProxyURL("socks5h://user:pass@127.0.0.1:1080") {
+		t.Fatal("expected authenticated socks proxy to be detected")
+	}
+	if IsAuthenticatedSocksProxyURL("socks5://127.0.0.1:1080") {
+		t.Fatal("expected plain socks proxy to remain browser-compatible")
+	}
+	if IsAuthenticatedSocksProxyURL("http://user:pass@127.0.0.1:8080") {
+		t.Fatal("expected HTTP auth proxy to remain browser-compatible")
 	}
 }
 
