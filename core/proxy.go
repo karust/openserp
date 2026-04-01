@@ -17,6 +17,7 @@ const (
 	ProxyModeOff                 = "off"
 	ProxyModeTagPool             = "tag_pool"
 	DefaultProxyFailureThreshold = 3
+	ProxyOverrideDirect          = "direct"
 )
 
 var supportedProxySchemes = map[string]struct{}{
@@ -279,6 +280,17 @@ func NormalizeProxyTag(raw string) (string, error) {
 		return "", fmt.Errorf("value is required")
 	}
 	return tag, nil
+}
+
+func NormalizeProxyRequestOverride(raw string) (string, error) {
+	override := normalizeTag(raw)
+	if override == "" {
+		return "", nil
+	}
+	if override == ProxyOverrideDirect {
+		return ProxyOverrideDirect, nil
+	}
+	return NormalizeProxyTag(override)
 }
 
 func IsAuthenticatedSocksProxyURL(raw string) bool {

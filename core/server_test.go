@@ -60,6 +60,17 @@ func request(t *testing.T, s *Server, path string) *http.Response {
 	return resp
 }
 
+func requestWithHeader(t *testing.T, s *Server, path string, header string, value string) *http.Response {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set(header, value)
+	resp, err := s.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed for %s: %v", path, err)
+	}
+	return resp
+}
+
 func TestHealthEndpointStatusSemantics(t *testing.T) {
 	ready := &engineMock{name: "google", initialized: true, limiter: rate.NewLimiter(rate.Every(time.Second), 1)}
 	notReady := &engineMock{name: "yandex", initialized: false, limiter: rate.NewLimiter(rate.Every(time.Second), 1)}
@@ -663,6 +674,79 @@ func TestGlobalProxyForcesAllEnginesRaw(t *testing.T) {
 	}
 }
 
+func TestRequestProxyOverrideDirectBeatsGlobal(t *testing.T) {
+	var googleProxy string
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(q Query) ([]SearchResult, error) {
+			googleProxy = q.ProxyURL
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			Global: "http://global-proxy:8080",
+		},
+	}
+
+	srv := NewServerWithOptions("127.0.0.1", 7099, opts, engine)
+	resp := requestWithHeader(t, srv, "/google/search?text=golang", "X-Use-Proxy", "direct")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected direct override request to succeed, got %d", resp.StatusCode)
+	}
+	if googleProxy != "" {
+		t.Fatalf("expected direct override to disable proxy, got %q", googleProxy)
+	}
+	if got := resp.Header.Get("X-Proxy-Mode"); got != ProxyModeOff {
+		t.Fatalf("expected X-Proxy-Mode=%s, got %q", ProxyModeOff, got)
+	}
+	if got := resp.Header.Get("X-Proxy-Used"); got != "direct" {
+		t.Fatalf("expected X-Proxy-Used=direct, got %q", got)
+	}
+}
+
+func TestRequestProxyOverrideTagBeatsGlobal(t *testing.T) {
+	var googleProxy string
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(q Query) ([]SearchResult, error) {
+			googleProxy = q.ProxyURL
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			Global: "http://global-proxy:8080",
+			Entries: []ProxyEntryConfig{
+				{URL: "http://proxy-us:8080", Tags: []string{"us"}},
+			},
+		},
+	}
+
+	srv := NewServerWithOptions("127.0.0.1", 7100, opts, engine)
+	resp := requestWithHeader(t, srv, "/google/search?text=golang", "X-Use-Proxy", "us")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected tagged override request to succeed, got %d", resp.StatusCode)
+	}
+	if googleProxy != "http://proxy-us:8080" {
+		t.Fatalf("expected tagged override to use pool proxy, got %q", googleProxy)
+	}
+	if got := resp.Header.Get("X-Proxy-Tag"); got != "us" {
+		t.Fatalf("expected X-Proxy-Tag=us, got %q", got)
+	}
+	if got := resp.Header.Get("X-Proxy-Used"); got != "http://proxy-us:8080" {
+		t.Fatalf("expected X-Proxy-Used to reflect override proxy, got %q", got)
+	}
+}
+
 func TestBrowserProxyPoolRotatesPerRequest(t *testing.T) {
 	var attemptedProxies []string
 	engine := &engineMock{
@@ -699,6 +783,64 @@ func TestBrowserProxyPoolRotatesPerRequest(t *testing.T) {
 	}
 	if attemptedProxies[0] != "http://proxy1:8080" || attemptedProxies[1] != "http://proxy2:8080" {
 		t.Fatalf("expected browser proxy rotation order, got %#v", attemptedProxies)
+	}
+}
+
+func TestRequestProxyOverrideMissingTagFailsClosed(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			Global: "http://global-proxy:8080",
+		},
+	}
+
+	srv := NewServerWithOptions("127.0.0.1", 7101, opts, engine)
+	resp := requestWithHeader(t, srv, "/google/search?text=golang", "X-Use-Proxy", "missing")
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected missing tag override to fail closed, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Proxy-Mode"); got != ProxyModeTagPool {
+		t.Fatalf("expected X-Proxy-Mode=%s on missing tag response, got %q", ProxyModeTagPool, got)
+	}
+	if got := resp.Header.Get("X-Proxy-Tag"); got != "missing" {
+		t.Fatalf("expected X-Proxy-Tag=missing, got %q", got)
+	}
+}
+
+func TestMegaProxyOverrideHeaderBeatsGlobal(t *testing.T) {
+	var googleProxy string
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(q Query) ([]SearchResult, error) {
+			googleProxy = q.ProxyURL
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			Global: "http://global-proxy:8080",
+			Entries: []ProxyEntryConfig{
+				{URL: "http://proxy-us:8080", Tags: []string{"us"}},
+			},
+		},
+	}
+
+	srv := NewServerWithOptions("127.0.0.1", 7102, opts, engine)
+	resp := requestWithHeader(t, srv, "/mega/search?text=golang&engines=google", "X-Use-Proxy", "us")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected mega override request to succeed, got %d", resp.StatusCode)
+	}
+	if googleProxy != "http://proxy-us:8080" {
+		t.Fatalf("expected mega override to use pool proxy, got %q", googleProxy)
+	}
+	if got := resp.Header.Get("X-Proxy-Tag"); got != "us" {
+		t.Fatalf("expected mega X-Proxy-Tag=us, got %q", got)
 	}
 }
 

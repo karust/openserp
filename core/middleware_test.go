@@ -3,6 +3,7 @@ package core
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
@@ -97,5 +98,12 @@ func TestNormalizeCORSConfig_FillsMissingValues(t *testing.T) {
 	}
 	if cfg.MaxAge != def.MaxAge {
 		t.Fatalf("expected default max_age, got %d", cfg.MaxAge)
+	}
+}
+
+func TestDefaultCORSConfig_IncludesProxyOverrideHeader(t *testing.T) {
+	cfg := DefaultCORSConfig()
+	if got := cfg.AllowHeaders; !strings.Contains(got, "X-Use-Proxy") {
+		t.Fatalf("expected allow_headers to include X-Use-Proxy, got %q", got)
 	}
 }

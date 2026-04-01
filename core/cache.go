@@ -36,7 +36,7 @@ func NewResponseCache(ttl time.Duration, maxSize int) *ResponseCache {
 
 func BuildCacheKey(engine string, action string, q Query) string {
 	raw := fmt.Sprintf(
-		"%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t",
+		"%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s",
 		engine,
 		action,
 		q.Text,
@@ -48,6 +48,7 @@ func BuildCacheKey(engine string, action string, q Query) string {
 		q.Start,
 		q.Filter,
 		q.Answers,
+		q.ProxyOverride,
 	)
 	hash := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(hash[:])
