@@ -227,6 +227,32 @@ func TestNormalizeProxyTag(t *testing.T) {
 	}
 }
 
+func TestNormalizeProxyRequestOverride(t *testing.T) {
+	override, err := NormalizeProxyRequestOverride(" direct ")
+	if err != nil {
+		t.Fatalf("normalize direct proxy override: %v", err)
+	}
+	if override != ProxyOverrideDirect {
+		t.Fatalf("expected direct override, got %q", override)
+	}
+
+	override, err = NormalizeProxyRequestOverride(" US ")
+	if err != nil {
+		t.Fatalf("normalize tagged proxy override: %v", err)
+	}
+	if override != "us" {
+		t.Fatalf("expected normalized tag override us, got %q", override)
+	}
+
+	override, err = NormalizeProxyRequestOverride("")
+	if err != nil {
+		t.Fatalf("normalize empty override: %v", err)
+	}
+	if override != "" {
+		t.Fatalf("expected empty override, got %q", override)
+	}
+}
+
 func TestIsAuthenticatedSocksProxyURL(t *testing.T) {
 	if !IsAuthenticatedSocksProxyURL("socks5h://user:pass@127.0.0.1:1080") {
 		t.Fatal("expected authenticated socks proxy to be detected")

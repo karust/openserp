@@ -334,7 +334,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(Query,
 		engineNames[i] = engine.Name()
 	}
 	engineNamesJoined := strings.Join(engineNames, ",")
-	s.applyProxyHeaders(c, s.resilient.ResolveMegaProxyMeta(enginesToUse))
+	s.applyProxyHeaders(c, s.resilient.ResolveMegaProxyMeta(q, enginesToUse))
 	logrus.Infof("Starting SERP mega %s request using engines: %s for query: %s", action, engineNamesJoined, q.Text)
 
 	cacheHitCandidates := []cacheHitCandidate{

@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	version               = "0.5.9"
+	version               = "0.5.10"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -307,7 +307,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("cors.enabled", true)
 	v.SetDefault("cors.allow_origins", "*")
 	v.SetDefault("cors.allow_methods", "GET, POST, OPTIONS")
-	v.SetDefault("cors.allow_headers", "Origin, Content-Type, Accept, Authorization")
+	v.SetDefault("cors.allow_headers", "Origin, Content-Type, Accept, Authorization, X-Use-Proxy")
 	v.SetDefault("cors.max_age", 86400)
 }
 

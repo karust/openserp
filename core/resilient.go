@@ -139,7 +139,7 @@ func (rs *ResilientSearcher) searchWithProtection(engine SearchEngine, q Query, 
 		return nil, ProxyExecutionMeta{}, ErrCircuitOpen
 	}
 
-	policy := rs.effectivePolicyForEngine(engine.Name())
+	policy := rs.effectivePolicyForQuery(engine.Name(), q)
 	attemptMeta := rs.baseProxyMeta(policy)
 
 	result := RetryableSearch(rs.retryCfg, engine.Name(), func() ([]SearchResult, error) {
@@ -160,7 +160,7 @@ func (rs *ResilientSearcher) searchWithProtection(engine SearchEngine, q Query, 
 			attemptQuery.ProxyURL = ""
 			attemptMeta.Used = "direct"
 		case ProxyModeTagPool:
-			proxyURL = rs.selectProxyForPolicy(policy)
+			proxyURL = rs.selectProxyForQuery(policy, q)
 			if proxyURL == "" {
 				return nil, fmt.Errorf("%w: no healthy proxy available for tag %q", ErrProxyUnavailable, policy.Tag)
 			}
@@ -318,7 +318,7 @@ func (rs *ResilientSearcher) GetProxyStats() ProxyStats {
 	return stats
 }
 
-func (rs *ResilientSearcher) ResolveMegaProxyMeta(engines []SearchEngine) ProxyExecutionMeta {
+func (rs *ResilientSearcher) ResolveMegaProxyMeta(q Query, engines []SearchEngine) ProxyExecutionMeta {
 	if len(engines) == 0 {
 		return ProxyExecutionMeta{Mode: ProxyModeOff, Used: "direct"}
 	}
@@ -328,7 +328,7 @@ func (rs *ResilientSearcher) ResolveMegaProxyMeta(engines []SearchEngine) ProxyE
 	hasOff := false
 
 	for _, engine := range engines {
-		policy := rs.effectivePolicyForEngine(engine.Name())
+		policy := rs.effectivePolicyForQuery(engine.Name(), q)
 		if policy.Mode == ProxyModeOff {
 			hasOff = true
 			continue
@@ -351,9 +351,11 @@ func (rs *ResilientSearcher) ResolveMegaProxyMeta(engines []SearchEngine) ProxyE
 		}
 	}
 
-	if global := strings.TrimSpace(rs.proxyCfg.Proxies.Global); global != "" && !hasOff {
-		meta.Used = MaskProxyURL(global)
-		return meta
+	if q.ProxyOverride == "" {
+		if global := strings.TrimSpace(rs.proxyCfg.Proxies.Global); global != "" && !hasOff {
+			meta.Used = MaskProxyURL(global)
+			return meta
+		}
 	}
 
 	if rs.proxyRuntime == ProxyRuntimeRaw {
@@ -388,6 +390,17 @@ func (rs *ResilientSearcher) effectivePolicyForEngine(engineName string) ProxyPo
 	return rs.proxyDefaults
 }
 
+func (rs *ResilientSearcher) effectivePolicyForQuery(engineName string, q Query) ProxyPolicy {
+	switch q.ProxyOverride {
+	case "":
+		return rs.effectivePolicyForEngine(engineName)
+	case ProxyOverrideDirect:
+		return ProxyPolicy{Mode: ProxyModeOff}
+	default:
+		return ProxyPolicy{Mode: ProxyModeTagPool, Tag: q.ProxyOverride}
+	}
+}
+
 func (rs *ResilientSearcher) selectProxyForTag(tag string) string {
 	if rs.proxyRegistry == nil {
 		return ""
@@ -408,12 +421,14 @@ func (rs *ResilientSearcher) reportProxyAttempt(proxyURL string, err error) {
 	rs.proxyRegistry.ReportSuccess(proxyURL)
 }
 
-func (rs *ResilientSearcher) selectProxyForPolicy(policy ProxyPolicy) string {
+func (rs *ResilientSearcher) selectProxyForQuery(policy ProxyPolicy, q Query) string {
 	if policy.Mode != ProxyModeTagPool {
 		return ""
 	}
-	if global := strings.TrimSpace(rs.proxyCfg.Proxies.Global); global != "" {
-		return global
+	if q.ProxyOverride == "" {
+		if global := strings.TrimSpace(rs.proxyCfg.Proxies.Global); global != "" {
+			return global
+		}
 	}
 	return rs.selectProxyForTag(policy.Tag)
 }

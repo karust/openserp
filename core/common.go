@@ -54,17 +54,18 @@ func ConvertSearchResultsMap(searchResultsMap map[string]SearchResult) *[]Search
 }
 
 type Query struct {
-	Text         string
-	LangCode     string // eg. EN, ES, RU...
-	DateInterval string // format: YYYYMMDD..YYYMMDD - 20181010..20231010
-	Filetype     string // File extension to search.
-	Site         string // Search site
-	Limit        int    // Limit the number of results
-	Start        int    // Search offset for pagination (Google uses 0, 10, 20...)
-	Filter       bool   // Filter duplicates (google) (false: include similar, true: hide similar)
-	Answers      bool   // Include question and answers from SERP page to results with negative indexes
-	ProxyURL     string // Proxy URL for raw requests
-	Insecure     bool   // Allow insecure TLS connections
+	Text          string
+	LangCode      string // eg. EN, ES, RU...
+	DateInterval  string // format: YYYYMMDD..YYYMMDD - 20181010..20231010
+	Filetype      string // File extension to search.
+	Site          string // Search site
+	Limit         int    // Limit the number of results
+	Start         int    // Search offset for pagination (Google uses 0, 10, 20...)
+	Filter        bool   // Filter duplicates (google) (false: include similar, true: hide similar)
+	Answers       bool   // Include question and answers from SERP page to results with negative indexes
+	ProxyURL      string // Proxy URL for raw requests
+	ProxyOverride string // Request-scoped proxy override: tag or direct
+	Insecure      bool   // Allow insecure TLS connections
 }
 
 func ComputePagination(start int, pageSize int) (int, int, error) {
@@ -112,6 +113,11 @@ func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 	}
 
 	searchQuery.Answers, err = strconv.ParseBool(reqCtx.Query("answers", "0"))
+	if err != nil {
+		return err
+	}
+
+	searchQuery.ProxyOverride, err = NormalizeProxyRequestOverride(reqCtx.Get("X-Use-Proxy"))
 	if err != nil {
 		return err
 	}

@@ -14,19 +14,19 @@ app:
   leave_head: false # Keep tabs open after request for debugging
   stealth: false # Enable stealth browser plugin
 
-#proxies:
-#   # Force a single proxy for all engines.
-#   # Same behavior as passing --proxy on the CLI.
-#  global: http://test:test@127.0.0.1:18888
-#
-#   # Advanced mode: define tagged proxy pools and opt engines in with `proxy: <tag>`.
-#   entries:
-#     - url: http://test:test@127.0.0.1:18888
-#       tags: [default, us]
-#     - url: socks5://127.0.0.1:19080 # Chrome doesn't support authenticated SOCKS proxies and hostname resolution
-#       tags: [default, eu]
-#   health:
-#     failure_threshold: 3 # Disable proxy after this many consecutive failures
+proxies:
+  # Force a single proxy for all engines.
+  # Same behavior as passing --proxy on the CLI.
+  #global: socks5h://127.0.0.1:19080
+
+  # Advanced mode: define tagged proxy pools and opt engines in with `proxy: <tag>`.
+  entries:
+    - url: http://test:test@127.0.0.1:18888
+      tags: [default, us]
+    - url: socks5://127.0.0.1:19080 # Browser mode fails fast on authenticated SOCKS proxies
+      tags: [default, eu]
+  health:
+    failure_threshold: 3 # Disable proxy after this many consecutive failures
 
 cache:
   ttl_seconds: 60 # Dedicated endpoint cache TTL in seconds (0 disables cache)
@@ -45,7 +45,7 @@ cors:
   enabled: true
   allow_origins: "*"
   allow_methods: "GET, POST, OPTIONS"
-  allow_headers: "Origin, Content-Type, Accept, Authorization"
+  allow_headers: "Origin, Content-Type, Accept, Authorization, X-Use-Proxy"
   max_age: 86400
 
 # 2captcha:
@@ -55,12 +55,12 @@ google:
   rate_requests: 4 # Allowed average requests per minute
   rate_burst: 2 # Burst requests before limiter applies
   captcha: true # Enable captcha solver path
-  #proxy: us
+  proxy: us
 
 yandex:
   rate_requests: 4
   rate_burst: 2
-  #proxy: eu
+  proxy: eu
 
 baidu:
   rate_requests: 4
@@ -75,4 +75,4 @@ bing:
 duckduckgo:
   rate_requests: 4
   rate_burst: 2
-  #proxy: default
+  proxy: default
