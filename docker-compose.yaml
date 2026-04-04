@@ -9,10 +9,10 @@ services:
       - 7000:7000
     command: serve -l
     #volumes:
-    #  - ./config.yaml:/usr/src/app/config.yaml
+    #  - ./config.yaml:/usr/src/app/config.yaml:ro
     environment:
-      OPENSERP_APP_HOST: "0.0.0.0"
-      OPENSERP_APP_PORT: 7000
+      OPENSERP_SERVER_HOST: "0.0.0.0"
+      OPENSERP_SERVER_PORT: 7000
       OPENSERP_BAIDU_RATE_REQUESTS: 6   # Number of requests per Minute
       OPENSERP_BAIDU_RATE_BURST: 2      # Number of non-ratelimited requests per Minute
     

@@ -16,8 +16,10 @@ RUN go build -o /app/openserp .
 
 FROM zenika/alpine-chrome:with-chromedriver
 
+WORKDIR /usr/src/app
+
 COPY --from=builder /app/openserp /usr/local/bin/openserp
-ADD config.yaml /usr/src/app
+COPY config.yaml ./config.yaml
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:7000/health || exit 1

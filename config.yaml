@@ -17,14 +17,14 @@ app:
 proxies:
   # Force a single proxy for all engines.
   # Same behavior as passing --proxy on the CLI.
-  #global: socks5h://127.0.0.1:19080
+  #global: http://127.0.0.1:8080
 
   # Advanced mode: define tagged proxy pools and opt engines in with `proxy: <tag>`.
-  entries:
-    - url: http://test:test@127.0.0.1:18888
-      tags: [default, us]
-    - url: socks5://127.0.0.1:19080 # Browser mode fails fast on authenticated SOCKS proxies
-      tags: [default, eu]
+  #entries:
+  #  - url: http://127.0.0.1:8080
+  #    tags: [default, us]
+  #  - url: socks5h://127.0.0.1:1080
+  #    tags: [eu]
   health:
     failure_threshold: 3 # Disable proxy after this many consecutive failures
 
@@ -55,12 +55,10 @@ google:
   rate_requests: 4 # Allowed average requests per minute
   rate_burst: 2 # Burst requests before limiter applies
   captcha: true # Enable captcha solver path
-  proxy: us
 
 yandex:
   rate_requests: 4
   rate_burst: 2
-  proxy: eu
 
 baidu:
   rate_requests: 4
@@ -75,4 +73,3 @@ bing:
 duckduckgo:
   rate_requests: 4
   rate_burst: 2
-  proxy: default

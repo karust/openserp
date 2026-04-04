@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -13,7 +14,7 @@ import (
 )
 
 const (
-	version               = "0.5.10"
+	version               = "0.6.0"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -172,13 +173,25 @@ func initializeConfig(cmd *cobra.Command) error {
 	v := viper.New()
 	setConfigDefaults(v)
 
-	// Base name of the config file, without the file extension
-	v.SetConfigName(defaultConfigFilename)
-	v.AddConfigPath(".")
+	explicitConfigPath := strings.TrimSpace(cmd.Flag("config").Value.String())
+	if explicitConfigPath == "" {
+		explicitConfigPath = strings.TrimSpace(os.Getenv(envPrefix + "_SERVER_CONFIG_PATH"))
+	}
+
+	if explicitConfigPath != "" {
+		v.SetConfigFile(explicitConfigPath)
+	} else {
+		// Base name of the config file, without the file extension
+		v.SetConfigName(defaultConfigFilename)
+		v.AddConfigPath(".")
+	}
 
 	// 1. Config file (lowest priority). Return an error if we cannot parse the config file.
 	err := v.ReadInConfig()
 	if err != nil {
+		if explicitConfigPath != "" {
+			return fmt.Errorf("cannot read config %q: %w", explicitConfigPath, err)
+		}
 		err = fmt.Errorf("cannot read config: %v", err)
 		logrus.Warn(err)
 	}
