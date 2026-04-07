@@ -10,6 +10,9 @@
 
 **OpenSERP** provides free API and CLI access to multiple search engines including **Google, Yandex, Baidu, Bing, and DuckDuckGo**. Get comprehensive search results without expensive API subscriptions!
 
+> 💡 OpenSerp is free and open-source. Third-party services using this name are not affiliated.
+
+
 ## Features
 
 - 🔍 **Multi-engine** - search with dedicated endpoints for each engine
@@ -177,3 +180,6 @@ If you encounter issues or have questions:
 - Open an issue on GitHub
 - Check existing issues for similar reports
 - Review the documentation and example config
+
+
+###### *"OpenSerp" is the name of this open-source project. Use of the name in a way that implies affiliation, endorsement, or official status is not permitted.*
