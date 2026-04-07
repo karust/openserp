@@ -8,9 +8,12 @@
 
 <!-- [![Docker Pulls](https://img.shields.io/docker/pulls/karust/openserp)](https://hub.docker.com/repository/docker/karust/openserp) -->
 
-**OpenSERP** provides free API and CLI access to multiple search engines including **Google, Yandex, Baidu, Bing, and DuckDuckGo**. Get comprehensive search results without expensive API subscriptions!
+**OpenSERP** is an API and CLI for accessing search engine results from **Google, Yandex, Baidu, Bing, and DuckDuckGo**.  
+A developer-friendly alternative to paid SERP API services!
 
-> 💡 OpenSerp is free and open-source. Third-party services using this name are not affiliated.
+**Official website:** [openserp.org](https://openserp.org)
+
+> 💡 OpenSerp is free and open-source. Only links listed in this repository and on the official website are associated with the project.
 
 
 ## Features
