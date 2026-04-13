@@ -6,9 +6,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
-
-	"github.com/karust/openserp/core"
 )
 
 // ResponseFromFixture reads an HTML file from the package's testdata/ directory
@@ -39,32 +38,49 @@ func ResponseFromBytes(data []byte) *http.Response {
 }
 
 // AssertSequentialRanks verifies that result ranks start at 1 and increase by 1.
-func AssertSequentialRanks(t *testing.T, results []core.SearchResult) {
+// Accepts any slice of structs with an int Rank field (avoids core import cycle).
+func AssertSequentialRanks(t *testing.T, results any) {
 	t.Helper()
 
-	for i, r := range results {
-		if r.Rank != i+1 {
-			t.Fatalf("rank sequence broken at index %d: got %d, want %d", i, r.Rank, i+1)
+	v := reflect.ValueOf(results)
+	if v.Kind() != reflect.Slice {
+		t.Fatalf("expected a slice of results, got %T", results)
+	}
+
+	for i := 0; i < v.Len(); i++ {
+		item := v.Index(i)
+		if item.Kind() == reflect.Ptr {
+			item = item.Elem()
+		}
+		rank := int(item.FieldByName("Rank").Int())
+		if rank != i+1 {
+			t.Fatalf("rank sequence broken at index %d: got %d, want %d", i, rank, i+1)
 		}
 	}
 }
 
 // AssertFirstResultFilled checks that the first result has non-empty URL, Title, and Description.
-func AssertFirstResultFilled(t *testing.T, results []core.SearchResult) {
+// Accepts any slice of structs with those string fields (avoids core import cycle).
+func AssertFirstResultFilled(t *testing.T, results any) {
 	t.Helper()
 
-	if len(results) == 0 {
+	v := reflect.ValueOf(results)
+	if v.Kind() != reflect.Slice {
+		t.Fatalf("expected a slice of results, got %T", results)
+	}
+	if v.Len() == 0 {
 		t.Fatal("expected at least one result")
 	}
 
-	first := results[0]
-	if first.URL == "" {
-		t.Fatal("first result URL is empty")
+	first := v.Index(0)
+	if first.Kind() == reflect.Ptr {
+		first = first.Elem()
 	}
-	if first.Title == "" {
-		t.Fatal("first result title is empty")
-	}
-	if first.Description == "" {
-		t.Fatal("first result description is empty")
+
+	for _, field := range []string{"URL", "Title", "Description"} {
+		val := first.FieldByName(field)
+		if !val.IsValid() || val.String() == "" {
+			t.Fatalf("first result %s is empty", field)
+		}
 	}
 }
