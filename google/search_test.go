@@ -2,6 +2,8 @@ package google
 
 import (
 	"testing"
+
+	"github.com/karust/openserp/core"
 )
 
 func TestParseSourceImageURL(t *testing.T) {
@@ -21,5 +23,12 @@ func TestParseSourceImageURL(t *testing.T) {
 
 	if want != got {
 		t.Fatalf("Want: %v, Got: %v", want, got)
+	}
+}
+
+func TestSolveCaptchaWithoutConfiguredSolverReturnsFalse(t *testing.T) {
+	gogl := New(core.Browser{}, core.SearchEngineOptions{})
+	if got := gogl.solveCaptcha(nil, "sitekey", "datas"); got {
+		t.Fatal("expected solveCaptcha to fail without solver/page context")
 	}
 }

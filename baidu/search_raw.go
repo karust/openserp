@@ -1,7 +1,6 @@
 package baidu
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -39,27 +38,41 @@ func baiduResultParser(response *http.Response) ([]core.SearchResult, error) {
 	results := []core.SearchResult{}
 	rank := 1
 
-	// Get individual results
-	sel := doc.Find("div.c-container.new-pmd")
-
-	fmt.Println(sel.Length())
+	// Prefer organic result blocks from the main result column.
+	sel := doc.Find("#content_left .result.c-container")
+	if sel.Length() == 0 {
+		sel = doc.Find("div.c-container.new-pmd")
+	}
 
 	for i := range sel.Nodes {
 		item := sel.Eq(i)
 
 		// Find URL
-		linkTag := item.Find("a")
+		titleTag := item.Find("h3").First()
+		if titleTag.Length() == 0 {
+			continue
+		}
+
+		linkTag := titleTag.Closest("a")
+		if linkTag.Length() == 0 {
+			linkTag = item.Find("a").First()
+		}
 		link, _ := linkTag.Attr("href")
-		link = strings.Trim(link, " ")
+		link = strings.TrimSpace(link)
 
 		// Find title
-		title := linkTag.Text()
+		title := strings.TrimSpace(titleTag.Text())
 
 		// Find description
-		desc := item.Text()
+		descTag := item.Find(".c-abstract, .content-right_8Zs40, .summary-gap_3Jb4I").First()
+		desc := strings.TrimSpace(descTag.Text())
+		if desc == "" {
+			desc = strings.TrimSpace(item.Text())
+		}
 		desc = strings.ReplaceAll(desc, title, "")
+		desc = strings.TrimSpace(desc)
 
-		if link != "" && link != "#" {
+		if link != "" && link != "#" && title != "" {
 			result := core.SearchResult{
 				Rank:        rank,
 				URL:         link,

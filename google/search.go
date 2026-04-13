@@ -71,7 +71,22 @@ func (gogl *Google) getTotalResults(page *rod.Page) (int, error) {
 func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas string) bool {
 	gogl.logger.Debug("Solve captcha: sitekey=%s", sitekey)
 
-	resp, _, err := gogl.CaptchaSolver.SolveReCaptcha2(sitekey, page.MustInfo().URL, datas)
+	if gogl.CaptchaSolver == nil {
+		gogl.logger.Error("Captcha solver is not configured")
+		return false
+	}
+	if page == nil {
+		gogl.logger.Error("Captcha page context is missing")
+		return false
+	}
+
+	info, err := page.Info()
+	if err != nil {
+		gogl.logger.Error("Cannot read page info for captcha solve: %s", err)
+		return false
+	}
+
+	resp, _, err := gogl.CaptchaSolver.SolveReCaptcha2(sitekey, info.URL, datas)
 	if err != nil {
 		gogl.logger.Error("Captcha solve failed: %s", err)
 		return false

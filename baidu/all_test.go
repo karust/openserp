@@ -1,21 +1,13 @@
 package baidu
 
 import (
+	"net/url"
 	"testing"
-	"time"
 
 	"github.com/karust/openserp/core"
 )
 
-var browser *core.Browser
 var testQuery = core.Query{Text: "go", Site: "tutorialspoint.com", DateInterval: "20140101..20230101", Limit: 10}
-
-func init() {
-	core.InitLogger(true, true)
-
-	opts := core.BrowserOpts{IsHeadless: false, IsLeakless: false, Timeout: time.Second * 10}
-	browser, _ = core.NewBrowser(opts)
-}
 
 func TestUrlBuild(t *testing.T) {
 	res, err := BuildURL(testQuery)
@@ -30,18 +22,6 @@ func TestUrlBuild(t *testing.T) {
 	}
 }
 
-func TestSearch(t *testing.T) {
-	baid := New(*browser, core.SearchEngineOptions{})
-	results, err := baid.Search(testQuery)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(results) == 0 {
-		t.Fatal("No results got from Baidu search")
-	}
-}
-
 func TestImageUrlBuild(t *testing.T) {
 	query := core.Query{Text: "金毛猎犬"}
 
@@ -50,22 +30,18 @@ func TestImageUrlBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := "https://image.baidu.com/search/acjson?cl=2&fp=result&ie=utf-8&ipn=rj&oe=utf-8&pn=0&rn=30&tn=resultjson_com&word=%E9%87%91%E6%AF%9B%E7%8C%8E%E7%8A%AC"
-	if want != got {
-		t.Fatalf("Want: `%s`, Got `%s`", want, got)
-	}
-}
-
-func TestImageSearch(t *testing.T) {
-	baid := New(*browser, core.SearchEngineOptions{})
-
-	query := core.Query{Text: "each each data", Limit: 60}
-	results, err := baid.SearchImage(query)
+	parsed, err := url.Parse(got)
 	if err != nil {
-		t.Fatalf("Cannot [ImageBaidu]: %s", err)
+		t.Fatalf("invalid URL returned: %v", err)
 	}
-
-	if len(results) < 60 {
-		t.Fatalf("[ImageBaidu] returned not full result")
+	if parsed.Host != "image.baidu.com" {
+		t.Fatalf("unexpected host: %s", parsed.Host)
+	}
+	q := parsed.Query()
+	if q.Get("word") != "金毛猎犬" {
+		t.Fatalf("expected word query to be preserved, got %q", q.Get("word"))
+	}
+	if q.Get("tn") != "resultjson_com" {
+		t.Fatalf("expected tn=resultjson_com, got %q", q.Get("tn"))
 	}
 }

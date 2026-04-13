@@ -38,26 +38,40 @@ func yandexResultParser(response *http.Response) ([]core.SearchResult, error) {
 	results := []core.SearchResult{}
 	rank := 1
 
-	// Get individual results
-	sel := doc.Find("li.serp-item")
+	// Prefer stable container + attributes and keep legacy fallback.
+	sel := doc.Find("#search-result > li[data-fast], li.serp-item")
 
 	for i := range sel.Nodes {
 		item := sel.Eq(i)
 
+		// Skip blocks without a result heading.
+		titleTag := item.Find("h2").First()
+		if titleTag.Length() == 0 {
+			continue
+		}
+
 		// Find URL
-		linkTag := item.Find("a")
+		linkTag := item.Find("a.OrganicTitle-Link").First()
+		if linkTag.Length() == 0 {
+			linkTag = titleTag.Closest("a")
+		}
+		if linkTag.Length() == 0 {
+			linkTag = item.Find("a").First()
+		}
 		link, _ := linkTag.Attr("href")
 		link = strings.Trim(link, " ")
 
 		// Find title
-		titleTag := item.Find("h2")
-		title := titleTag.Text()
+		title := strings.TrimSpace(titleTag.Text())
 
 		// Find description
-		descTag := item.Find(`span.OrganicTextContentSpan`)
-		desc := descTag.Text()
+		descTag := item.Find(`span.OrganicTextContentSpan`).First()
+		if descTag.Length() == 0 {
+			descTag = item.Find("div.OrganicText").First()
+		}
+		desc := strings.TrimSpace(descTag.Text())
 
-		if link != "" && link != "#" {
+		if link != "" && link != "#" && title != "" {
 			result := core.SearchResult{
 				Rank:        rank,
 				URL:         link,

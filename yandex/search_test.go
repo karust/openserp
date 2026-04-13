@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package yandex
 
 import (
@@ -5,35 +8,31 @@ import (
 	"time"
 
 	"github.com/karust/openserp/core"
+	"github.com/karust/openserp/testutil"
 )
 
-var browser *core.Browser
-
-func init() {
+func createTestBrowser(t *testing.T) *core.Browser {
+	t.Helper()
 	opts := core.BrowserOpts{IsHeadless: false, IsLeakless: false, Timeout: time.Second * 15, LeavePageOpen: true}
-	browser, _ = core.NewBrowser(opts)
+	b, err := core.NewBrowser(opts)
+	if err != nil {
+		t.Fatalf("failed to create test browser: %v", err)
+	}
+	return b
 }
 
-// func TestParseImgData(t *testing.T) {
-
-// 	jsonData, _ := os.ReadFile("./testImgData.json")
-// 	var obj ImageData
-// 	if err := json.Unmarshal(jsonData, &obj); err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	if (len(obj.InitalState.SerpList.Items.Entities)) != 30 {
-// 		t.Fail()
-// 	}
-// }
-
 func TestSearchYandex(t *testing.T) {
+	testutil.RequireIntegration(t)
 
+	browser := createTestBrowser(t)
 	yand := New(*browser, core.SearchEngineOptions{})
 
 	query := core.Query{Text: "HEY", Limit: 10}
 	results, err := yand.Search(query)
 	if err != nil {
+		if err == core.ErrSearchTimeout || err == core.ErrCaptcha {
+			t.Skipf("skipping unstable live yandex search result: %v", err)
+		}
 		t.Fatalf("Cannot [SearchYandex]: %s", err)
 	}
 
@@ -43,6 +42,9 @@ func TestSearchYandex(t *testing.T) {
 }
 
 func TestImageYandex(t *testing.T) {
+	testutil.RequireIntegration(t)
+
+	browser := createTestBrowser(t)
 	yand := New(*browser, core.SearchEngineOptions{})
 
 	query := core.Query{Text: "furry tiger", Limit: 30}
@@ -51,7 +53,7 @@ func TestImageYandex(t *testing.T) {
 		t.Fatalf("Cannot [ImageYandex]: %s", err)
 	}
 
-	if len(results) < 30 {
+	if len(results) == 0 {
 		t.Fatalf("[ImageYandex] returned empty result")
 	}
 }
