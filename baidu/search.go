@@ -166,8 +166,14 @@ func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		if !baid.Browser.LeavePageOpen {
 			defer page.Close()
 		}
-		page.Reload()
-		page.WaitLoad()
+		if err := page.Reload(); err != nil {
+			baid.logger.Error("Page reload failed: %s", err)
+			return nil, core.ErrSearchTimeout
+		}
+		if err := page.WaitLoad(); err != nil {
+			baid.logger.Error("Page load wait failed: %s", err)
+			return nil, core.ErrSearchTimeout
+		}
 
 		result, err := page.Timeout(baid.Timeout).Search("body > pre")
 		if err != nil {
@@ -235,7 +241,9 @@ func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		searchPage += 1
 
 		if !baid.Browser.LeavePageOpen {
-			page.Close()
+			if err := page.Close(); err != nil {
+				baid.logger.Debug("Page close error: %v", err)
+			}
 		}
 	}
 

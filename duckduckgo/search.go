@@ -285,7 +285,10 @@ func (ddg *DuckDuckGo) SearchImage(query core.Query) ([]core.SearchResult, error
 	}
 
 	// Wait for page to load
-	page.WaitLoad()
+	if err := page.WaitLoad(); err != nil {
+		ddg.logger.Error("Wait load failed: %s", err)
+		return searchResults, core.ErrSearchTimeout
+	}
 	time.Sleep(time.Second * 2) // Give time for images to load
 
 	// Try multiple selectors for DuckDuckGo image results

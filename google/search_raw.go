@@ -52,7 +52,7 @@ func googleResultParser(response *http.Response) ([]core.SearchResult, error) {
 
 		// Find URL - look for the anchor that contains the h3 title
 		linkTag := item.Find("h3").Parent()
-		if linkTag.Is("a") == false {
+		if !linkTag.Is("a") {
 			linkTag = item.Find("h3").Closest("a")
 		}
 
