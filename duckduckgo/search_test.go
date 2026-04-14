@@ -1,6 +1,7 @@
 package duckduckgo
 
 import (
+	"net/url"
 	"testing"
 
 	"github.com/karust/openserp/core"
@@ -8,56 +9,113 @@ import (
 
 func TestBuildURL(t *testing.T) {
 	tests := []struct {
-		name     string
-		query    core.Query
-		expected string
-		wantErr  bool
+		name    string
+		query   core.Query
+		page    int
+		wantErr bool
+		check   func(*testing.T, url.Values, string)
 	}{
 		{
-			name: "Basic search",
-			query: core.Query{
-				Text: "golang programming",
+			name:  "basic search",
+			query: core.Query{Text: "golang programming"},
+			page:  0,
+			check: func(t *testing.T, params url.Values, host string) {
+				t.Helper()
+				if host != "duckduckgo.com" {
+					t.Fatalf("unexpected host: %s", host)
+				}
+				if got := params.Get("q"); got != "golang programming" {
+					t.Fatalf("unexpected q value: %q", got)
+				}
+				if got := params.Get("ia"); got != "web" {
+					t.Fatalf("unexpected ia value: %q", got)
+				}
+				if got := params.Get("t"); got != "h" {
+					t.Fatalf("unexpected t value: %q", got)
+				}
+				if got := params.Get("s"); got != "" {
+					t.Fatalf("s should be omitted on first page, got %q", got)
+				}
 			},
-			expected: "https://duckduckgo.com/?q=golang+programming&t=h&ia=web",
-			wantErr:  false,
 		},
 		{
-			name: "Search with site filter",
+			name: "combined params with unicode",
 			query: core.Query{
-				Text: "golang",
-				Site: "github.com",
+				Text:         "поиск",
+				Site:         "github.com",
+				Filetype:     "pdf",
+				LangCode:     "RU-ru",
+				DateInterval: "20240101..20240131",
 			},
-			expected: "https://duckduckgo.com/?q=golang+site%3Agithub.com&t=h&ia=web",
-			wantErr:  false,
+			page: 0,
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("q"); got != "поиск site:github.com filetype:pdf" {
+					t.Fatalf("unexpected q value: %q", got)
+				}
+				if got := params.Get("df"); got != "2024-01-01..2024-01-31" {
+					t.Fatalf("unexpected df value: %q", got)
+				}
+				if got := params.Get("kl"); got != "ru-ru" {
+					t.Fatalf("unexpected kl value: %q", got)
+				}
+			},
 		},
 		{
-			name: "Search with filetype",
-			query: core.Query{
-				Text:     "documentation",
-				Filetype: "pdf",
+			name:  "very large page offset",
+			query: core.Query{Text: "golang"},
+			page:  100000,
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("s"); got != "2500000" {
+					t.Fatalf("unexpected pagination offset: %q", got)
+				}
 			},
-			expected: "https://duckduckgo.com/?q=documentation+filetype%3Apdf&t=h&ia=web",
-			wantErr:  false,
 		},
 		{
-			name: "Empty query",
-			query: core.Query{
-				Text: "",
+			name:  "negative page does not add offset",
+			query: core.Query{Text: "golang"},
+			page:  -1,
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("s"); got != "" {
+					t.Fatalf("expected empty offset for negative page, got %q", got)
+				}
 			},
-			expected: "",
-			wantErr:  true,
+		},
+		{
+			name: "invalid date interval returns error",
+			query: core.Query{
+				Text:         "golang",
+				DateInterval: "invalid",
+			},
+			page:    0,
+			wantErr: true,
+		},
+		{
+			name:    "empty query returns error",
+			query:   core.Query{},
+			page:    0,
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildURL(tt.query)
+			got, err := BuildURL(tt.query, tt.page)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("BuildURL() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("BuildURL() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
 				return
 			}
-			if got != tt.expected {
-				t.Errorf("BuildURL() = %v, want %v", got, tt.expected)
+
+			parsed, err := url.Parse(got)
+			if err != nil {
+				t.Fatalf("BuildURL() returned invalid URL: %v", err)
+			}
+			if tt.check != nil {
+				tt.check(t, parsed.Query(), parsed.Host)
 			}
 		})
 	}
@@ -65,26 +123,51 @@ func TestBuildURL(t *testing.T) {
 
 func TestBuildImageURL(t *testing.T) {
 	tests := []struct {
-		name     string
-		query    core.Query
-		expected string
-		wantErr  bool
+		name    string
+		query   core.Query
+		wantErr bool
+		check   func(*testing.T, url.Values, string)
 	}{
 		{
-			name: "Basic image search",
+			name: "combined params with unicode",
 			query: core.Query{
-				Text: "golang logo",
+				Text:         "горы",
+				Site:         "example.com",
+				Filetype:     "jpg",
+				LangCode:     "RU",
+				DateInterval: "20240201..20240229",
 			},
-			expected: "https://duckduckgo.com/?q=golang+logo&t=h&iax=images&ia=images",
-			wantErr:  false,
+			check: func(t *testing.T, params url.Values, host string) {
+				t.Helper()
+				if host != "duckduckgo.com" {
+					t.Fatalf("unexpected host: %s", host)
+				}
+				if got := params.Get("q"); got != "горы site:example.com filetype:jpg" {
+					t.Fatalf("unexpected q value: %q", got)
+				}
+				if got := params.Get("iax"); got != "images" || params.Get("ia") != "images" {
+					t.Fatalf("expected image mode params, got iax=%q ia=%q", params.Get("iax"), params.Get("ia"))
+				}
+				if got := params.Get("df"); got != "2024-02-01..2024-02-29" {
+					t.Fatalf("unexpected df value: %q", got)
+				}
+				if got := params.Get("kl"); got != "ru" {
+					t.Fatalf("unexpected kl value: %q", got)
+				}
+			},
 		},
 		{
-			name: "Empty query",
+			name: "invalid date interval returns error",
 			query: core.Query{
-				Text: "",
+				Text:         "golang",
+				DateInterval: "202401",
 			},
-			expected: "",
-			wantErr:  true,
+			wantErr: true,
+		},
+		{
+			name:    "empty query returns error",
+			query:   core.Query{},
+			wantErr: true,
 		},
 	}
 
@@ -92,11 +175,18 @@ func TestBuildImageURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := BuildImageURL(tt.query)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("BuildImageURL() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("BuildImageURL() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
 				return
 			}
-			if got != tt.expected {
-				t.Errorf("BuildImageURL() = %v, want %v", got, tt.expected)
+
+			parsed, err := url.Parse(got)
+			if err != nil {
+				t.Fatalf("BuildImageURL() returned invalid URL: %v", err)
+			}
+			if tt.check != nil {
+				tt.check(t, parsed.Query(), parsed.Host)
 			}
 		})
 	}

@@ -82,7 +82,9 @@ func (bing *Bing) acceptCookies(page *rod.Page) {
 	if err != nil {
 		return
 	}
-	consentBtn.Click(proto.InputMouseButtonLeft, 1)
+	if err := consentBtn.Click(proto.InputMouseButtonLeft, 1); err != nil {
+		bing.logger.Debug("Cookie consent click failed: %v", err)
+	}
 	time.Sleep(time.Millisecond * 500)
 }
 
@@ -113,7 +115,10 @@ func (bing *Bing) Search(query core.Query) ([]core.SearchResult, error) {
 	}
 	defer bing.close(page)
 
-	page.WaitLoad()
+	if err := page.WaitLoad(); err != nil {
+		bing.logger.Error("Initial page load wait failed: %s", err)
+		return nil, core.ErrSearchTimeout
+	}
 
 	if bing.checkCaptcha(page) {
 		bing.logger.Error("Captcha detected: %s", url)
@@ -121,7 +126,10 @@ func (bing *Bing) Search(query core.Query) ([]core.SearchResult, error) {
 	}
 
 	bing.acceptCookies(page)
-	page.WaitLoad()
+	if err := page.WaitLoad(); err != nil {
+		bing.logger.Error("Post-consent page load wait failed: %s", err)
+		return nil, core.ErrSearchTimeout
+	}
 
 	organicElements, err := page.Timeout(bing.Timeout).Elements("li.b_algo")
 	if err != nil {
@@ -262,7 +270,10 @@ func (bing *Bing) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	}
 	defer bing.close(page)
 
-	page.WaitLoad()
+	if err := page.WaitLoad(); err != nil {
+		bing.logger.Error("Initial image page load wait failed: %s", err)
+		return nil, core.ErrSearchTimeout
+	}
 
 	// Check for captcha
 	if bing.checkCaptcha(page) {
@@ -274,7 +285,10 @@ func (bing *Bing) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	bing.acceptCookies(page)
 
 	// Wait for image results to load
-	page.WaitLoad()
+	if err := page.WaitLoad(); err != nil {
+		bing.logger.Error("Image results load wait failed: %s", err)
+		return nil, core.ErrSearchTimeout
+	}
 	time.Sleep(time.Second * 2)
 
 	// Find all image result containers using CSS selector

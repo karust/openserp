@@ -2,160 +2,184 @@ package bing
 
 import (
 	"net/url"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/karust/openserp/core"
 )
 
-var browser *core.Browser
-
-func init() {
-	opts := core.BrowserOpts{IsHeadless: false, IsLeakless: false, UseStealth: true, Timeout: time.Second * 5, LeavePageOpen: true}
-	browser, _ = core.NewBrowser(opts)
-}
-
-func TestSearchBing(t *testing.T) {
-	bing := New(*browser, core.SearchEngineOptions{})
-
-	query := core.Query{Text: "golang programming", Limit: 10}
-	results, err := bing.Search(query)
-	if err != nil {
-		t.Fatalf("Cannot [SearchBing]: %s", err)
+func TestBuildURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		query   core.Query
+		wantErr bool
+		check   func(*testing.T, url.Values, string)
+	}{
+		{
+			name: "combined params with unicode and start zero",
+			query: core.Query{
+				Text:         "golang тест",
+				Site:         "example.com",
+				Filetype:     "pdf",
+				DateInterval: "20240101..20240131",
+				LangCode:     "RU",
+				Limit:        30,
+				Start:        0,
+			},
+			check: func(t *testing.T, params url.Values, host string) {
+				t.Helper()
+				if host != "www.bing.com" {
+					t.Fatalf("unexpected host: %s", host)
+				}
+				if got := params.Get("q"); got != "golang тест site:example.com filetype:pdf after:2024-01-01 before:2024-01-31" {
+					t.Fatalf("unexpected q value: %q", got)
+				}
+				if got := params.Get("pq"); got != params.Get("q") {
+					t.Fatalf("pq should match q, got %q vs %q", got, params.Get("q"))
+				}
+				if got := params.Get("setlang"); got != "ru" {
+					t.Fatalf("unexpected setlang value: %q", got)
+				}
+				if got := params.Get("count"); got != "30" {
+					t.Fatalf("unexpected count value: %q", got)
+				}
+				if got := params.Get("first"); got != "" {
+					t.Fatalf("first should be omitted when Start=0, got %q", got)
+				}
+				if got := params.Get("form"); got != "QBLH" {
+					t.Fatalf("unexpected form value: %q", got)
+				}
+				if got := params.Get("qs"); got != "HS" {
+					t.Fatalf("unexpected qs value: %q", got)
+				}
+				if got := params.Get("sp"); got != "-1" {
+					t.Fatalf("unexpected sp value: %q", got)
+				}
+			},
+		},
+		{
+			name: "very large start",
+			query: core.Query{
+				Text:  "golang",
+				Start: 2147483647,
+				Limit: 20,
+			},
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("first"); got != "2147483648" {
+					t.Fatalf("unexpected first value: %q", got)
+				}
+				if got := params.Get("count"); got != "" {
+					t.Fatalf("count should be omitted when first is used, got %q", got)
+				}
+			},
+		},
+		{
+			name: "negative start returns error",
+			query: core.Query{
+				Text:  "golang",
+				Start: -1,
+			},
+			wantErr: true,
+		},
+		{
+			name:    "empty fields return error",
+			query:   core.Query{},
+			wantErr: true,
+		},
 	}
 
-	if len(results) == 0 {
-		t.Fatalf("[SearchBing] returned empty result")
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BuildURL(tt.query)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("BuildURL() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
 
-	// Check that we have some basic fields populated
-	firstResult := results[0]
-	if firstResult.Title == "" {
-		t.Errorf("First result missing title: %+v", firstResult)
-	}
-	if firstResult.URL == "" {
-		t.Errorf("First result missing URL: %+v", firstResult)
-	}
-	if firstResult.Rank == 0 {
-		t.Errorf("First result missing rank: %+v", firstResult)
+			parsed, err := url.Parse(got)
+			if err != nil {
+				t.Fatalf("BuildURL() returned invalid URL: %v", err)
+			}
+			if tt.check != nil {
+				tt.check(t, parsed.Query(), parsed.Host)
+			}
+		})
 	}
 }
 
 func TestBuildImageURL(t *testing.T) {
 	tests := []struct {
-		name     string
-		query    core.Query
-		wantErr  bool
-		wantCont string
+		name    string
+		query   core.Query
+		wantErr bool
+		check   func(*testing.T, url.Values, string)
 	}{
 		{
-			name:     "basic image query",
-			query:    core.Query{Text: "test"},
-			wantErr:  false,
-			wantCont: "q=test",
+			name:  "basic image query",
+			query: core.Query{Text: "test"},
+			check: func(t *testing.T, params url.Values, host string) {
+				t.Helper()
+				if host != "www.bing.com" {
+					t.Fatalf("unexpected host: %s", host)
+				}
+				if got := params.Get("q"); got != "test" {
+					t.Fatalf("unexpected q value: %q", got)
+				}
+			},
 		},
 		{
-			name:     "image query with site",
-			query:    core.Query{Text: "cats", Site: "example.com"},
-			wantErr:  false,
-			wantCont: "q=cats+site%3Aexample.com",
+			name: "combined params with unicode",
+			query: core.Query{
+				Text:     "коты",
+				Site:     "example.com",
+				Filetype: "png",
+				LangCode: "EN",
+			},
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("q"); got != "коты site:example.com" {
+					t.Fatalf("unexpected q value: %q", got)
+				}
+				if got := params.Get("setlang"); got != "en" {
+					t.Fatalf("unexpected setlang value: %q", got)
+				}
+				if got := params.Get("form"); got != "HDRSC2" {
+					t.Fatalf("unexpected form value: %q", got)
+				}
+				if got := params.Get("first"); got != "1" {
+					t.Fatalf("unexpected first value: %q", got)
+				}
+				if got := params.Get("scenario"); got != "ImageBasicHover" {
+					t.Fatalf("unexpected scenario value: %q", got)
+				}
+			},
 		},
 		{
-			name:     "image query with filetype",
-			query:    core.Query{Text: "dogs", Filetype: "png"},
-			wantErr:  false,
-			wantCont: "q=dogs+filetype%3Apng",
-		},
-		{
-			name:     "empty query",
-			query:    core.Query{Text: ""},
-			wantErr:  true,
-			wantCont: "",
+			name:    "empty fields return error",
+			query:   core.Query{},
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := BuildImageURL(tt.query)
-
 			if (err != nil) != tt.wantErr {
-				t.Errorf("BuildImageURL() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("BuildImageURL() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
 				return
 			}
 
-			if !tt.wantErr && got != "" {
-				if !strings.Contains(got, tt.wantCont) {
-					t.Errorf("BuildImageURL() = %v, should contain %v", got, tt.wantCont)
-				}
-
-				// Test that URL is valid
-				_, err := url.Parse(got)
-				if err != nil {
-					t.Errorf("BuildImageURL() returned invalid URL: %v", err)
-				}
-
-				// Should be a Bing images URL
-				if !strings.Contains(got, "bing.com/images/search") {
-					t.Errorf("BuildImageURL() should return Bing images URL, got: %v", got)
-				}
+			parsed, err := url.Parse(got)
+			if err != nil {
+				t.Fatalf("BuildImageURL() returned invalid URL: %v", err)
+			}
+			if tt.check != nil {
+				tt.check(t, parsed.Query(), parsed.Host)
 			}
 		})
 	}
-}
-
-func TestBingImageSearch(t *testing.T) {
-	bing := New(*browser, core.SearchEngineOptions{RateTime: 5})
-
-	query := core.Query{
-		Text:     "golden puppy",
-		Limit:    25,
-		Filetype: "jpg",
-	}
-
-	results, err := bing.SearchImage(query)
-	if err != nil {
-		t.Fatalf("Cannot search Bing images: %s", err)
-	}
-
-	if len(results) == 0 {
-		t.Fatalf("Bing image search returned empty result")
-	}
-
-	// Check that we have image results with proper fields
-	firstResult := results[0]
-	if firstResult.URL == "" {
-		t.Errorf("First result missing image URL: %+v", firstResult)
-	}
-	if firstResult.Title == "" {
-		t.Errorf("First result missing title: %+v", firstResult)
-	}
-
-	// Check that we have either image URL or source URL
-	hasImageURL := firstResult.URL != ""
-	hasSourceURL := firstResult.URL != ""
-	if !hasImageURL && !hasSourceURL {
-		t.Errorf("First result should have either image URL or source URL: %+v", firstResult)
-	}
-
-	// For image results, URL should typically point to an image file
-	if hasImageURL {
-		// Check if it looks like an image URL (common extensions)
-		imageExtensions := []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
-		hasImageExtension := false
-		for _, ext := range imageExtensions {
-			if strings.Contains(strings.ToLower(firstResult.URL), ext) {
-				hasImageExtension = true
-				break
-			}
-		}
-		if !hasImageExtension {
-			t.Logf("Image URL doesn't have common extension (might be valid): %s", firstResult.URL)
-		}
-	}
-
-	t.Logf("Found %d image results", len(results))
-	t.Logf("First result - Title: %s", firstResult.Title)
-	t.Logf("First result - Image URL: %s", firstResult.URL)
-	t.Logf("First result - Source URL: %s", firstResult.URL)
 }

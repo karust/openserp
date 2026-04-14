@@ -5,6 +5,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/karust/openserp)](https://goreportcard.com/report/github.com/karust/openserp)
 [![Go Reference](https://pkg.go.dev/badge/github/karust/openserp?style=for-the-badge)](https://pkg.go.dev/github.com/karust/openserp)
 [![release](https://img.shields.io/github/release/karust/openserp)](https://github.com/karust/openserp/releases)
+[![CI](https://github.com/karust/openserp/actions/workflows/ci.yml/badge.svg?branch=tests)](https://github.com/karust/openserp/actions/workflows/ci.yml)
 
 <!-- [![Docker Pulls](https://img.shields.io/docker/pulls/karust/openserp)](https://hub.docker.com/repository/docker/karust/openserp) -->
 
@@ -14,7 +15,6 @@ A developer-friendly alternative to paid SERP API services!
 **Official website:** [openserp.org](https://openserp.org)
 
 > 💡 OpenSerp is free and open-source. Only links listed in this repository and on the official website are associated with the project.
-
 
 ## Features
 
@@ -184,5 +184,4 @@ If you encounter issues or have questions:
 - Check existing issues for similar reports
 - Review the documentation and example config
 
-
-###### *"OpenSerp" is the name of this open-source project. Use of the name in a way that implies affiliation, endorsement, or official status is not permitted.*
+###### _"OpenSerp" is the name of this open-source project. Use of the name in a way that implies affiliation, endorsement, or official status is not permitted._

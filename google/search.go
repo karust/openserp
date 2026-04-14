@@ -71,7 +71,22 @@ func (gogl *Google) getTotalResults(page *rod.Page) (int, error) {
 func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas string) bool {
 	gogl.logger.Debug("Solve captcha: sitekey=%s", sitekey)
 
-	resp, _, err := gogl.CaptchaSolver.SolveReCaptcha2(sitekey, page.MustInfo().URL, datas)
+	if gogl.CaptchaSolver == nil {
+		gogl.logger.Error("Captcha solver is not configured")
+		return false
+	}
+	if page == nil {
+		gogl.logger.Error("Captcha page context is missing")
+		return false
+	}
+
+	info, err := page.Info()
+	if err != nil {
+		gogl.logger.Error("Cannot read page info for captcha solve: %s", err)
+		return false
+	}
+
+	resp, _, err := gogl.CaptchaSolver.SolveReCaptcha2(sitekey, info.URL, datas)
 	if err != nil {
 		gogl.logger.Error("Captcha solve failed: %s", err)
 		return false
@@ -132,7 +147,13 @@ func (gogl *Google) acceptCookies(page *rod.Page) {
 		gogl.logger.Debug("Cannot get cookie consent buttons: %s", err)
 		return
 	}
-	btnElms[3].Click(proto.InputMouseButtonLeft, 1)
+	if len(btnElms) < 4 {
+		gogl.logger.Debug("Cookie consent buttons unavailable")
+		return
+	}
+	if err := btnElms[3].Click(proto.InputMouseButtonLeft, 1); err != nil {
+		gogl.logger.Debug("Cookie consent click failed: %s", err)
+	}
 
 }
 
@@ -204,7 +225,9 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 				gogl.logger.Debug("Missing link")
 				continue
 			}
-			link.MoveMouseOut()
+			if err := link.MoveMouseOut(); err != nil {
+				gogl.logger.Debug("Move mouse out failed: %s", err)
+			}
 
 			href, err := link.Property("href")
 			if err != nil {
@@ -240,8 +263,13 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 
 			// Unvail answer contents
 			for _, answ := range answers {
-				answ.Click(proto.InputMouseButtonLeft, 1)
-				answ.Focus()
+				if err := answ.Click(proto.InputMouseButtonLeft, 1); err != nil {
+					gogl.logger.Debug("Answer expand click failed: %s", err)
+					continue
+				}
+				if err := answ.Focus(); err != nil {
+					gogl.logger.Debug("Answer focus failed: %s", err)
+				}
 				//answ.Page().WaitRepaint()
 			}
 			time.Sleep(time.Millisecond * 2000)
@@ -259,7 +287,9 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 					gogl.logger.Debug("Missing answer link")
 					continue
 				}
-				link.MoveMouseOut()
+				if err := link.MoveMouseOut(); err != nil {
+					gogl.logger.Debug("Move mouse out failed: %s", err)
+				}
 
 				href, err := link.Property("href")
 				if err != nil {
@@ -353,9 +383,18 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	defer gogl.close(page)
 
 	for len(searchResultsMap) < query.Limit {
-		page.WaitLoad()
-		page.Mouse.Scroll(0, 1000000, 1)
-		page.WaitLoad()
+		if err := page.WaitLoad(); err != nil {
+			gogl.logger.Error("Image page load wait failed: %s", err)
+			return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrSearchTimeout
+		}
+		if err := page.Mouse.Scroll(0, 1000000, 1); err != nil {
+			gogl.logger.Error("Image page scroll failed: %s", err)
+			return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrSearchTimeout
+		}
+		if err := page.WaitLoad(); err != nil {
+			gogl.logger.Error("Image results load wait failed: %s", err)
+			return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrSearchTimeout
+		}
 
 		results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][jsaction]")
 		if err != nil {
@@ -438,7 +477,9 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 			}
 			searchResultsMap[*dataVed] = gR
 
-			r.Remove()
+			if err := r.Remove(); err != nil {
+				gogl.logger.Debug("Failed to remove parsed image element: %s", err)
+			}
 		}
 	}
 
