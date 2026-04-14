@@ -23,8 +23,16 @@ dev.md
 logrus.txt
 logs.txt
 .release
+!.release/
+.release/*
+!.release/site/
+!.release/site/**
 core/test/
 .aider*
 .gocache/
 openserp
 .gomodcache/
+AGENTS.md
+.claude
+sanitize_html_fixtures.py
+core/testdata/*
