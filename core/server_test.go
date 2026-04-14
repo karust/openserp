@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -69,6 +70,223 @@ func requestWithHeader(t *testing.T, s *Server, path string, header string, valu
 		t.Fatalf("request failed for %s: %v", path, err)
 	}
 	return resp
+}
+
+func TestInvalidQueryParametersReturnJSONError(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	srv := NewServerWithOptions("127.0.0.1", 7104, DefaultServerOptions(), engine)
+
+	tests := []struct {
+		name    string
+		path    string
+		message string
+	}{
+		{
+			name:    "invalid limit",
+			path:    "/google/search?text=golang&limit=abc",
+			message: "invalid syntax",
+		},
+		{
+			name:    "negative start",
+			path:    "/google/search?text=golang&start=-1",
+			message: "start must be >= 0",
+		},
+		{
+			name:    "invalid filter flag",
+			path:    "/google/search?text=golang&filter=notabool",
+			message: "invalid syntax",
+		},
+		{
+			name:    "invalid answers flag on mega endpoint",
+			path:    "/mega/search?text=golang&answers=notabool",
+			message: "invalid syntax",
+		},
+		{
+			name:    "empty text query",
+			path:    "/google/search?text=",
+			message: "Query cannot be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := request(t, srv, tt.path)
+			if resp.StatusCode != http.StatusInternalServerError {
+				t.Fatalf("expected 500 for invalid query params, got %d", resp.StatusCode)
+			}
+
+			var payload JSONErrorResponse
+			if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode error response: %v", err)
+			}
+			if payload.Code != http.StatusInternalServerError {
+				t.Fatalf("expected code=500, got %d", payload.Code)
+			}
+			if payload.Error != "server_error" {
+				t.Fatalf("expected error=server_error, got %q", payload.Error)
+			}
+			if payload.Message == "" {
+				t.Fatal("expected error message to be present")
+			}
+			if tt.message != "" && !strings.Contains(payload.Message, tt.message) {
+				t.Fatalf("expected message to contain %q, got %q", tt.message, payload.Message)
+			}
+		})
+	}
+}
+
+func TestMegaEnginesEndpointResponseFormat(t *testing.T) {
+	google := &engineMock{name: "google", initialized: true}
+	yandex := &engineMock{name: "yandex", initialized: false}
+	srv := NewServerWithOptions("127.0.0.1", 7105, DefaultServerOptions(), google, yandex)
+
+	// Prime circuit breaker stats so circuit_state is populated for both engines.
+	_ = request(t, srv, "/google/search?text=golang")
+	_ = request(t, srv, "/yandex/search?text=golang")
+
+	resp := request(t, srv, "/mega/engines")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected /mega/engines to return 200, got %d", resp.StatusCode)
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode /mega/engines response: %v", err)
+	}
+
+	total, ok := payload["total"].(float64)
+	if !ok {
+		t.Fatalf("expected numeric total field, got %T", payload["total"])
+	}
+	if total != 2 {
+		t.Fatalf("expected total=2, got %v", total)
+	}
+
+	engines, ok := payload["engines"].([]interface{})
+	if !ok {
+		t.Fatalf("expected engines array, got %T", payload["engines"])
+	}
+	if len(engines) != 2 {
+		t.Fatalf("expected 2 engines in payload, got %d", len(engines))
+	}
+
+	byName := map[string]map[string]interface{}{}
+	for _, entry := range engines {
+		engineData, ok := entry.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected engine object, got %T", entry)
+		}
+		name, _ := engineData["name"].(string)
+		if name == "" {
+			t.Fatalf("expected non-empty engine name, got %#v", engineData["name"])
+		}
+		if _, ok := engineData["initialized"].(bool); !ok {
+			t.Fatalf("expected initialized bool for engine %s, got %T", name, engineData["initialized"])
+		}
+		state, ok := engineData["circuit_state"].(string)
+		if !ok || state == "" {
+			t.Fatalf("expected non-empty circuit_state for engine %s, got %#v", name, engineData["circuit_state"])
+		}
+		byName[name] = engineData
+	}
+
+	if _, ok := byName["google"]; !ok {
+		t.Fatal("expected google engine in response")
+	}
+	if _, ok := byName["yandex"]; !ok {
+		t.Fatal("expected yandex engine in response")
+	}
+}
+
+func TestStatsEndpointStructure(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	srv := NewServerWithOptions("127.0.0.1", 7106, DefaultServerOptions(), engine)
+
+	// Ensure circuit breaker stats are initialized.
+	_ = request(t, srv, "/google/search?text=golang")
+
+	resp := request(t, srv, "/stats")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected /stats to return 200, got %d", resp.StatusCode)
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode /stats response: %v", err)
+	}
+
+	cache, ok := payload["cache"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected cache object, got %T", payload["cache"])
+	}
+	if _, ok := cache["status"].(bool); !ok {
+		t.Fatalf("expected cache.status bool, got %T", cache["status"])
+	}
+	if _, ok := cache["entries"].(float64); !ok {
+		t.Fatalf("expected cache.entries number, got %T", cache["entries"])
+	}
+	if _, ok := cache["hits"].(float64); !ok {
+		t.Fatalf("expected cache.hits number, got %T", cache["hits"])
+	}
+	if _, ok := cache["misses"].(float64); !ok {
+		t.Fatalf("expected cache.misses number, got %T", cache["misses"])
+	}
+	if _, ok := cache["bypasses"].(float64); !ok {
+		t.Fatalf("expected cache.bypasses number, got %T", cache["bypasses"])
+	}
+
+	proxy, ok := payload["proxy"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected proxy object, got %T", payload["proxy"])
+	}
+	if _, ok := proxy["configured_count"].(float64); !ok {
+		t.Fatalf("expected proxy.configured_count number, got %T", proxy["configured_count"])
+	}
+	if _, ok := proxy["healthy_count"].(float64); !ok {
+		t.Fatalf("expected proxy.healthy_count number, got %T", proxy["healthy_count"])
+	}
+	if _, ok := proxy["unhealthy_count"].(float64); !ok {
+		t.Fatalf("expected proxy.unhealthy_count number, got %T", proxy["unhealthy_count"])
+	}
+	if _, ok := proxy["tags"].(map[string]interface{}); !ok {
+		t.Fatalf("expected proxy.tags object, got %T", proxy["tags"])
+	}
+	if _, ok := proxy["entries"].([]interface{}); !ok {
+		t.Fatalf("expected proxy.entries array, got %T", proxy["entries"])
+	}
+
+	engines, ok := proxy["engines"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected proxy.engines object, got %T", proxy["engines"])
+	}
+	googleStats, ok := engines["google"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected proxy.engines.google object, got %T", engines["google"])
+	}
+	if got := googleStats["selected_proxy"]; got != "direct" {
+		t.Fatalf("expected proxy.engines.google.selected_proxy=direct, got %#v", got)
+	}
+
+	breakers, ok := payload["circuit_breakers"].([]interface{})
+	if !ok {
+		t.Fatalf("expected circuit_breakers array, got %T", payload["circuit_breakers"])
+	}
+	if len(breakers) == 0 {
+		t.Fatal("expected at least one circuit breaker entry")
+	}
+	first, ok := breakers[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected circuit breaker object, got %T", breakers[0])
+	}
+	if _, ok := first["engine"].(string); !ok {
+		t.Fatalf("expected circuit_breakers[0].engine string, got %T", first["engine"])
+	}
+	if _, ok := first["state"].(string); !ok {
+		t.Fatalf("expected circuit_breakers[0].state string, got %T", first["state"])
+	}
+	if _, ok := first["failure_count"].(float64); !ok {
+		t.Fatalf("expected circuit_breakers[0].failure_count number, got %T", first["failure_count"])
+	}
 }
 
 func TestHealthEndpointStatusSemantics(t *testing.T) {

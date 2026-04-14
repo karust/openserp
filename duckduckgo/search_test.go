@@ -11,30 +11,98 @@ func TestBuildURL(t *testing.T) {
 	tests := []struct {
 		name    string
 		query   core.Query
+		page    int
 		wantErr bool
+		check   func(*testing.T, url.Values, string)
 	}{
 		{
 			name:  "basic search",
 			query: core.Query{Text: "golang programming"},
+			page:  0,
+			check: func(t *testing.T, params url.Values, host string) {
+				t.Helper()
+				if host != "duckduckgo.com" {
+					t.Fatalf("unexpected host: %s", host)
+				}
+				if got := params.Get("q"); got != "golang programming" {
+					t.Fatalf("unexpected q value: %q", got)
+				}
+				if got := params.Get("ia"); got != "web" {
+					t.Fatalf("unexpected ia value: %q", got)
+				}
+				if got := params.Get("t"); got != "h" {
+					t.Fatalf("unexpected t value: %q", got)
+				}
+				if got := params.Get("s"); got != "" {
+					t.Fatalf("s should be omitted on first page, got %q", got)
+				}
+			},
 		},
 		{
-			name:  "search with site filter",
-			query: core.Query{Text: "golang", Site: "github.com"},
+			name: "combined params with unicode",
+			query: core.Query{
+				Text:         "поиск",
+				Site:         "github.com",
+				Filetype:     "pdf",
+				LangCode:     "RU-ru",
+				DateInterval: "20240101..20240131",
+			},
+			page: 0,
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("q"); got != "поиск site:github.com filetype:pdf" {
+					t.Fatalf("unexpected q value: %q", got)
+				}
+				if got := params.Get("df"); got != "2024-01-01..2024-01-31" {
+					t.Fatalf("unexpected df value: %q", got)
+				}
+				if got := params.Get("kl"); got != "ru-ru" {
+					t.Fatalf("unexpected kl value: %q", got)
+				}
+			},
 		},
 		{
-			name:  "search with filetype",
-			query: core.Query{Text: "documentation", Filetype: "pdf"},
+			name:  "very large page offset",
+			query: core.Query{Text: "golang"},
+			page:  100000,
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("s"); got != "2500000" {
+					t.Fatalf("unexpected pagination offset: %q", got)
+				}
+			},
 		},
 		{
-			name:    "empty query",
-			query:   core.Query{Text: ""},
+			name:  "negative page does not add offset",
+			query: core.Query{Text: "golang"},
+			page:  -1,
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("s"); got != "" {
+					t.Fatalf("expected empty offset for negative page, got %q", got)
+				}
+			},
+		},
+		{
+			name: "invalid date interval returns error",
+			query: core.Query{
+				Text:         "golang",
+				DateInterval: "invalid",
+			},
+			page:    0,
+			wantErr: true,
+		},
+		{
+			name:    "empty query returns error",
+			query:   core.Query{},
+			page:    0,
 			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildURL(tt.query, 0)
+			got, err := BuildURL(tt.query, tt.page)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("BuildURL() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -46,15 +114,8 @@ func TestBuildURL(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BuildURL() returned invalid URL: %v", err)
 			}
-			params := parsed.Query()
-			if params.Get("q") == "" {
-				t.Fatalf("BuildURL() should include q parameter, got %s", got)
-			}
-			if params.Get("ia") != "web" {
-				t.Fatalf("BuildURL() should include ia=web, got %s", got)
-			}
-			if params.Get("t") != "h" {
-				t.Fatalf("BuildURL() should include t=h, got %s", got)
+			if tt.check != nil {
+				tt.check(t, parsed.Query(), parsed.Host)
 			}
 		})
 	}
@@ -65,14 +126,47 @@ func TestBuildImageURL(t *testing.T) {
 		name    string
 		query   core.Query
 		wantErr bool
+		check   func(*testing.T, url.Values, string)
 	}{
 		{
-			name:  "basic image search",
-			query: core.Query{Text: "golang logo"},
+			name: "combined params with unicode",
+			query: core.Query{
+				Text:         "горы",
+				Site:         "example.com",
+				Filetype:     "jpg",
+				LangCode:     "RU",
+				DateInterval: "20240201..20240229",
+			},
+			check: func(t *testing.T, params url.Values, host string) {
+				t.Helper()
+				if host != "duckduckgo.com" {
+					t.Fatalf("unexpected host: %s", host)
+				}
+				if got := params.Get("q"); got != "горы site:example.com filetype:jpg" {
+					t.Fatalf("unexpected q value: %q", got)
+				}
+				if got := params.Get("iax"); got != "images" || params.Get("ia") != "images" {
+					t.Fatalf("expected image mode params, got iax=%q ia=%q", params.Get("iax"), params.Get("ia"))
+				}
+				if got := params.Get("df"); got != "2024-02-01..2024-02-29" {
+					t.Fatalf("unexpected df value: %q", got)
+				}
+				if got := params.Get("kl"); got != "ru" {
+					t.Fatalf("unexpected kl value: %q", got)
+				}
+			},
 		},
 		{
-			name:    "empty query",
-			query:   core.Query{Text: ""},
+			name: "invalid date interval returns error",
+			query: core.Query{
+				Text:         "golang",
+				DateInterval: "202401",
+			},
+			wantErr: true,
+		},
+		{
+			name:    "empty query returns error",
+			query:   core.Query{},
 			wantErr: true,
 		},
 	}
@@ -91,12 +185,8 @@ func TestBuildImageURL(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BuildImageURL() returned invalid URL: %v", err)
 			}
-			params := parsed.Query()
-			if params.Get("q") == "" {
-				t.Fatalf("BuildImageURL() should include q parameter, got %s", got)
-			}
-			if params.Get("iax") != "images" || params.Get("ia") != "images" {
-				t.Fatalf("BuildImageURL() should target image mode, got %s", got)
+			if tt.check != nil {
+				tt.check(t, parsed.Query(), parsed.Host)
 			}
 		})
 	}
