@@ -1,0 +1,880 @@
+openapi: 3.0.3
+info:
+  title: OpenSERP API
+  version: 0.6.3
+  description: >
+    OpenSERP provides dedicated and multi-engine search endpoints for Google, Yandex,
+    Baidu, Bing, and DuckDuckGo. Responses are normalized into a shared schema and
+    include runtime metadata via response headers.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: http://127.0.0.1:7000
+    description: Local default server
+security: []
+tags:
+  - name: Search
+    description: Dedicated per-engine search endpoints
+  - name: Mega
+    description: Cross-engine aggregated search endpoints
+  - name: Health
+    description: Health and readiness endpoints
+  - name: Stats
+    description: Runtime statistics endpoints
+  - name: Docs
+    description: OpenAPI and Swagger UI endpoints
+paths:
+  /{engine}/search:
+    get:
+      tags: [Search]
+      operationId: searchWeb
+      summary: Search web results from a specific engine
+      description: >
+        Engine path values are `google`, `yandex`, `baidu`, `bing`, and `duck` (`duck` maps
+        to DuckDuckGo internally).
+      parameters:
+        - $ref: "#/components/parameters/EnginePath"
+        - $ref: "#/components/parameters/TextQuery"
+        - $ref: "#/components/parameters/LangQuery"
+        - $ref: "#/components/parameters/DateQuery"
+        - $ref: "#/components/parameters/FileQuery"
+        - $ref: "#/components/parameters/SiteQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+        - $ref: "#/components/parameters/StartQuery"
+        - $ref: "#/components/parameters/FilterQuery"
+        - $ref: "#/components/parameters/AnswersQuery"
+        - $ref: "#/components/parameters/UseProxyHeader"
+      responses:
+        "200":
+          description: Search results
+          headers:
+            X-Cache:
+              $ref: "#/components/headers/XCache"
+            X-Fallback-Engine:
+              $ref: "#/components/headers/XFallbackEngine"
+            X-Proxy-Mode:
+              $ref: "#/components/headers/XProxyMode"
+            X-Proxy-Tag:
+              $ref: "#/components/headers/XProxyTag"
+            X-Proxy-Used:
+              $ref: "#/components/headers/XProxyUsed"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SearchResult"
+              examples:
+                default:
+                  value:
+                    - rank: 1
+                      url: https://go.dev/doc/
+                      title: The Go Programming Language
+                      description: Official Go language documentation.
+                      ad: false
+        "503":
+          $ref: "#/components/responses/ServiceUnavailableError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /{engine}/image:
+    get:
+      tags: [Search]
+      operationId: searchImages
+      summary: Search image results from a specific engine
+      parameters:
+        - $ref: "#/components/parameters/EnginePath"
+        - $ref: "#/components/parameters/TextQuery"
+        - $ref: "#/components/parameters/LangQuery"
+        - $ref: "#/components/parameters/DateQuery"
+        - $ref: "#/components/parameters/FileQuery"
+        - $ref: "#/components/parameters/SiteQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+        - $ref: "#/components/parameters/StartQuery"
+        - $ref: "#/components/parameters/FilterQuery"
+        - $ref: "#/components/parameters/AnswersQuery"
+        - $ref: "#/components/parameters/UseProxyHeader"
+      responses:
+        "200":
+          description: Image search results
+          headers:
+            X-Cache:
+              $ref: "#/components/headers/XCache"
+            X-Fallback-Engine:
+              $ref: "#/components/headers/XFallbackEngine"
+            X-Proxy-Mode:
+              $ref: "#/components/headers/XProxyMode"
+            X-Proxy-Tag:
+              $ref: "#/components/headers/XProxyTag"
+            X-Proxy-Used:
+              $ref: "#/components/headers/XProxyUsed"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SearchResult"
+              examples:
+                default:
+                  value:
+                    - rank: 1
+                      url: https://upload.wikimedia.org/example/golang.png
+                      title: Golang logo image
+                      description: Example image result
+                      ad: false
+        "503":
+          $ref: "#/components/responses/ServiceUnavailableError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /mega/search:
+    get:
+      tags: [Mega]
+      operationId: megaSearch
+      summary: Search across multiple engines in parallel
+      parameters:
+        - $ref: "#/components/parameters/TextQuery"
+        - $ref: "#/components/parameters/LangQuery"
+        - $ref: "#/components/parameters/DateQuery"
+        - $ref: "#/components/parameters/FileQuery"
+        - $ref: "#/components/parameters/SiteQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+        - $ref: "#/components/parameters/StartQuery"
+        - $ref: "#/components/parameters/FilterQuery"
+        - $ref: "#/components/parameters/AnswersQuery"
+        - $ref: "#/components/parameters/EnginesQuery"
+        - $ref: "#/components/parameters/UseProxyHeader"
+      responses:
+        "200":
+          description: Aggregated and de-duplicated results
+          headers:
+            X-Cache:
+              $ref: "#/components/headers/XCache"
+            X-Proxy-Mode:
+              $ref: "#/components/headers/XProxyMode"
+            X-Proxy-Tag:
+              $ref: "#/components/headers/XProxyTag"
+            X-Proxy-Used:
+              $ref: "#/components/headers/XProxyUsed"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MegaSearchResult"
+              examples:
+                default:
+                  value:
+                    - rank: 1
+                      url: https://go.dev/doc/
+                      title: The Go Programming Language
+                      description: Official documentation.
+                      ad: false
+                      engine: google
+                    - rank: 2
+                      url: https://pkg.go.dev/
+                      title: Go Packages
+                      description: Go package documentation.
+                      ad: false
+                      engine: bing
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /mega/image:
+    get:
+      tags: [Mega]
+      operationId: megaImageSearch
+      summary: Image search across multiple engines in parallel
+      parameters:
+        - $ref: "#/components/parameters/TextQuery"
+        - $ref: "#/components/parameters/LangQuery"
+        - $ref: "#/components/parameters/DateQuery"
+        - $ref: "#/components/parameters/FileQuery"
+        - $ref: "#/components/parameters/SiteQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+        - $ref: "#/components/parameters/StartQuery"
+        - $ref: "#/components/parameters/FilterQuery"
+        - $ref: "#/components/parameters/AnswersQuery"
+        - $ref: "#/components/parameters/EnginesQuery"
+        - $ref: "#/components/parameters/UseProxyHeader"
+      responses:
+        "200":
+          description: Aggregated and de-duplicated image results
+          headers:
+            X-Cache:
+              $ref: "#/components/headers/XCache"
+            X-Proxy-Mode:
+              $ref: "#/components/headers/XProxyMode"
+            X-Proxy-Tag:
+              $ref: "#/components/headers/XProxyTag"
+            X-Proxy-Used:
+              $ref: "#/components/headers/XProxyUsed"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MegaSearchResult"
+              examples:
+                default:
+                  value:
+                    - rank: 1
+                      url: https://upload.wikimedia.org/example/gopher.png
+                      title: Go Gopher
+                      description: Example image
+                      ad: false
+                      engine: duckduckgo
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /mega/engines:
+    get:
+      tags: [Mega]
+      operationId: listMegaEngines
+      summary: List available engines and runtime state
+      responses:
+        "200":
+          description: Engine list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MegaEnginesResponse"
+              examples:
+                default:
+                  value:
+                    total: 5
+                    engines:
+                      - name: google
+                        initialized: true
+                        circuit_state: closed
+                      - name: bing
+                        initialized: true
+                        circuit_state: closed
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+  /health:
+    get:
+      tags: [Health]
+      operationId: healthCheck
+      summary: Service health status
+      responses:
+        "200":
+          description: Healthy or degraded service
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+              examples:
+                healthy:
+                  value:
+                    status: healthy
+                    uptime: 1h2m3s
+                    engines:
+                      - name: google
+                        initialized: true
+                        status: ready
+                    system:
+                      goroutines: 32
+                      memory_mb: 128
+                      go_version: go1.24.6
+        "503":
+          description: Unhealthy service
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+              examples:
+                unhealthy:
+                  value:
+                    status: unhealthy
+                    uptime: 12m10s
+                    engines:
+                      - name: google
+                        initialized: false
+                        status: not_initialized
+                    system:
+                      goroutines: 14
+                      memory_mb: 96
+                      go_version: go1.24.6
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+  /stats:
+    get:
+      tags: [Stats]
+      operationId: getStats
+      summary: Combined cache, proxy, and circuit-breaker stats
+      responses:
+        "200":
+          description: Runtime statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsResponse"
+              examples:
+                default:
+                  value:
+                    cache:
+                      status: true
+                      entries: 10
+                      hits: 200
+                      misses: 15
+                      bypasses: 4
+                      evictions: 0
+                      ttl_seconds: 60
+                      max_size: 1000
+                    proxy:
+                      configured_count: 2
+                      healthy_count: 2
+                      unhealthy_count: 0
+                      tags:
+                        default:
+                          configured: 2
+                          healthy: 2
+                      entries:
+                        - proxy: http://proxy1:8080
+                          tags: [default]
+                          healthy: true
+                          failures: 0
+                          disabled: false
+                      engines:
+                        google:
+                          tag: default
+                          selected_proxy: pooled
+                    circuit_breakers:
+                      - engine: google
+                        state: closed
+                        failure_count: 0
+                        last_changed: 2026-04-15T08:00:00Z
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+  /stats/cache:
+    get:
+      tags: [Stats]
+      operationId: getCacheStats
+      summary: Cache statistics only
+      responses:
+        "200":
+          description: Cache status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CacheStats"
+              examples:
+                enabled:
+                  value:
+                    status: true
+                    entries: 1
+                    hits: 1
+                    misses: 2
+                    bypasses: 1
+                    evictions: 0
+                    ttl_seconds: 60
+                    max_size: 1000
+                disabled:
+                  value:
+                    status: false
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+  /stats/proxy:
+    get:
+      tags: [Stats]
+      operationId: getProxyStats
+      summary: Proxy pool and per-engine proxy policy statistics
+      responses:
+        "200":
+          description: Proxy stats payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProxyStats"
+              examples:
+                default:
+                  value:
+                    configured_count: 1
+                    healthy_count: 1
+                    unhealthy_count: 0
+                    tags:
+                      us:
+                        configured: 1
+                        healthy: 1
+                    entries:
+                      - proxy: http://proxy-us:8080
+                        tags: [us]
+                        healthy: true
+                        failures: 0
+                        disabled: false
+                    engines:
+                      google:
+                        tag: us
+                        selected_proxy: pooled
+                      yandex:
+                        selected_proxy: direct
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+  /stats/cb:
+    get:
+      tags: [Stats]
+      operationId: getCircuitBreakerStats
+      summary: Circuit breaker state per engine
+      responses:
+        "200":
+          description: Circuit breaker stats payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CircuitBreakerStatsResponse"
+              examples:
+                default:
+                  value:
+                    circuit_breakers:
+                      - engine: google
+                        state: open
+                        failure_count: 5
+                        last_changed: 2026-04-15T08:00:00Z
+                        retry_in: 43
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+  /openapi.yaml:
+    get:
+      tags: [Docs]
+      operationId: getOpenAPISpec
+      summary: Get raw OpenAPI YAML
+      responses:
+        "200":
+          description: OpenAPI YAML
+          content:
+            application/yaml:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+  /docs:
+    get:
+      tags: [Docs]
+      operationId: getSwaggerUI
+      summary: Swagger UI for interactive API docs
+      responses:
+        "200":
+          description: HTML page loading Swagger UI from CDN
+          content:
+            text/html:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+components:
+  parameters:
+    EnginePath:
+      name: engine
+      in: path
+      required: true
+      description: Search engine endpoint alias (`duck` is DuckDuckGo).
+      schema:
+        type: string
+        enum: [google, yandex, baidu, bing, duck]
+    TextQuery:
+      name: text
+      in: query
+      required: false
+      description: >
+        Search query text. At least one of `text`, `site`, or `file` must be non-empty.
+      schema:
+        type: string
+      example: golang
+    LangQuery:
+      name: lang
+      in: query
+      required: false
+      description: Language code (engine-specific behavior).
+      schema:
+        type: string
+      example: EN
+    DateQuery:
+      name: date
+      in: query
+      required: false
+      description: Date interval in `YYYYMMDD..YYYYMMDD` format.
+      schema:
+        type: string
+        pattern: "^[0-9]{8}\\.\\.[0-9]{8}$"
+      example: 20250101..20250131
+    FileQuery:
+      name: file
+      in: query
+      required: false
+      description: File extension filter (for engines that support it).
+      schema:
+        type: string
+      example: PDF
+    SiteQuery:
+      name: site
+      in: query
+      required: false
+      description: Site/domain filter.
+      schema:
+        type: string
+      example: github.com
+    LimitQuery:
+      name: limit
+      in: query
+      required: false
+      description: Maximum results to return.
+      schema:
+        type: integer
+        default: 25
+      example: 10
+    StartQuery:
+      name: start
+      in: query
+      required: false
+      description: Pagination offset (must be >= 0).
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+      example: 20
+    FilterQuery:
+      name: filter
+      in: query
+      required: false
+      description: Duplicate filtering flag (primarily used by Google parser behavior).
+      schema:
+        type: boolean
+        default: true
+      example: true
+    AnswersQuery:
+      name: answers
+      in: query
+      required: false
+      description: Include answer box style results when supported.
+      schema:
+        type: boolean
+        default: false
+      example: false
+    EnginesQuery:
+      name: engines
+      in: query
+      required: false
+      description: >
+        Comma-separated engine list for mega endpoints. If omitted, all available engines are used.
+      schema:
+        type: string
+      example: google,bing,duckduckgo
+    UseProxyHeader:
+      name: X-Use-Proxy
+      in: header
+      required: false
+      description: >
+        Request-scoped proxy override. Use `direct` to disable proxy for the request or
+        pass a proxy tag name (for example `us`) to force a tagged proxy pool.
+      schema:
+        type: string
+      examples:
+        direct:
+          value: direct
+        tag:
+          value: us
+  headers:
+    XCache:
+      description: Cache status when cache is enabled (`HIT`, `MISS`, `BYPASS`).
+      schema:
+        type: string
+    XFallbackEngine:
+      description: Engine name used when dedicated endpoint fallback served the response.
+      schema:
+        type: string
+    XProxyMode:
+      description: Effective proxy mode for the request (`off` or `tag_pool`).
+      schema:
+        type: string
+        enum: [off, tag_pool]
+    XProxyTag:
+      description: Effective proxy tag when `X-Proxy-Mode=tag_pool`.
+      schema:
+        type: string
+    XProxyUsed:
+      description: Effective proxy target used (`direct`, masked proxy, `pooled`, `multiple`, `mixed`).
+      schema:
+        type: string
+  responses:
+    BadRequestError:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            invalidEngines:
+              value:
+                error: bad_request
+                code: 400
+                message: No valid search engines specified
+    ServiceUnavailableError:
+      description: Search failed and no result could be produced
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            primaryFailed:
+              value:
+                error: service_unavailable
+                code: 503
+                message: all search engines failed
+    NotFoundError:
+      description: Endpoint not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            notFound:
+              value:
+                error: not_found
+                code: 404
+                message: Cannot GET /unknown
+    InternalServerError:
+      description: Internal error while parsing/handling request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            parseError:
+              value:
+                error: server_error
+                code: 500
+                message: invalid syntax
+  schemas:
+    SearchResult:
+      type: object
+      required: [rank, url, title, description, ad]
+      properties:
+        rank:
+          type: integer
+          example: 1
+        url:
+          type: string
+          example: https://go.dev/doc/
+        title:
+          type: string
+          example: The Go Programming Language
+        description:
+          type: string
+          example: Official Go language documentation.
+        ad:
+          type: boolean
+          example: false
+    MegaSearchResult:
+      allOf:
+        - $ref: "#/components/schemas/SearchResult"
+        - type: object
+          required: [engine]
+          properties:
+            engine:
+              type: string
+              example: google
+    ErrorResponse:
+      type: object
+      required: [error, code]
+      properties:
+        error:
+          type: string
+          example: service_unavailable
+        code:
+          type: integer
+          example: 503
+        message:
+          type: string
+          example: all search engines failed
+    EngineHealth:
+      type: object
+      required: [name, initialized, status]
+      properties:
+        name:
+          type: string
+          example: google
+        initialized:
+          type: boolean
+          example: true
+        status:
+          type: string
+          enum: [ready, not_initialized, circuit_open]
+          example: ready
+    HealthStatus:
+      type: object
+      required: [status, uptime, engines, system]
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        uptime:
+          type: string
+          example: 1h12m3s
+        engines:
+          type: array
+          items:
+            $ref: "#/components/schemas/EngineHealth"
+        system:
+          type: object
+          additionalProperties: true
+          properties:
+            goroutines:
+              type: integer
+            memory_mb:
+              type: integer
+            go_version:
+              type: string
+    CacheStatsEnabled:
+      type: object
+      required: [status, entries, hits, misses, bypasses, evictions, ttl_seconds, max_size]
+      properties:
+        status:
+          type: boolean
+          enum: [true]
+        entries:
+          type: integer
+        hits:
+          type: integer
+        misses:
+          type: integer
+        bypasses:
+          type: integer
+        evictions:
+          type: integer
+        ttl_seconds:
+          type: integer
+        max_size:
+          type: integer
+    CacheStatsDisabled:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: boolean
+          enum: [false]
+    CacheStats:
+      oneOf:
+        - $ref: "#/components/schemas/CacheStatsEnabled"
+        - $ref: "#/components/schemas/CacheStatsDisabled"
+    ProxyTagSummary:
+      type: object
+      required: [configured, healthy]
+      properties:
+        configured:
+          type: integer
+        healthy:
+          type: integer
+    ProxyStatsEntry:
+      type: object
+      required: [proxy, tags, healthy, failures, disabled]
+      properties:
+        proxy:
+          type: string
+          example: http://proxy-us:8080
+        tags:
+          type: array
+          items:
+            type: string
+        healthy:
+          type: boolean
+        failures:
+          type: integer
+        disabled:
+          type: boolean
+    ProxyEngineStats:
+      type: object
+      required: [selected_proxy]
+      properties:
+        tag:
+          type: string
+        selected_proxy:
+          type: string
+          example: direct
+    ProxyStats:
+      type: object
+      required: [configured_count, healthy_count, unhealthy_count, tags, entries]
+      properties:
+        configured_count:
+          type: integer
+        healthy_count:
+          type: integer
+        unhealthy_count:
+          type: integer
+        tags:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/ProxyTagSummary"
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProxyStatsEntry"
+        engines:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/ProxyEngineStats"
+    CircuitBreakerStat:
+      type: object
+      required: [engine, state, failure_count, last_changed]
+      properties:
+        engine:
+          type: string
+          example: google
+        state:
+          type: string
+          enum: [closed, open, half-open]
+        failure_count:
+          type: integer
+        last_changed:
+          type: string
+          format: date-time
+        retry_in:
+          type: integer
+          description: Seconds until next half-open attempt (present when state is open).
+    CircuitBreakerStatsResponse:
+      type: object
+      required: [circuit_breakers]
+      properties:
+        circuit_breakers:
+          type: array
+          items:
+            $ref: "#/components/schemas/CircuitBreakerStat"
+    StatsResponse:
+      type: object
+      required: [cache, proxy, circuit_breakers]
+      properties:
+        cache:
+          $ref: "#/components/schemas/CacheStats"
+        proxy:
+          $ref: "#/components/schemas/ProxyStats"
+        circuit_breakers:
+          type: array
+          items:
+            $ref: "#/components/schemas/CircuitBreakerStat"
+    MegaEngineInfo:
+      type: object
+      required: [name, initialized]
+      properties:
+        name:
+          type: string
+          example: google
+        initialized:
+          type: boolean
+        circuit_state:
+          type: string
+          enum: [closed, open, half-open]
+    MegaEnginesResponse:
+      type: object
+      required: [engines, total]
+      properties:
+        engines:
+          type: array
+          items:
+            $ref: "#/components/schemas/MegaEngineInfo"
+        total:
+          type: integer

@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"runtime"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	apidocs "github.com/karust/openserp/docs"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
@@ -84,6 +86,9 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 	}
 	app.Use(RequestLoggerMiddleware())
 
+	app.Get("/openapi.yaml", serv.handleOpenAPISpec)
+	app.Get("/docs", serv.handleSwaggerUI)
+	app.Get("/docs/", serv.handleSwaggerUI)
 	app.Get("/health", serv.handleHealthCheck)
 	app.Get("/stats", serv.handleStats)
 	app.Get("/stats/cache", serv.handleCacheStats)
@@ -561,6 +566,45 @@ func (s *Server) applyProxyHeaders(c *fiber.Ctx, meta ProxyExecutionMeta) {
 	c.Set("X-Proxy-Mode", mode)
 	c.Set("X-Proxy-Tag", tag)
 	c.Set("X-Proxy-Used", used)
+}
+
+func (s *Server) handleOpenAPISpec(c *fiber.Ctx) error {
+	c.Set("Content-Type", "application/yaml; charset=utf-8")
+	return c.Send(apidocs.OpenAPIYAML)
+}
+
+func (s *Server) handleSwaggerUI(c *fiber.Ctx) error {
+	const specPath = "/openapi.yaml"
+	page := fmt.Sprintf(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenSERP API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <style>
+    body { margin: 0; background: #f6f8fb; }
+    #swagger-ui { max-width: 1200px; margin: 0 auto; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+  <script>
+    window.onload = function () {
+      window.ui = SwaggerUIBundle({
+        url: %q,
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        displayRequestDuration: true,
+        presets: [SwaggerUIBundle.presets.apis],
+      });
+    };
+  </script>
+</body>
+</html>`, html.EscapeString(specPath))
+	c.Set("Content-Type", "text/html; charset=utf-8")
+	return c.SendString(page)
 }
 
 func (s *Server) Listen() error {

@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -70,6 +71,52 @@ func requestWithHeader(t *testing.T, s *Server, path string, header string, valu
 		t.Fatalf("request failed for %s: %v", path, err)
 	}
 	return resp
+}
+
+func TestOpenAPISpecEndpoint(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	srv := NewServerWithOptions("127.0.0.1", 7107, DefaultServerOptions(), engine)
+
+	resp := request(t, srv, "/openapi.yaml")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected /openapi.yaml to return 200, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "application/yaml") {
+		t.Fatalf("expected YAML content-type, got %q", got)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read /openapi.yaml body: %v", err)
+	}
+	if !strings.Contains(string(body), "openapi: 3.0.3") {
+		t.Fatalf("expected OpenAPI version marker in body")
+	}
+}
+
+func TestDocsEndpointServesSwaggerUI(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	srv := NewServerWithOptions("127.0.0.1", 7108, DefaultServerOptions(), engine)
+
+	resp := request(t, srv, "/docs")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected /docs to return 200, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "text/html") {
+		t.Fatalf("expected HTML content-type, got %q", got)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read /docs body: %v", err)
+	}
+	content := string(body)
+	if !strings.Contains(content, "SwaggerUIBundle") {
+		t.Fatalf("expected SwaggerUI bundle script on docs page")
+	}
+	if !strings.Contains(content, "/openapi.yaml") {
+		t.Fatalf("expected docs page to reference /openapi.yaml")
+	}
 }
 
 func TestInvalidQueryParametersReturnJSONError(t *testing.T) {

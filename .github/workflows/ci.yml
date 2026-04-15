@@ -23,11 +23,19 @@ jobs:
           go-version: "1.24"
           cache: true
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Run unit tests
         run: go test -race -count=1 ./...
 
       - name: Run go vet
         run: go vet ./...
+
+      - name: Lint OpenAPI spec
+        run: npx --yes @redocly/cli lint docs/openapi.yaml
 
       - name: Build
         run: go build .
