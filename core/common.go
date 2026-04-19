@@ -9,17 +9,31 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// ErrCaptcha is returned when the engine detects a captcha challenge page.
+// This error is treated as non-retryable by resilient search policies.
 var ErrCaptcha = errors.New("captcha detected")
+
+// ErrSearchTimeout is returned when required SERP elements are not found before
+// selector or page timeouts expire.
 var ErrSearchTimeout = errors.New("timeout. Cannot find element on page")
 
+// SearchResult represents one normalized result item returned by any engine.
 type SearchResult struct {
-	Rank        int    `json:"rank"`
-	URL         string `json:"url"`
-	Title       string `json:"title"`
+	// Rank is a 1-based position in engine output. Some engines use negative
+	// ranks for non-organic blocks such as ads or instant answers.
+	Rank int `json:"rank"`
+	// URL is the canonical result URL.
+	URL string `json:"url"`
+	// Title is the result headline shown on the SERP.
+	Title string `json:"title"`
+	// Description is the snippet text associated with the result.
 	Description string `json:"description"`
-	Ad          bool   `json:"ad"`
+	// Ad reports whether the result is sponsored.
+	Ad bool `json:"ad"`
 }
 
+// DeduplicateResults removes items with duplicate URLs and returns a result set
+// sorted by rank in ascending order.
 func DeduplicateResults(results []SearchResult) []SearchResult {
 	unique := make(map[string]bool)
 	var deduped []SearchResult
@@ -40,6 +54,8 @@ func DeduplicateResults(results []SearchResult) []SearchResult {
 	return deduped
 }
 
+// ConvertSearchResultsMap converts a map-based collection to a rank-sorted
+// slice and returns it by pointer.
 func ConvertSearchResultsMap(searchResultsMap map[string]SearchResult) *[]SearchResult {
 	searchResults := []SearchResult{}
 
@@ -53,21 +69,42 @@ func ConvertSearchResultsMap(searchResultsMap map[string]SearchResult) *[]Search
 	return &searchResults
 }
 
+// Query holds request parameters used by HTTP handlers and search engines.
+// Example minimal query: Query{Text: "golang", Limit: 10}.
 type Query struct {
-	Text          string
-	LangCode      string // eg. EN, ES, RU...
-	DateInterval  string // format: YYYYMMDD..YYYMMDD - 20181010..20231010
-	Filetype      string // File extension to search.
-	Site          string // Search site
-	Limit         int    // Limit the number of results
-	Start         int    // Search offset for pagination (Google uses 0, 10, 20...)
-	Filter        bool   // Filter duplicates (google) (false: include similar, true: hide similar)
-	Answers       bool   // Include question and answers from SERP page to results with negative indexes
-	ProxyURL      string // Proxy URL for raw requests
-	ProxyOverride string // Request-scoped proxy override: tag or direct
-	Insecure      bool   // Allow insecure TLS connections
+	// Text is the search phrase, for example "golang fiber tutorial".
+	Text string
+	// LangCode is an engine language hint such as "EN", "DE", or "RU".
+	LangCode string
+	// DateInterval filters by date range in YYYYMMDD..YYYYMMDD format.
+	// Example: "20250101..20250331".
+	DateInterval string
+	// Filetype is a file extension filter, for example "pdf" or "docx".
+	Filetype string
+	// Site restricts results to a specific domain, for example "github.com".
+	Site string
+	// Limit is the maximum number of results requested by the client.
+	Limit int
+	// Start is an engine pagination offset. Values are engine-specific:
+	// Google commonly uses 0,10,20 while some engines use page indexes.
+	Start int
+	// Filter controls duplicate filtering when supported by the engine.
+	// For Google, false includes similar results and true hides them.
+	Filter bool
+	// Answers enables parsing answer modules when supported by the engine.
+	// Such entries may be returned with negative rank values.
+	Answers bool
+	// ProxyURL is a direct proxy URL used by raw HTTP search paths.
+	ProxyURL string
+	// ProxyOverride is a request-scoped proxy policy override (tag or "direct"),
+	// typically parsed from the X-Use-Proxy header.
+	ProxyOverride string
+	// Insecure enables insecure TLS for request/browser execution.
+	Insecure bool
 }
 
+// ComputePagination translates an absolute start offset into page index and
+// in-page offset for a fixed page size.
 func ComputePagination(start int, pageSize int) (int, int, error) {
 	if pageSize <= 0 {
 		return 0, 0, errors.New("pageSize must be > 0")
@@ -78,6 +115,7 @@ func ComputePagination(start int, pageSize int) (int, int, error) {
 	return start / pageSize, start % pageSize, nil
 }
 
+// IsEmpty reports whether query text operators are all absent.
 func (q Query) IsEmpty() bool {
 	if q.Site == "" && q.Filetype == "" && q.Text == "" {
 		return true
@@ -85,6 +123,9 @@ func (q Query) IsEmpty() bool {
 	return false
 }
 
+// InitFromContext populates Query from HTTP query parameters and request
+// headers. It validates numeric/boolean inputs and returns an error for empty
+// search expressions.
 func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 	searchQuery.Text = reqCtx.Query("text")
 	searchQuery.LangCode = reqCtx.Query("lang")
@@ -128,14 +169,23 @@ func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 	return nil
 }
 
+// SearchEngineOptions controls engine pacing, selector waits, and captcha
+// handling behavior shared by browser and raw implementations.
 type SearchEngineOptions struct {
-	RateRequests    int   `mapstructure:"rate_requests"`
-	RateTime        int64 `mapstructure:"rate_seconds"`
-	RateBurst       int   `mapstructure:"rate_burst"`
-	SelectorTimeout int64 `mapstructure:"selector_timeout"` // CSS selector timeout in seconds
-	IsSolveCaptcha  bool  `mapstructure:"captcha"`
+	// RateRequests is the allowed number of requests within RateTime seconds.
+	RateRequests int `mapstructure:"rate_requests"`
+	// RateTime defines the rate-limiting window size in seconds.
+	RateTime int64 `mapstructure:"rate_seconds"`
+	// RateBurst is the token bucket burst size for short spikes.
+	RateBurst int `mapstructure:"rate_burst"`
+	// SelectorTimeout is the per-selector wait timeout in seconds.
+	SelectorTimeout int64 `mapstructure:"selector_timeout"`
+	// IsSolveCaptcha enables automatic captcha solving when engine support and
+	// solver credentials are configured.
+	IsSolveCaptcha bool `mapstructure:"captcha"`
 }
 
+// Init sets default option values when fields are zero.
 func (o *SearchEngineOptions) Init() {
 	if o.RateRequests == 0 {
 		o.RateRequests = 6
@@ -151,10 +201,12 @@ func (o *SearchEngineOptions) Init() {
 	}
 }
 
+// GetRatelimit returns the interval between two allowed requests.
 func (o *SearchEngineOptions) GetRatelimit() time.Duration {
 	return (time.Duration(o.RateTime) * time.Second) / time.Duration(o.RateRequests)
 }
 
+// GetSelectorTimeout returns the selector wait timeout as time.Duration.
 func (o *SearchEngineOptions) GetSelectorTimeout() time.Duration {
 	return time.Duration(o.SelectorTimeout) * time.Second
 }

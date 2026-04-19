@@ -11,6 +11,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// GoogleDomains maps language/country hints to Google TLD suffixes used for
+// URL construction.
 var GoogleDomains = map[string]string{
 	"":    "com",
 	"en":  "com",
@@ -213,7 +215,8 @@ var GoogleDomains = map[string]string{
 	"zw":  "co.zw",
 }
 
-// Build Google query URL from Query struct
+// BuildURL builds a Google web search URL from Query fields.
+// It returns an error when the resulting query text is empty or invalid.
 func BuildURL(q core.Query) (string, error) {
 	googleBase := GoogleDomains[strings.ToLower(q.LangCode)]
 	base, err := url.Parse(fmt.Sprintf("https://www.google.%s", googleBase))
@@ -286,6 +289,8 @@ func BuildURL(q core.Query) (string, error) {
 	return base.String(), nil
 }
 
+// BuildImageURL builds a Google image search URL from Query fields.
+// It returns an error when the resulting query text is empty or invalid.
 func BuildImageURL(q core.Query) (string, error) {
 	// TODO: Add new params
 	googleBase := GoogleDomains[strings.ToLower(q.LangCode)]
@@ -344,6 +349,7 @@ func BuildImageURL(q core.Query) (string, error) {
 	return base.String(), nil
 }
 
+// SourceImage contains parsed Google image metadata extracted from result links.
 type SourceImage struct {
 	PageURL     string
 	OriginalURL string

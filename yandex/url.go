@@ -10,6 +10,8 @@ import (
 
 const baseURL = "https://www.yandex.com"
 
+// BuildURL builds a Yandex web search URL for the provided query and page
+// index. It returns an error when the resulting query text is empty.
 func BuildURL(q core.Query, page int) (string, error) {
 	base, _ := url.Parse(baseURL)
 	base.Path += "search/"
@@ -42,6 +44,8 @@ func BuildURL(q core.Query, page int) (string, error) {
 	return base.String(), nil
 }
 
+// BuildImageURL builds a Yandex image search URL for the provided query and
+// page index. It returns an error when the resulting query text is empty.
 func BuildImageURL(q core.Query, page int) (string, error) {
 	// TODO: Add other parameters
 	base, _ := url.Parse(baseURL)

@@ -82,7 +82,7 @@ API response example:
     "rank": 2,
     "url": "https://www.bing.com/ck/a?!&&p=6f15ac4589858d0a104cd6f55cc8",
     "title": "Golden Retriever Dog Forums",
-    "description": "Oct 20, 2024 · Back in the 1970s, Golden Retrievers routinely lived until 16 and 17 years old, they are now...",
+    "description": "Oct 20, 2024 · Back in the 1970s, Golden Retrievers routinely lived until 16 and 17 years old, they are now...",
     "ad": false,
     "engine": "bing"
   },
@@ -141,6 +141,87 @@ curl "http://127.0.0.1:7000/bing/search?text=golang&limit=10&start=20"
 curl "http://127.0.0.1:7000/yandex/search?text=golang&limit=10&start=10"
 curl "http://127.0.0.1:7000/bing/image?text=golang&limit=20"
 ```
+
+## Response Examples
+
+Interactive docs (OpenAPI + Swagger UI) are available at:
+
+- `http://127.0.0.1:7000/docs`
+- `http://127.0.0.1:7000/openapi.yaml`
+
+### Web Search Response (`/<engine>/search`)
+
+```json
+[
+  {
+    "rank": 1,
+    "url": "https://go.dev/doc/",
+    "title": "Documentation - The Go Programming Language",
+    "description": "Official Go documentation, tutorials, references, and release notes.",
+    "ad": false
+  },
+  {
+    "rank": 2,
+    "url": "https://pkg.go.dev/",
+    "title": "pkg.go.dev",
+    "description": "Go package discovery and API documentation.",
+    "ad": false
+  }
+]
+```
+
+### Image Search Response (`/<engine>/image`)
+
+```json
+[
+  {
+    "rank": 1,
+    "url": "https://golang.org/lib/godoc/images/go-logo-blue.svg",
+    "title": "Go Gopher Logo",
+    "description": "Source: https://go.dev/brand/",
+    "ad": false
+  },
+  {
+    "rank": 2,
+    "url": "https://example.com/images/go-mascot.png",
+    "title": "Go mascot",
+    "description": "Height:800, Width:1200, Source Page: https://example.com/post",
+    "ad": false
+  }
+]
+```
+
+### Error Responses
+
+`400 Bad Request` (invalid/missing query):
+
+```json
+{
+  "error": "bad_request",
+  "code": 400,
+  "message": "Query cannot be empty"
+}
+```
+
+`503 Service Unavailable` (engine unavailable, captcha, timeout, or proxy path failure):
+
+```json
+{
+  "error": "service_unavailable",
+  "code": 503,
+  "message": "captcha found, please stop sending requests for a while: captcha detected"
+}
+```
+
+### Response Headers
+
+| Header              | Values/Examples                 | Meaning                                                       |
+| ------------------- | ------------------------------- | ------------------------------------------------------------- |
+| `X-Cache`           | `HIT`, `MISS`, `BYPASS`         | Cache result for this response.                               |
+| `X-Fallback-Engine` | `google`, `bing`, `duckduckgo`  | Present when dedicated endpoint used fallback engine.         |
+| `X-Proxy-Mode`      | `off`, `single`, `pool`         | Proxy policy mode applied by resilient search.                |
+| `X-Proxy-Tag`       | `residential`, `datacenter`, `` | Selected proxy pool tag. Empty when proxy mode is off/direct. |
+| `X-Proxy-Used`      | `direct`, `socks5://host:port`  | Actual upstream route used to execute request.                |
 
 ## 🌍 Proxy Support
 

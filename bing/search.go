@@ -13,12 +13,14 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// Bing implements core.SearchEngine for Bing SERP pages.
 type Bing struct {
 	core.Browser
 	core.SearchEngineOptions
 	logger *core.EngineLogger
 }
 
+// New creates a Bing engine instance with browser/runtime options applied.
 func New(browser core.Browser, opts core.SearchEngineOptions) *Bing {
 	bing := Bing{Browser: browser}
 	opts.Init()
@@ -27,10 +29,12 @@ func New(browser core.Browser, opts core.SearchEngineOptions) *Bing {
 	return &bing
 }
 
+// Name returns the stable engine identifier.
 func (bing *Bing) Name() string {
 	return "bing"
 }
 
+// GetRateLimiter returns a limiter configured from SearchEngineOptions.
 func (bing *Bing) GetRateLimiter() *rate.Limiter {
 	ratelimit := rate.Every(bing.GetRatelimit())
 	return rate.NewLimiter(ratelimit, bing.RateBurst)
@@ -99,6 +103,8 @@ func (bing *Bing) close(page *rod.Page) {
 	}
 }
 
+// Search executes a Bing web search and returns normalized search results.
+// It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (bing *Bing) Search(query core.Query) ([]core.SearchResult, error) {
 	bing.logger.Debug("Starting search, query: %+v", query)
 
@@ -240,7 +246,7 @@ func (bing *Bing) Search(query core.Query) ([]core.SearchResult, error) {
 	return deduped, nil
 }
 
-// BingImageData represents the JSON structure in the m attribute of image elements
+// BingImageData represents metadata encoded in the image result `m` attribute.
 type BingImageData struct {
 	T      string `json:"t"`      // Title
 	Desc   string `json:"desc"`   // Description
@@ -252,7 +258,8 @@ type BingImageData struct {
 	MURL   string `json:"murl"`   // Image URL
 }
 
-// SearchImage performs Bing image search and returns results
+// SearchImage executes a Bing image search and returns normalized image
+// results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (bing *Bing) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	bing.logger.Debug("Starting image search, query: %+v", query)
 

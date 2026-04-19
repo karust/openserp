@@ -16,14 +16,24 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// SearchEngine defines the contract required by the HTTP server and resilient
+// search pipeline.
 type SearchEngine interface {
+	// Search runs a web search request and returns normalized results.
+	// Implementations should return sentinel errors such as ErrCaptcha and
+	// ErrSearchTimeout for policy-aware handling.
 	Search(Query) ([]SearchResult, error)
+	// SearchImage runs an image search request and returns normalized results.
 	SearchImage(Query) ([]SearchResult, error)
+	// IsInitialized reports whether the engine is ready to serve requests.
 	IsInitialized() bool
+	// Name returns a stable engine identifier used in routes and telemetry.
 	Name() string
+	// GetRateLimiter returns an engine-specific limiter used by resilient search.
 	GetRateLimiter() *rate.Limiter
 }
 
+// Server exposes OpenSERP HTTP endpoints backed by one or more search engines.
 type Server struct {
 	app           *fiber.App
 	addr          string
@@ -34,15 +44,25 @@ type Server struct {
 	opts          ServerOptions
 }
 
+// ServerOptions configures HTTP server middleware and resilience behavior.
 type ServerOptions struct {
-	CacheTTL              time.Duration
-	CacheMaxSize          int
-	EnableCORS            bool
-	CORS                  CORSConfig
+	// CacheTTL controls response cache entry lifetime. Zero disables caching.
+	CacheTTL time.Duration
+	// CacheMaxSize is the maximum number of cached entries.
+	CacheMaxSize int
+	// EnableCORS enables cross-origin headers with the CORS config below.
+	EnableCORS bool
+	// CORS contains allowed origins, methods, and headers when CORS is enabled.
+	CORS CORSConfig
+	// AllowEndpointFallback allows dedicated engine routes to fall back to other
+	// healthy engines when the primary engine fails.
 	AllowEndpointFallback bool
-	Resilience            ResilientConfig
+	// Resilience defines retry/circuit-breaker/proxy strategy settings.
+	Resilience ResilientConfig
 }
 
+// DefaultServerOptions returns production-oriented defaults for cache, CORS,
+// and resilient search policies.
 func DefaultServerOptions() ServerOptions {
 	return ServerOptions{
 		CacheTTL:              5 * time.Minute,
@@ -54,10 +74,15 @@ func DefaultServerOptions() ServerOptions {
 	}
 }
 
+// NewServer creates a Server with DefaultServerOptions and registers all
+// routes for the provided engines.
 func NewServer(host string, port int, searchEngines ...SearchEngine) *Server {
 	return NewServerWithOptions(host, port, DefaultServerOptions(), searchEngines...)
 }
 
+// NewServerWithOptions builds a Server, installs middleware, and registers API
+// routes. The returned server is ready to Listen; call Shutdown for graceful
+// stop.
 func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngines ...SearchEngine) *Server {
 	addr := fmt.Sprintf("%s:%d", host, port)
 	app := fiber.New(fiber.Config{
@@ -207,6 +232,7 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 	return c.JSON(res)
 }
 
+// HealthStatus is returned by /health and summarizes service state.
 type HealthStatus struct {
 	Status  string                 `json:"status"`
 	Uptime  string                 `json:"uptime"`
@@ -214,6 +240,7 @@ type HealthStatus struct {
 	System  map[string]interface{} `json:"system"`
 }
 
+// EngineHealth describes availability of one configured engine.
 type EngineHealth struct {
 	Name        string `json:"name"`
 	Initialized bool   `json:"initialized"`
@@ -309,6 +336,7 @@ func (s *Server) handleCircuitBreakerStats(c *fiber.Ctx) error {
 	})
 }
 
+// MegaSearchResult extends SearchResult with the engine source name.
 type MegaSearchResult struct {
 	SearchResult
 	Engine string `json:"engine"`
@@ -607,10 +635,12 @@ func (s *Server) handleSwaggerUI(c *fiber.Ctx) error {
 	return c.SendString(page)
 }
 
+// Listen starts the Fiber HTTP server on the configured address.
 func (s *Server) Listen() error {
 	return s.app.Listen(s.addr)
 }
 
+// Shutdown gracefully stops the Fiber HTTP server.
 func (s *Server) Shutdown() error {
 	return s.app.Shutdown()
 }

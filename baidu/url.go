@@ -22,6 +22,8 @@ func dateToTimestamp(date string) (int64, error) {
 	return t.Unix(), nil
 }
 
+// BuildURL builds a Baidu web search URL from Query fields.
+// It returns an error when query text, date, or pagination parameters are invalid.
 func BuildURL(q core.Query) (string, error) {
 	base, _ := url.Parse("https://www.baidu.com/")
 	base.Path += "s"
@@ -84,6 +86,8 @@ func BuildURL(q core.Query) (string, error) {
 	return base.String(), nil
 }
 
+// BuildImageURL builds a Baidu image search URL from Query fields and page
+// index. It returns an error when the query text is empty.
 func BuildImageURL(q core.Query, pageNum int) (string, error) {
 	base, _ := url.Parse("https://image.baidu.com/")
 	base.Path += "search/acjson"

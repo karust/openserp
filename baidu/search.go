@@ -31,12 +31,14 @@ type imageDataJson struct {
 	}
 }
 
+// Baidu implements core.SearchEngine for Baidu SERP pages.
 type Baidu struct {
 	core.Browser
 	core.SearchEngineOptions
 	logger *core.EngineLogger
 }
 
+// New creates a Baidu engine instance with browser/runtime options applied.
 func New(browser core.Browser, opts core.SearchEngineOptions) *Baidu {
 	baid := Baidu{Browser: browser}
 	opts.Init()
@@ -45,10 +47,12 @@ func New(browser core.Browser, opts core.SearchEngineOptions) *Baidu {
 	return &baid
 }
 
+// Name returns the stable engine identifier.
 func (baid *Baidu) Name() string {
 	return "baidu"
 }
 
+// GetRateLimiter returns a limiter configured from SearchEngineOptions.
 func (baid *Baidu) GetRateLimiter() *rate.Limiter {
 	ratelimit := rate.Every(baid.GetRatelimit())
 	return rate.NewLimiter(ratelimit, baid.RateBurst)
@@ -64,6 +68,8 @@ func (baid *Baidu) isTimeout(page *rod.Page) bool {
 	return err == nil
 }
 
+// Search executes a Baidu web search and returns normalized search results.
+// It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 	baid.logger.Debug("Starting search, query: %+v", query)
 
@@ -145,6 +151,8 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 	return core.DeduplicateResults(searchResults), nil
 }
 
+// SearchImage executes a Baidu image search and returns normalized image
+// results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	baid.logger.Debug("Starting image search, query: %+v", query)
 

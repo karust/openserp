@@ -11,6 +11,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// ImageEntity contains one image record from Yandex image search state JSON.
 type ImageEntity struct {
 	ID        string `json:"id"`
 	Rank      int    `json:"pos"`
@@ -23,6 +24,7 @@ type ImageEntity struct {
 	IsGIF     bool   `json:"gifLabel"`
 }
 
+// ImageData maps the subset of Yandex JSON state used by parser code.
 type ImageData struct {
 	InitalState struct {
 		SerpList struct {
@@ -33,6 +35,7 @@ type ImageData struct {
 	} `json:"initialState"`
 }
 
+// Yandex implements core.SearchEngine for Yandex SERP pages.
 type Yandex struct {
 	core.Browser
 	core.SearchEngineOptions
@@ -40,6 +43,7 @@ type Yandex struct {
 	logger    *core.EngineLogger
 }
 
+// New creates a Yandex engine instance with browser/runtime options applied.
 func New(browser core.Browser, opts core.SearchEngineOptions) *Yandex {
 	yand := Yandex{Browser: browser}
 	opts.Init()
@@ -50,10 +54,12 @@ func New(browser core.Browser, opts core.SearchEngineOptions) *Yandex {
 	return &yand
 }
 
+// Name returns the stable engine identifier.
 func (yand *Yandex) Name() string {
 	return "yandex"
 }
 
+// GetRateLimiter returns a limiter configured from SearchEngineOptions.
 func (yand *Yandex) GetRateLimiter() *rate.Limiter {
 	ratelimit := rate.Every(yand.GetRatelimit())
 	return rate.NewLimiter(ratelimit, yand.RateBurst)
@@ -113,6 +119,8 @@ func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.Searc
 	return searchResults
 }
 
+// Search executes a Yandex web search and returns normalized search results.
+// It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
 	yand.logger.Debug("Starting search, query: %+v", query)
 	if query.Start < 0 {
@@ -192,6 +200,8 @@ func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
 	return core.DeduplicateResults(allResults), nil
 }
 
+// SearchImage executes a Yandex image search and returns normalized image
+// results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (yand *Yandex) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	yand.logger.Debug("Starting image search, query: %+v", query)
 

@@ -12,6 +12,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// BuildURL builds a Bing web search URL from Query fields.
+// It returns an error when query text or date parameters are invalid.
 func BuildURL(q core.Query) (string, error) {
 	base, err := url.Parse("https://www.bing.com")
 	if err != nil {
@@ -93,6 +95,8 @@ func BuildURL(q core.Query) (string, error) {
 	return base.String(), nil
 }
 
+// BuildImageURL builds a Bing image search URL from Query fields.
+// It returns an error when the resulting query text is empty.
 func BuildImageURL(q core.Query) (string, error) {
 	base, err := url.Parse("https://www.bing.com")
 	if err != nil {

@@ -175,33 +175,33 @@ Defaults below are the shipped defaults in `config.yaml` (if present). If the co
 
 ### `server`
 
-| Key | Default | Description |
-| --- | --- | --- |
-| `server.host` | `0.0.0.0` | API bind host |
-| `server.port` | `7000` | API bind port |
-| `server.debug` | `false` | Debug mode, forces headful browser |
-| `server.verbose` | `true` | Info-level request logs |
-| `server.raw_requests` | `false` | `true` = raw HTTP mode |
-| `server.insecure` | `true` | Allow insecure TLS connections |
+| Key                   | Default   | Description                        |
+| --------------------- | --------- | ---------------------------------- |
+| `server.host`         | `0.0.0.0` | API bind host                      |
+| `server.port`         | `7000`    | API bind port                      |
+| `server.debug`        | `false`   | Debug mode, forces headful browser |
+| `server.verbose`      | `true`    | Info-level request logs            |
+| `server.raw_requests` | `false`   | `true` = raw HTTP mode             |
+| `server.insecure`     | `true`    | Allow insecure TLS connections     |
 
 ### `app`
 
-| Key | Default | Description |
-| --- | --- | --- |
-| `app.timeout` | `15` | Request timeout in seconds |
-| `app.browser_path` | `""` | Custom browser binary path |
-| `app.head` | `false` | Headful browser UI |
-| `app.leakless` | `false` | Force browser process cleanup |
-| `app.leave_head` | `false` | Keep browser tabs open |
-| `app.stealth` | `false` | Enable stealth plugin |
+| Key                | Default | Description                   |
+| ------------------ | ------- | ----------------------------- |
+| `app.timeout`      | `15`    | Request timeout in seconds    |
+| `app.browser_path` | `""`    | Custom browser binary path    |
+| `app.head`         | `false` | Headful browser UI            |
+| `app.leakless`     | `false` | Force browser process cleanup |
+| `app.leave_head`   | `false` | Keep browser tabs open        |
+| `app.stealth`      | `false` | Enable stealth plugin         |
 
 ### `proxies`
 
-| Key | Default | Description |
-| --- | --- | --- |
-| `proxies.global` | unset | Force single proxy for all engines |
-| `proxies.entries[]` | empty | Tagged proxy pool entries (`url`, `tags`) |
-| `proxies.health.failure_threshold` | `3` | Disable proxy after N failures |
+| Key                                | Default | Description                               |
+| ---------------------------------- | ------- | ----------------------------------------- |
+| `proxies.global`                   | unset   | Force single proxy for all engines        |
+| `proxies.entries[]`                | empty   | Tagged proxy pool entries (`url`, `tags`) |
+| `proxies.health.failure_threshold` | `3`     | Disable proxy after N failures            |
 
 Per-engine optional proxy tag:
 
@@ -213,52 +213,52 @@ Per-engine optional proxy tag:
 
 ### `cache`
 
-| Key | Default | Description |
-| --- | --- | --- |
-| `cache.ttl_seconds` | `60` | Response cache TTL (0 disables cache) |
-| `cache.max_size` | `1000` | Max cached entries |
+| Key                 | Default | Description                           |
+| ------------------- | ------- | ------------------------------------- |
+| `cache.ttl_seconds` | `60`    | Response cache TTL (0 disables cache) |
+| `cache.max_size`    | `1000`  | Max cached entries                    |
 
 ### `resilience`
 
-| Key | Default | Description |
-| --- | --- | --- |
-| `resilience.max_retries` | `2` | Retry attempts per request |
+| Key                                  | Default | Description                                            |
+| ------------------------------------ | ------- | ------------------------------------------------------ |
+| `resilience.max_retries`             | `2`     | Retry attempts per request                             |
 | `resilience.allow_endpoint_fallback` | `false` | Allow dedicated endpoints to fallback to other engines |
 
 ### `circuit_breaker`
 
-| Key | Default | Description |
-| --- | --- | --- |
-| `circuit_breaker.failures` | `5` | Failures before opening circuit |
-| `circuit_breaker.recovery_seconds` | `60` | Open -> half-open wait time |
-| `circuit_breaker.successes` | `2` | Half-open successes to close circuit |
+| Key                                | Default | Description                          |
+| ---------------------------------- | ------- | ------------------------------------ |
+| `circuit_breaker.failures`         | `5`     | Failures before opening circuit      |
+| `circuit_breaker.recovery_seconds` | `60`    | Open -> half-open wait time          |
+| `circuit_breaker.successes`        | `2`     | Half-open successes to close circuit |
 
 ### `cors`
 
-| Key | Default | Description |
-| --- | --- | --- |
-| `cors.enabled` | `true` | Enable CORS middleware |
-| `cors.allow_origins` | `"*"` | Allowed origins |
-| `cors.allow_methods` | `"GET, POST, OPTIONS"` | Allowed methods |
-| `cors.allow_headers` | `"Origin, Content-Type, Accept, Authorization, X-Use-Proxy"` | Allowed headers |
-| `cors.max_age` | `86400` | Preflight cache max age (seconds) |
+| Key                  | Default                                                      | Description                       |
+| -------------------- | ------------------------------------------------------------ | --------------------------------- |
+| `cors.enabled`       | `true`                                                       | Enable CORS middleware            |
+| `cors.allow_origins` | `"*"`                                                        | Allowed origins                   |
+| `cors.allow_methods` | `"GET, POST, OPTIONS"`                                       | Allowed methods                   |
+| `cors.allow_headers` | `"Origin, Content-Type, Accept, Authorization, X-Use-Proxy"` | Allowed headers                   |
+| `cors.max_age`       | `86400`                                                      | Preflight cache max age (seconds) |
 
 ### `2captcha`
 
-| Key | Default | Description |
-| --- | --- | --- |
-| `2captcha.apikey` | unset | Optional captcha solver key |
+| Key               | Default | Description                 |
+| ----------------- | ------- | --------------------------- |
+| `2captcha.apikey` | unset   | Optional captcha solver key |
 
 ### Engine rate-limit defaults
 
 For each engine (`google`, `yandex`, `baidu`, `bing`, `duckduckgo`):
 
-| Key | Default | Description |
-| --- | --- | --- |
-| `<engine>.rate_requests` | `4` | Average requests per minute |
-| `<engine>.rate_burst` | `2` | Burst capacity |
-| `<engine>.rate_seconds` | `60` (implicit) | Rate window seconds |
-| `<engine>.selector_timeout` | `5` (implicit) | Selector wait timeout seconds |
+| Key                         | Default         | Description                   |
+| --------------------------- | --------------- | ----------------------------- |
+| `<engine>.rate_requests`    | `4`             | Average requests per minute   |
+| `<engine>.rate_burst`       | `2`             | Burst capacity                |
+| `<engine>.rate_seconds`     | `60` (implicit) | Rate window seconds           |
+| `<engine>.selector_timeout` | `5` (implicit)  | Selector wait timeout seconds |
 
 Google-only additional toggle:
 

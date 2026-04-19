@@ -14,6 +14,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// Google implements core.SearchEngine for Google SERP pages.
 type Google struct {
 	core.Browser
 	core.SearchEngineOptions
@@ -21,6 +22,7 @@ type Google struct {
 	logger        *core.EngineLogger
 }
 
+// New creates a Google engine instance with browser/runtime options applied.
 func New(browser core.Browser, opts core.SearchEngineOptions) *Google {
 	gogl := Google{Browser: browser}
 	opts.Init()
@@ -30,10 +32,12 @@ func New(browser core.Browser, opts core.SearchEngineOptions) *Google {
 	return &gogl
 }
 
+// Name returns the stable engine identifier.
 func (gogl *Google) Name() string {
 	return "google"
 }
 
+// GetRateLimiter returns a limiter configured from SearchEngineOptions.
 func (gogl *Google) GetRateLimiter() *rate.Limiter {
 	ratelimit := rate.Every(gogl.GetRatelimit())
 	return rate.NewLimiter(ratelimit, gogl.RateBurst)
@@ -157,6 +161,8 @@ func (gogl *Google) acceptCookies(page *rod.Page) {
 
 }
 
+// Search executes a Google web search and returns normalized search results.
+// It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 	gogl.logger.Debug("Starting search, query: %+v", query)
 
@@ -366,6 +372,8 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 	return core.DeduplicateResults(searchResults), nil
 }
 
+// SearchImage executes a Google image search and returns normalized image
+// results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	gogl.logger.Debug("Starting image search, query: %+v", query)
 

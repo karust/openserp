@@ -17,23 +17,35 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// BrowserOpts configures Chromium launch and navigation behavior.
 type BrowserOpts struct {
-	IsHeadless          bool          // Use browser interface
-	IsLeakless          bool          // Force to kill browser
-	Timeout             time.Duration // Timeout
-	LanguageCode        string
-	WaitRequests        bool          // Wait requests to complete after navigation
-	LeavePageOpen       bool          // Leave pages and browser open
-	WaitLoadTime        time.Duration // Time to wait till page loads
-	CaptchaSolverApiKey string        // 2Captcha api key
-	BrowserPath         string        // Explicit browser executable path
-	ProxyURL            string        // Proxy URL
-	Insecure            bool          // Allow insecure TLS connections
-	UseStealth          bool          // Use go-rod stealth plugin
-
+	// IsHeadless runs Chromium without visible UI.
+	IsHeadless bool
+	// IsLeakless forces child browser process cleanup when the parent exits.
+	IsLeakless bool
+	// Timeout is applied to browser connect and page navigation operations.
+	Timeout time.Duration
+	// LanguageCode sets Accept-Language for emulated requests.
+	LanguageCode string
+	// WaitRequests waits for request-idle state after navigation.
+	WaitRequests bool
+	// LeavePageOpen keeps pages open after search operations.
+	LeavePageOpen bool
+	// WaitLoadTime is an additional fixed wait after load/idle checks.
+	WaitLoadTime time.Duration
+	// CaptchaSolverApiKey enables 2Captcha integration for supported engines.
+	CaptchaSolverApiKey string
+	// BrowserPath optionally points to a specific browser executable.
+	BrowserPath string
+	// ProxyURL defines the upstream proxy for browser traffic.
+	ProxyURL string
+	// Insecure allows invalid TLS certificates for browser requests.
+	Insecure bool
+	// UseStealth enables go-rod stealth page creation.
+	UseStealth bool
 }
 
-// Initialize browser parameters with default values if they are not set
+// Check applies default option values when optional fields are unset.
 func (o *BrowserOpts) Check() {
 	if o.Timeout == 0 {
 		o.Timeout = time.Second * 30
@@ -44,6 +56,7 @@ func (o *BrowserOpts) Check() {
 	}
 }
 
+// Browser wraps a launched Chromium instance used by engine implementations.
 type Browser struct {
 	BrowserOpts
 	browserAddr   string
@@ -51,6 +64,8 @@ type Browser struct {
 	CaptchaSolver *CaptchaSolver
 }
 
+// NewBrowser launches a new Chromium process via Rod launcher and returns a
+// Browser wrapper configured with proxy and captcha solver settings.
 func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	opts.Check()
 	logrus.Debugf("Browser options: %+v", opts)
@@ -151,7 +166,7 @@ func resolveBrowserBinaryPath(browserPath string, lookPath func() (string, bool)
 	return "", nil
 }
 
-// Check whether browser instance is already created
+// IsInitialized reports whether the browser launcher has been created.
 func (b *Browser) IsInitialized() bool {
 	if b.browserAddr != "" {
 		return true
@@ -160,7 +175,9 @@ func (b *Browser) IsInitialized() bool {
 	}
 }
 
-// Open URL
+// Navigate connects to Chromium, creates a page, applies stealth/emulation and
+// proxy auth, then navigates to URL. It returns an initialized page ready for
+// selector queries, or an error when browser setup/navigation fails.
 func (b *Browser) Navigate(URL string) (*rod.Page, error) {
 	logrus.Debug("Navigate to: ", URL)
 
@@ -280,6 +297,7 @@ func (b *Browser) Navigate(URL string) (*rod.Page, error) {
 	return page, nil
 }
 
+// Close closes the active browser connection.
 func (b *Browser) Close() error {
 	return b.browser.Close()
 }

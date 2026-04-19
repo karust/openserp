@@ -10,6 +10,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// DuckDuckGo implements core.SearchEngine for DuckDuckGo SERP pages.
 type DuckDuckGo struct {
 	core.Browser
 	core.SearchEngineOptions
@@ -17,6 +18,7 @@ type DuckDuckGo struct {
 	logger    *core.EngineLogger
 }
 
+// New creates a DuckDuckGo engine instance with browser/runtime options applied.
 func New(browser core.Browser, opts core.SearchEngineOptions) *DuckDuckGo {
 	ddg := DuckDuckGo{Browser: browser}
 	opts.Init()
@@ -27,10 +29,12 @@ func New(browser core.Browser, opts core.SearchEngineOptions) *DuckDuckGo {
 	return &ddg
 }
 
+// Name returns the stable engine identifier.
 func (ddg *DuckDuckGo) Name() string {
 	return "duckduckgo"
 }
 
+// GetRateLimiter returns a limiter configured from SearchEngineOptions.
 func (ddg *DuckDuckGo) GetRateLimiter() *rate.Limiter {
 	ratelimit := rate.Every(ddg.GetRatelimit())
 	return rate.NewLimiter(ratelimit, ddg.RateBurst)
@@ -163,6 +167,8 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 	return searchResults
 }
 
+// Search executes a DuckDuckGo web search and returns normalized search
+// results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (ddg *DuckDuckGo) Search(query core.Query) ([]core.SearchResult, error) {
 	ddg.logger.Debug("Starting search, query: %+v", query)
 
@@ -265,6 +271,8 @@ func (ddg *DuckDuckGo) Search(query core.Query) ([]core.SearchResult, error) {
 	return deduped, nil
 }
 
+// SearchImage executes a DuckDuckGo image search and returns normalized image
+// results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (ddg *DuckDuckGo) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	ddg.logger.Debug("Starting image search, query: %+v", query)
 

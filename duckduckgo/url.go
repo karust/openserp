@@ -12,6 +12,8 @@ import (
 
 const baseURL = "https://duckduckgo.com"
 
+// BuildURL builds a DuckDuckGo web search URL for the provided query and page
+// index. It returns an error when query text or date parameters are invalid.
 func BuildURL(q core.Query, page int) (string, error) {
 	base, err := url.Parse(baseURL)
 	if err != nil {
@@ -84,6 +86,8 @@ func BuildURL(q core.Query, page int) (string, error) {
 	return base.String(), nil
 }
 
+// BuildImageURL builds a DuckDuckGo image search URL from Query fields.
+// It returns an error when query text or date parameters are invalid.
 func BuildImageURL(q core.Query) (string, error) {
 	base, err := url.Parse(baseURL)
 	if err != nil {
