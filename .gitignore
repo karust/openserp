@@ -36,3 +36,5 @@ AGENTS.md
 .claude
 sanitize_html_fixtures.py
 core/testdata/*
+.tmp-gocache
+.tmpcache/

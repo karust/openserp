@@ -103,7 +103,7 @@ func Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer core.DrainAndCloseResponse(res)
 	logrus.Debugf("Baidu Raw response: code=%d", res.StatusCode)
 
 	results, err := baiduResultParser(res)

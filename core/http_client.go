@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -13,6 +14,17 @@ import (
 )
 
 const rawHTTPTimeout = 10 * time.Second
+
+// DrainAndCloseResponse drains unread bytes before closing so HTTP transports
+// can safely reuse connections when callers don't consume the full body.
+func DrainAndCloseResponse(resp *http.Response) {
+	if resp == nil || resp.Body == nil {
+		return
+	}
+
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+}
 
 func NewRawHTTPClient(query Query) (*http.Client, error) {
 	transport, err := newRawTransport(query)
