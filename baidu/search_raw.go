@@ -1,6 +1,7 @@
 package baidu
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -10,13 +11,13 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func baiduRequest(searchURL string, query core.Query) (*http.Response, error) {
+func baiduRequest(ctx context.Context, searchURL string, query core.Query) (*http.Response, error) {
 	baseClient, err := core.NewRawHTTPClient(query)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("GET", searchURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -89,17 +90,20 @@ func baiduResultParser(response *http.Response) ([]core.SearchResult, error) {
 	return results, err
 }
 
-func Search(query core.Query) ([]core.SearchResult, error) {
+func Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+	ctx = core.EnsureContext(ctx)
+
 	googleURL, err := BuildURL(query)
 	if err != nil {
 		return nil, err
 	}
 	logrus.Debugf("Baidu URL built: %s", googleURL)
 
-	res, err := baiduRequest(googleURL, query)
+	res, err := baiduRequest(ctx, googleURL, query)
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
 	logrus.Debugf("Baidu Raw response: code=%d", res.StatusCode)
 
 	results, err := baiduResultParser(res)

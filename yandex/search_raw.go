@@ -1,6 +1,7 @@
 package yandex
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -10,13 +11,13 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func yandexRequest(searchURL string, query core.Query) (*http.Response, error) {
+func yandexRequest(ctx context.Context, searchURL string, query core.Query) (*http.Response, error) {
 	baseClient, err := core.NewRawHTTPClient(query)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("GET", searchURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +89,9 @@ func yandexResultParser(response *http.Response) ([]core.SearchResult, error) {
 	return core.DeduplicateResults(results), err
 }
 
-func Search(query core.Query) ([]core.SearchResult, error) {
+func Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+	ctx = core.EnsureContext(ctx)
+
 	startPage, skipOnFirstPage, err := core.ComputePagination(query.Start, 10)
 	if err != nil {
 		return nil, err
@@ -100,10 +103,11 @@ func Search(query core.Query) ([]core.SearchResult, error) {
 	}
 	logrus.Debugf("Yandex URL built: %s", googleURL)
 
-	res, err := yandexRequest(googleURL, query)
+	res, err := yandexRequest(ctx, googleURL, query)
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
 	logrus.Debugf("Yandex Raw response: code=%d", res.StatusCode)
 
 	results, err := yandexResultParser(res)

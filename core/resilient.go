@@ -74,8 +74,8 @@ func NewResilientSearcher(engines []SearchEngine, cfg ResilientConfig) *Resilien
 }
 
 // SearchPrimary keeps dedicated endpoints engine-pure (no fallback).
-func (rs *ResilientSearcher) SearchPrimary(primaryEngine SearchEngine, q Query) ([]SearchResult, string, ProxyExecutionMeta, error) {
-	results, proxyMeta, err := rs.searchWithProtection(primaryEngine, q, false)
+func (rs *ResilientSearcher) SearchPrimary(ctx context.Context, primaryEngine SearchEngine, q Query) ([]SearchResult, string, ProxyExecutionMeta, error) {
+	results, proxyMeta, err := rs.searchWithProtection(ctx, primaryEngine, q, false)
 	if err != nil {
 		return nil, primaryEngine.Name(), proxyMeta, err
 	}
@@ -83,26 +83,31 @@ func (rs *ResilientSearcher) SearchPrimary(primaryEngine SearchEngine, q Query) 
 }
 
 // SearchWithFallback retries primary and then tries other initialized engines.
-func (rs *ResilientSearcher) SearchWithFallback(primaryEngine SearchEngine, q Query) ([]SearchResult, string, ProxyExecutionMeta, error) {
-	return rs.searchWithFallback(primaryEngine, q, false)
+func (rs *ResilientSearcher) SearchWithFallback(ctx context.Context, primaryEngine SearchEngine, q Query) ([]SearchResult, string, ProxyExecutionMeta, error) {
+	return rs.searchWithFallback(ctx, primaryEngine, q, false)
 }
 
-func (rs *ResilientSearcher) SearchImagePrimary(primaryEngine SearchEngine, q Query) ([]SearchResult, string, ProxyExecutionMeta, error) {
-	results, proxyMeta, err := rs.searchWithProtection(primaryEngine, q, true)
+func (rs *ResilientSearcher) SearchImagePrimary(ctx context.Context, primaryEngine SearchEngine, q Query) ([]SearchResult, string, ProxyExecutionMeta, error) {
+	results, proxyMeta, err := rs.searchWithProtection(ctx, primaryEngine, q, true)
 	if err != nil {
 		return nil, primaryEngine.Name(), proxyMeta, err
 	}
 	return results, primaryEngine.Name(), proxyMeta, nil
 }
 
-func (rs *ResilientSearcher) SearchImageWithFallback(primaryEngine SearchEngine, q Query) ([]SearchResult, string, ProxyExecutionMeta, error) {
-	return rs.searchWithFallback(primaryEngine, q, true)
+func (rs *ResilientSearcher) SearchImageWithFallback(ctx context.Context, primaryEngine SearchEngine, q Query) ([]SearchResult, string, ProxyExecutionMeta, error) {
+	return rs.searchWithFallback(ctx, primaryEngine, q, true)
 }
 
-func (rs *ResilientSearcher) searchWithFallback(primaryEngine SearchEngine, q Query, isImage bool) ([]SearchResult, string, ProxyExecutionMeta, error) {
-	results, proxyMeta, err := rs.searchWithProtection(primaryEngine, q, isImage)
+func (rs *ResilientSearcher) searchWithFallback(ctx context.Context, primaryEngine SearchEngine, q Query, isImage bool) ([]SearchResult, string, ProxyExecutionMeta, error) {
+	ctx = EnsureContext(ctx)
+
+	results, proxyMeta, err := rs.searchWithProtection(ctx, primaryEngine, q, isImage)
 	if err == nil {
 		return results, primaryEngine.Name(), proxyMeta, nil
+	}
+	if ctx.Err() != nil {
+		return nil, primaryEngine.Name(), proxyMeta, ctx.Err()
 	}
 	if errors.Is(err, ErrProxyUnavailable) {
 		logrus.Warnf("[Resilient] Primary engine %s proxy policy failed closed: %s", primaryEngine.Name(), err)
@@ -118,11 +123,14 @@ func (rs *ResilientSearcher) searchWithFallback(primaryEngine SearchEngine, q Qu
 
 	logrus.Warnf("[Resilient] Primary engine %s %s: %s. Trying fallback engines...", primaryEngine.Name(), action, err)
 	for _, fallbackEngine := range rs.engines {
+		if ctx.Err() != nil {
+			return nil, primaryEngine.Name(), proxyMeta, ctx.Err()
+		}
 		if fallbackEngine.Name() == primaryEngine.Name() || !fallbackEngine.IsInitialized() {
 			continue
 		}
 
-		results, fallbackMeta, fallbackErr := rs.searchWithProtection(fallbackEngine, q, isImage)
+		results, fallbackMeta, fallbackErr := rs.searchWithProtection(ctx, fallbackEngine, q, isImage)
 		if fallbackErr == nil {
 			logrus.Infof("[Resilient] "+successMessage, fallbackEngine.Name(), len(results))
 			return results, fallbackEngine.Name(), fallbackMeta, nil
@@ -133,7 +141,12 @@ func (rs *ResilientSearcher) searchWithFallback(primaryEngine SearchEngine, q Qu
 	return nil, primaryEngine.Name(), proxyMeta, ErrAllEnginesFailed
 }
 
-func (rs *ResilientSearcher) searchWithProtection(engine SearchEngine, q Query, isImage bool) ([]SearchResult, ProxyExecutionMeta, error) {
+func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine SearchEngine, q Query, isImage bool) ([]SearchResult, ProxyExecutionMeta, error) {
+	ctx = EnsureContext(ctx)
+
+	if ctx.Err() != nil {
+		return nil, ProxyExecutionMeta{}, ctx.Err()
+	}
 	cb := rs.cbManager.Get(engine.Name())
 	if !cb.AllowRequest() {
 		return nil, ProxyExecutionMeta{}, ErrCircuitOpen
@@ -142,10 +155,10 @@ func (rs *ResilientSearcher) searchWithProtection(engine SearchEngine, q Query, 
 	policy := rs.effectivePolicyForQuery(engine.Name(), q)
 	attemptMeta := rs.baseProxyMeta(policy)
 
-	result := RetryableSearch(rs.retryCfg, engine.Name(), func() ([]SearchResult, error) {
+	result := RetryableSearch(ctx, rs.retryCfg, engine.Name(), func(callCtx context.Context) ([]SearchResult, error) {
 		limiter := engine.GetRateLimiter()
 		if limiter != nil {
-			if err := limiter.Wait(context.Background()); err != nil {
+			if err := limiter.Wait(callCtx); err != nil {
 				return nil, err
 			}
 		}
@@ -174,9 +187,9 @@ func (rs *ResilientSearcher) searchWithProtection(engine SearchEngine, q Query, 
 			err     error
 		)
 		if isImage {
-			results, err = engine.SearchImage(attemptQuery)
+			results, err = engine.SearchImage(callCtx, attemptQuery)
 		} else {
-			results, err = engine.Search(attemptQuery)
+			results, err = engine.Search(callCtx, attemptQuery)
 		}
 
 		if reportToRegistry {
@@ -198,12 +211,17 @@ func (rs *ResilientSearcher) searchWithProtection(engine SearchEngine, q Query, 
 }
 
 // SearchAllParallel applies retry/circuit protections per engine for mega search.
-func (rs *ResilientSearcher) SearchAllParallel(q Query, engines []SearchEngine) []MegaSearchResult {
+func (rs *ResilientSearcher) SearchAllParallel(ctx context.Context, q Query, engines []SearchEngine) []MegaSearchResult {
+	ctx = EnsureContext(ctx)
+
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var allResults []MegaSearchResult
 
 	for _, engine := range engines {
+		if ctx.Err() != nil {
+			break
+		}
 		if !engine.IsInitialized() {
 			continue
 		}
@@ -216,7 +234,7 @@ func (rs *ResilientSearcher) SearchAllParallel(q Query, engines []SearchEngine) 
 		go func(eng SearchEngine) {
 			defer wg.Done()
 
-			results, _, err := rs.searchWithProtection(eng, q, false)
+			results, _, err := rs.searchWithProtection(ctx, eng, q, false)
 			if err != nil {
 				return
 			}
@@ -236,12 +254,17 @@ func (rs *ResilientSearcher) SearchAllParallel(q Query, engines []SearchEngine) 
 	return allResults
 }
 
-func (rs *ResilientSearcher) SearchAllImageParallel(q Query, engines []SearchEngine) []MegaSearchResult {
+func (rs *ResilientSearcher) SearchAllImageParallel(ctx context.Context, q Query, engines []SearchEngine) []MegaSearchResult {
+	ctx = EnsureContext(ctx)
+
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var allResults []MegaSearchResult
 
 	for _, engine := range engines {
+		if ctx.Err() != nil {
+			break
+		}
 		if !engine.IsInitialized() {
 			continue
 		}
@@ -254,7 +277,7 @@ func (rs *ResilientSearcher) SearchAllImageParallel(q Query, engines []SearchEng
 		go func(eng SearchEngine) {
 			defer wg.Done()
 
-			results, _, err := rs.searchWithProtection(eng, q, true)
+			results, _, err := rs.searchWithProtection(ctx, eng, q, true)
 			if err != nil {
 				return
 			}

@@ -255,7 +255,7 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE).
 
 ## 🤝 Contributing
 
-Contributions are welcome. Please feel free to submit a pull request.
+Contributions are welcome. See [CONTRIBUTE](./docs/CONTRIBUTING.md). Please feel free to submit your improvements!
 
 ## 👾 Issues & Support
 

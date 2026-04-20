@@ -4,6 +4,7 @@
 package duckduckgo
 
 import (
+	"context"
 	"testing"
 
 	"github.com/karust/openserp/core"
@@ -18,7 +19,7 @@ func TestSearchDuckDuckGo(t *testing.T) {
 	ddg := New(*browser, core.SearchEngineOptions{})
 
 	query := core.Query{Text: "wikipedia", Limit: 10}
-	results, err := ddg.Search(query)
+	results, err := ddg.Search(context.Background(), query)
 	ithelper.HandleError(t, "duckduckgo web search", err)
 
 	if len(results) == 0 {
@@ -39,7 +40,7 @@ func TestImageSearchDuckDuckGo(t *testing.T) {
 	ddg := New(*browser, core.SearchEngineOptions{})
 
 	query := core.Query{Text: "golden retriever puppy", Limit: 10}
-	results, err := ddg.SearchImage(query)
+	results, err := ddg.SearchImage(context.Background(), query)
 	ithelper.HandleError(t, "duckduckgo image search", err)
 
 	if len(results) == 0 {

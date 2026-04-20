@@ -4,6 +4,7 @@
 package yandex
 
 import (
+	"context"
 	"testing"
 
 	"github.com/karust/openserp/core"
@@ -18,7 +19,7 @@ func TestSearchYandex(t *testing.T) {
 	yand := New(*browser, core.SearchEngineOptions{})
 
 	query := core.Query{Text: "HEY", Limit: 10}
-	results, err := yand.Search(query)
+	results, err := yand.Search(context.Background(), query)
 	ithelper.HandleError(t, "yandex web search", err)
 
 	if len(results) == 0 {
@@ -33,7 +34,7 @@ func TestImageYandex(t *testing.T) {
 	yand := New(*browser, core.SearchEngineOptions{})
 
 	query := core.Query{Text: "furry tiger", Limit: 30}
-	results, err := yand.SearchImage(query)
+	results, err := yand.SearchImage(context.Background(), query)
 	ithelper.HandleError(t, "yandex image search", err)
 
 	if len(results) == 0 {

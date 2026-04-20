@@ -1,9 +1,11 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -35,20 +37,35 @@ type RetryResult struct {
 
 // RetryableSearch executes searchFn with exponential backoff retries.
 // CAPTCHA and proxy-unavailable errors are not retried.
-func RetryableSearch(cfg RetryConfig, engineName string, searchFn func() ([]SearchResult, error)) RetryResult {
+func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, searchFn func(context.Context) ([]SearchResult, error)) RetryResult {
+	ctx = EnsureContext(ctx)
 	if cfg.BackoffFactor <= 0 {
 		cfg.BackoffFactor = 2.0
 	}
 
 	var lastErr error
 	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return RetryResult{
+				Err:      err,
+				Attempts: attempt,
+				Engine:   engineName,
+			}
+		}
+
 		if attempt > 0 {
 			backoff := calculateBackoff(cfg, attempt)
 			logrus.Warnf("[%s] Retry attempt %d/%d after %s", engineName, attempt, cfg.MaxRetries, backoff)
-			time.Sleep(backoff)
+			if err := SleepContext(ctx, backoff); err != nil {
+				return RetryResult{
+					Err:      err,
+					Attempts: attempt,
+					Engine:   engineName,
+				}
+			}
 		}
 
-		results, err := searchFn()
+		results, err := searchFn(ctx)
 		if err == nil {
 			if attempt > 0 {
 				logrus.Infof("[%s] Succeeded on retry attempt %d", engineName, attempt)
@@ -77,6 +94,14 @@ func RetryableSearch(cfg RetryConfig, engineName string, searchFn func() ([]Sear
 				Engine:   engineName,
 			}
 		}
+		if IsContextDone(err) {
+			logrus.Warnf("[%s] Context canceled/deadline exceeded, skipping retries", engineName)
+			return RetryResult{
+				Err:      err,
+				Attempts: attempt + 1,
+				Engine:   engineName,
+			}
+		}
 
 		logrus.Warnf("[%s] Attempt %d failed: %s", engineName, attempt+1, err)
 	}
@@ -95,6 +120,10 @@ func calculateBackoff(cfg RetryConfig, attempt int) time.Duration {
 	}
 	if backoff < 0 {
 		backoff = 0
+	}
+	backoff = backoff * (0.5 + rand.Float64())
+	if backoff > float64(cfg.MaxBackoff) {
+		backoff = float64(cfg.MaxBackoff)
 	}
 	return time.Duration(backoff)
 }

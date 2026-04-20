@@ -1,6 +1,7 @@
 package yandex
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -121,7 +122,8 @@ func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.Searc
 
 // Search executes a Yandex web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
+func (yand *Yandex) Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+	ctx = core.EnsureContext(ctx)
 	yand.logger.Debug("Starting search, query: %+v", query)
 	if query.Start < 0 {
 		return nil, fmt.Errorf("incorrect start provided")
@@ -141,7 +143,7 @@ func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
 			return nil, err
 		}
 
-		page, err := yand.Navigate(url)
+		page, err := yand.Navigate(ctx, url)
 		if err != nil {
 			return nil, err
 		}
@@ -193,7 +195,9 @@ func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
 			}
 		}
 
-		time.Sleep(yand.pageSleep)
+		if err := core.SleepContext(ctx, yand.pageSleep); err != nil {
+			return nil, err
+		}
 	}
 
 	yand.logger.Info("Search completed: %d results", len(allResults))
@@ -202,7 +206,8 @@ func (yand *Yandex) Search(query core.Query) ([]core.SearchResult, error) {
 
 // SearchImage executes a Yandex image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (yand *Yandex) SearchImage(query core.Query) ([]core.SearchResult, error) {
+func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+	ctx = core.EnsureContext(ctx)
 	yand.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}
@@ -215,7 +220,7 @@ func (yand *Yandex) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		}
 		searchPage += 1
 
-		page, err := yand.Navigate(url)
+		page, err := yand.Navigate(ctx, url)
 		if err != nil {
 			return nil, err
 		}

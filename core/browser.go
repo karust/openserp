@@ -178,7 +178,12 @@ func (b *Browser) IsInitialized() bool {
 // Navigate connects to Chromium, creates a page, applies stealth/emulation and
 // proxy auth, then navigates to URL. It returns an initialized page ready for
 // selector queries, or an error when browser setup/navigation fails.
-func (b *Browser) Navigate(URL string) (*rod.Page, error) {
+func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
+	ctx = EnsureContext(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	logrus.Debug("Navigate to: ", URL)
 
 	browser := rod.New().ControlURL(b.browserAddr).Timeout(b.Timeout)
@@ -233,46 +238,48 @@ func (b *Browser) Navigate(URL string) (*rod.Page, error) {
 		if err != nil {
 			return nil, fmt.Errorf("create stealth page failed: %w", err)
 		}
-		err = page.Emulate(devices.Device{
-			AcceptLanguage: b.LanguageCode,
-			UserAgent:      ua,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("emulate stealth page failed: %w", err)
-		}
-
 	} else {
 		page, err = b.browser.Page(proto.TargetCreateTarget{URL: "about:blank"})
 		if err != nil {
 			return nil, fmt.Errorf("create page failed: %w", err)
 		}
+	}
 
-		err = page.Emulate(devices.Device{
-			AcceptLanguage: b.LanguageCode,
-			UserAgent:      ua,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("emulate page failed: %w", err)
+	// From here on, any error path must close the page to avoid leaking tabs
+	// when the caller context is canceled or navigation fails.
+	closeOnErr := func() {
+		if cerr := page.Close(); cerr != nil {
+			logrus.Debugf("Close page after navigate error failed: %v", cerr)
 		}
+	}
 
-		err = proto.EmulationSetDeviceMetricsOverride{
+	if err := page.Emulate(devices.Device{
+		AcceptLanguage: b.LanguageCode,
+		UserAgent:      ua,
+	}); err != nil {
+		closeOnErr()
+		return nil, fmt.Errorf("emulate page failed: %w", err)
+	}
+
+	if !b.UseStealth {
+		if err := (proto.EmulationSetDeviceMetricsOverride{
 			Width:             1920,
 			Height:            1080,
 			DeviceScaleFactor: 1,
 			Mobile:            false,
 			ScreenWidth:       &[]int{1920}[0],
 			ScreenHeight:      &[]int{1080}[0],
-		}.Call(page)
-		if err != nil {
+		}).Call(page); err != nil {
+			closeOnErr()
 			return nil, fmt.Errorf("set device metrics failed: %w", err)
 		}
 	}
-	//EnableCustomStealth(page)
 
+	page = page.Context(ctx)
 	timedPage := page.Timeout(b.Timeout)
 
-	err = timedPage.Navigate(URL)
-	if err != nil {
+	if err := timedPage.Navigate(URL); err != nil {
+		closeOnErr()
 		return nil, err
 	}
 
@@ -293,7 +300,10 @@ func (b *Browser) Navigate(URL string) (*rod.Page, error) {
 		wait()
 	}
 
-	time.Sleep(b.WaitLoadTime)
+	if err := SleepContext(ctx, b.WaitLoadTime); err != nil {
+		closeOnErr()
+		return nil, err
+	}
 	return page, nil
 }
 

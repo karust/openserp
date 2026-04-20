@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -22,22 +23,22 @@ type rawEngine struct {
 	name string
 }
 
-func (r *rawEngine) Search(q core.Query) ([]core.SearchResult, error) {
+func (r *rawEngine) Search(ctx context.Context, q core.Query) ([]core.SearchResult, error) {
 	q.Insecure = config.Server.Insecure
 
 	switch r.name {
 	case "google":
-		return google.Search(q)
+		return google.Search(ctx, q)
 	case "yandex":
-		return yandex.Search(q)
+		return yandex.Search(ctx, q)
 	case "baidu":
-		return baidu.Search(q)
+		return baidu.Search(ctx, q)
 	default:
 		return nil, fmt.Errorf("unsupported engine: %s", r.name)
 	}
 }
 
-func (r *rawEngine) SearchImage(q core.Query) ([]core.SearchResult, error) {
+func (r *rawEngine) SearchImage(_ context.Context, _ core.Query) ([]core.SearchResult, error) {
 	return nil, fmt.Errorf("image search is not supported in raw mode for %s", r.name)
 }
 
@@ -195,20 +196,20 @@ type pooledBrowserEngine struct {
 	engines map[string]core.SearchEngine
 }
 
-func (e *pooledBrowserEngine) Search(q core.Query) ([]core.SearchResult, error) {
+func (e *pooledBrowserEngine) Search(ctx context.Context, q core.Query) ([]core.SearchResult, error) {
 	engine, err := e.getOrCreate(q.ProxyURL)
 	if err != nil {
 		return nil, err
 	}
-	return engine.Search(q)
+	return engine.Search(ctx, q)
 }
 
-func (e *pooledBrowserEngine) SearchImage(q core.Query) ([]core.SearchResult, error) {
+func (e *pooledBrowserEngine) SearchImage(ctx context.Context, q core.Query) ([]core.SearchResult, error) {
 	engine, err := e.getOrCreate(q.ProxyURL)
 	if err != nil {
 		return nil, err
 	}
-	return engine.SearchImage(q)
+	return engine.SearchImage(ctx, q)
 }
 
 func (e *pooledBrowserEngine) IsInitialized() bool {

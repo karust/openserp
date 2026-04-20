@@ -1,6 +1,7 @@
 package bing
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,15 +82,16 @@ func (bing *Bing) checkCaptcha(page *rod.Page) bool {
 	return false
 }
 
-func (bing *Bing) acceptCookies(page *rod.Page) {
+func (bing *Bing) acceptCookies(ctx context.Context, page *rod.Page) error {
 	consentBtn, err := page.Timeout(bing.Timeout / 10).Element("button#bnp_btn_accept")
 	if err != nil {
-		return
+		return nil
 	}
 	if err := consentBtn.Click(proto.InputMouseButtonLeft, 1); err != nil {
 		bing.logger.Debug("Cookie consent click failed: %v", err)
 	}
-	time.Sleep(time.Millisecond * 500)
+
+	return core.SleepContext(ctx, 500*time.Millisecond)
 }
 
 func (bing *Bing) close(page *rod.Page) {
@@ -105,7 +107,8 @@ func (bing *Bing) close(page *rod.Page) {
 
 // Search executes a Bing web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (bing *Bing) Search(query core.Query) ([]core.SearchResult, error) {
+func (bing *Bing) Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+	ctx = core.EnsureContext(ctx)
 	bing.logger.Debug("Starting search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}
@@ -115,7 +118,7 @@ func (bing *Bing) Search(query core.Query) ([]core.SearchResult, error) {
 		return nil, err
 	}
 
-	page, err := bing.Navigate(url)
+	page, err := bing.Navigate(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +134,9 @@ func (bing *Bing) Search(query core.Query) ([]core.SearchResult, error) {
 		return nil, core.ErrCaptcha
 	}
 
-	bing.acceptCookies(page)
+	if err := bing.acceptCookies(ctx, page); err != nil {
+		return nil, err
+	}
 	if err := page.WaitLoad(); err != nil {
 		bing.logger.Error("Post-consent page load wait failed: %s", err)
 		return nil, core.ErrSearchTimeout
@@ -260,7 +265,8 @@ type BingImageData struct {
 
 // SearchImage executes a Bing image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (bing *Bing) SearchImage(query core.Query) ([]core.SearchResult, error) {
+func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+	ctx = core.EnsureContext(ctx)
 	bing.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}
@@ -271,7 +277,7 @@ func (bing *Bing) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		return nil, err
 	}
 
-	page, err := bing.Navigate(url)
+	page, err := bing.Navigate(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -289,14 +295,18 @@ func (bing *Bing) SearchImage(query core.Query) ([]core.SearchResult, error) {
 	}
 
 	// Accept cookies if present
-	bing.acceptCookies(page)
+	if err := bing.acceptCookies(ctx, page); err != nil {
+		return nil, err
+	}
 
 	// Wait for image results to load
 	if err := page.WaitLoad(); err != nil {
 		bing.logger.Error("Image results load wait failed: %s", err)
 		return nil, core.ErrSearchTimeout
 	}
-	time.Sleep(time.Second * 2)
+	if err := core.SleepContext(ctx, 2*time.Second); err != nil {
+		return nil, err
+	}
 
 	// Find all image result containers using CSS selector
 	imageContainers, err := page.Timeout(bing.Timeout).Elements("div.iuscp, div.isv")

@@ -4,6 +4,7 @@
 package bing
 
 import (
+	"context"
 	"testing"
 
 	"github.com/karust/openserp/core"
@@ -18,7 +19,7 @@ func TestSearchBing(t *testing.T) {
 	bing := New(*browser, core.SearchEngineOptions{})
 
 	query := core.Query{Text: "golang programming", Limit: 10}
-	results, err := bing.Search(query)
+	results, err := bing.Search(context.Background(), query)
 	ithelper.HandleError(t, "bing web search", err)
 
 	if len(results) == 0 {
@@ -39,7 +40,7 @@ func TestImageSearchBing(t *testing.T) {
 	bing := New(*browser, core.SearchEngineOptions{})
 
 	query := core.Query{Text: "golden retriever puppy", Limit: 10}
-	results, err := bing.SearchImage(query)
+	results, err := bing.SearchImage(context.Background(), query)
 	ithelper.HandleError(t, "bing image search", err)
 
 	if len(results) == 0 {

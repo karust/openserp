@@ -1,6 +1,7 @@
 package duckduckgo
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -169,7 +170,8 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 
 // Search executes a DuckDuckGo web search and returns normalized search
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (ddg *DuckDuckGo) Search(query core.Query) ([]core.SearchResult, error) {
+func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+	ctx = core.EnsureContext(ctx)
 	ddg.logger.Debug("Starting search, query: %+v", query)
 
 	allResults := []core.SearchResult{}
@@ -181,7 +183,7 @@ func (ddg *DuckDuckGo) Search(query core.Query) ([]core.SearchResult, error) {
 			return nil, err
 		}
 
-		page, err := ddg.Navigate(url)
+		page, err := ddg.Navigate(ctx, url)
 		if err != nil {
 			return nil, err
 		}
@@ -256,7 +258,9 @@ func (ddg *DuckDuckGo) Search(query core.Query) ([]core.SearchResult, error) {
 			break
 		}
 
-		time.Sleep(ddg.pageSleep)
+		if err := core.SleepContext(ctx, ddg.pageSleep); err != nil {
+			return nil, err
+		}
 	}
 
 	// Deduplicate results
@@ -273,7 +277,8 @@ func (ddg *DuckDuckGo) Search(query core.Query) ([]core.SearchResult, error) {
 
 // SearchImage executes a DuckDuckGo image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (ddg *DuckDuckGo) SearchImage(query core.Query) ([]core.SearchResult, error) {
+func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+	ctx = core.EnsureContext(ctx)
 	ddg.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}
@@ -283,7 +288,7 @@ func (ddg *DuckDuckGo) SearchImage(query core.Query) ([]core.SearchResult, error
 		return nil, err
 	}
 
-	page, err := ddg.Navigate(url)
+	page, err := ddg.Navigate(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +302,9 @@ func (ddg *DuckDuckGo) SearchImage(query core.Query) ([]core.SearchResult, error
 		ddg.logger.Error("Wait load failed: %s", err)
 		return searchResults, core.ErrSearchTimeout
 	}
-	time.Sleep(time.Second * 2) // Give time for images to load
+	if err := core.SleepContext(ctx, 2*time.Second); err != nil {
+		return searchResults, err
+	}
 
 	// Try multiple selectors for DuckDuckGo image results
 	var searchRes *rod.SearchResult

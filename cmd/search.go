@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -129,19 +130,20 @@ func searchBrowser(engineType string, query core.Query, browserProxyURL string) 
 		return nil, fmt.Errorf("no %q search engine found", engineType)
 	}
 
-	return engine.Search(query)
+	return engine.Search(context.Background(), query)
 }
 
 func searchRaw(engineType string, query core.Query) ([]core.SearchResult, error) {
 	logrus.Warn("Browserless results are very inconsistent or may not even work!")
+	ctx := context.Background()
 
 	switch strings.ToLower(engineType) {
 	case "yandex":
-		return yandex.Search(query)
+		return yandex.Search(ctx, query)
 	case "google":
-		return google.Search(query)
+		return google.Search(ctx, query)
 	case "baidu":
-		return baidu.Search(query)
+		return baidu.Search(ctx, query)
 	case "bing":
 		logrus.Warn("Bing does not support raw HTTP requests mode. Please use browser mode instead.")
 		return nil, fmt.Errorf("bing does not support raw requests mode")

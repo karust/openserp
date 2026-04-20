@@ -4,6 +4,7 @@
 package baidu
 
 import (
+	"context"
 	"testing"
 
 	"github.com/karust/openserp/core"
@@ -18,7 +19,7 @@ func TestSearchBaidu(t *testing.T) {
 	baid := New(*browser, core.SearchEngineOptions{})
 
 	query := core.Query{Text: "golang programming", Limit: 10}
-	results, err := baid.Search(query)
+	results, err := baid.Search(context.Background(), query)
 	ithelper.HandleError(t, "baidu web search", err)
 
 	if len(results) == 0 {
@@ -39,7 +40,7 @@ func TestImageSearchBaidu(t *testing.T) {
 	baid := New(*browser, core.SearchEngineOptions{})
 
 	query := core.Query{Text: "golden retriever puppy", Limit: 10}
-	results, err := baid.SearchImage(query)
+	results, err := baid.SearchImage(context.Background(), query)
 	ithelper.HandleError(t, "baidu image search", err)
 
 	if len(results) == 0 {

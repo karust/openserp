@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,9 +23,9 @@ type SearchEngine interface {
 	// Search runs a web search request and returns normalized results.
 	// Implementations should return sentinel errors such as ErrCaptcha and
 	// ErrSearchTimeout for policy-aware handling.
-	Search(Query) ([]SearchResult, error)
+	Search(context.Context, Query) ([]SearchResult, error)
 	// SearchImage runs an image search request and returns normalized results.
-	SearchImage(Query) ([]SearchResult, error)
+	SearchImage(context.Context, Query) ([]SearchResult, error)
 	// IsInitialized reports whether the engine is ready to serve requests.
 	IsInitialized() bool
 	// Name returns a stable engine identifier used in routes and telemetry.
@@ -176,15 +177,15 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 
 	if isImage {
 		if s.opts.AllowEndpointFallback {
-			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchImageWithFallback(engine, q)
+			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchImageWithFallback(c.UserContext(), engine, q)
 		} else {
-			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchImagePrimary(engine, q)
+			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchImagePrimary(c.UserContext(), engine, q)
 		}
 	} else {
 		if s.opts.AllowEndpointFallback {
-			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchWithFallback(engine, q)
+			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchWithFallback(c.UserContext(), engine, q)
 		} else {
-			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchPrimary(engine, q)
+			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchPrimary(c.UserContext(), engine, q)
 		}
 	}
 	s.applyProxyHeaders(c, proxyMeta)
@@ -350,7 +351,7 @@ func (s *Server) handleMegaImage(c *fiber.Ctx) error {
 	return s.handleMegaEndpoint(c, "image", s.resilient.SearchAllImageParallel)
 }
 
-func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(Query, []SearchEngine) []MegaSearchResult) error {
+func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(context.Context, Query, []SearchEngine) []MegaSearchResult) error {
 	q := Query{}
 	if err := q.InitFromContext(c); err != nil {
 		logrus.Errorf("Error while setting mega %s query: %s", action, err)
@@ -387,7 +388,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(Query,
 		return err
 	}
 
-	results := run(q, enginesToUse)
+	results := run(c.UserContext(), q, enginesToUse)
 	dedupedResults := s.deduplicateMegaResults(results)
 
 	if s.cache != nil {

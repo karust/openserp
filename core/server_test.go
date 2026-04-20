@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,8 +19,8 @@ type engineMock struct {
 	name        string
 	initialized bool
 	limiter     *rate.Limiter
-	searchFn    func(Query) ([]SearchResult, error)
-	imageFn     func(Query) ([]SearchResult, error)
+	searchFn    func(context.Context, Query) ([]SearchResult, error)
+	imageFn     func(context.Context, Query) ([]SearchResult, error)
 
 	mu          sync.Mutex
 	searchCalls int
@@ -32,22 +33,22 @@ func (e *engineMock) IsInitialized() bool {
 }
 func (e *engineMock) GetRateLimiter() *rate.Limiter { return e.limiter }
 
-func (e *engineMock) Search(q Query) ([]SearchResult, error) {
+func (e *engineMock) Search(ctx context.Context, q Query) ([]SearchResult, error) {
 	e.mu.Lock()
 	e.searchCalls++
 	e.mu.Unlock()
 	if e.searchFn != nil {
-		return e.searchFn(q)
+		return e.searchFn(ctx, q)
 	}
 	return []SearchResult{{Rank: 1, URL: "https://example.com/" + e.name, Title: e.name}}, nil
 }
 
-func (e *engineMock) SearchImage(q Query) ([]SearchResult, error) {
+func (e *engineMock) SearchImage(ctx context.Context, q Query) ([]SearchResult, error) {
 	e.mu.Lock()
 	e.imageCalls++
 	e.mu.Unlock()
 	if e.imageFn != nil {
-		return e.imageFn(q)
+		return e.imageFn(ctx, q)
 	}
 	return []SearchResult{{Rank: 1, URL: "https://img.example.com/" + e.name, Title: e.name}}, nil
 }
@@ -366,7 +367,7 @@ func TestDedicatedEndpointNoFallbackByDefault(t *testing.T) {
 	primary := &engineMock{
 		name:        "google",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			return nil, errors.New("primary failed")
 		},
 	}
@@ -453,7 +454,7 @@ func TestDedicatedEndpointFallbackBypassesCache(t *testing.T) {
 	primary := &engineMock{
 		name:        "google",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			return nil, errors.New("primary failed")
 		},
 	}
@@ -524,14 +525,14 @@ func TestMegaSearchCachesWholeQueryWithEngineOrderNormalization(t *testing.T) {
 	google := &engineMock{
 		name:        "google",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			return []SearchResult{{Rank: 1, URL: "https://example.com/shared", Title: "shared"}}, nil
 		},
 	}
 	yandex := &engineMock{
 		name:        "yandex",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			return []SearchResult{{Rank: 1, URL: "https://example.com/shared", Title: "shared"}}, nil
 		},
 	}
@@ -567,14 +568,14 @@ func TestMegaImageCachesWholeQueryWithEngineOrderNormalization(t *testing.T) {
 	google := &engineMock{
 		name:        "google",
 		initialized: true,
-		imageFn: func(q Query) ([]SearchResult, error) {
+		imageFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			return []SearchResult{{Rank: 1, URL: "https://img.example.com/shared", Title: "shared"}}, nil
 		},
 	}
 	yandex := &engineMock{
 		name:        "yandex",
 		initialized: true,
-		imageFn: func(q Query) ([]SearchResult, error) {
+		imageFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			return []SearchResult{{Rank: 1, URL: "https://img.example.com/shared", Title: "shared"}}, nil
 		},
 	}
@@ -628,7 +629,7 @@ func TestMegaSearchCachesForHealthySubsetWhenOneCircuitIsOpen(t *testing.T) {
 	bing := &engineMock{
 		name:        "bing",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			return nil, errors.New("bing failed")
 		},
 	}
@@ -666,7 +667,7 @@ func TestResilienceStatsContainsRetryInWhenCircuitOpen(t *testing.T) {
 	primary := &engineMock{
 		name:        "google",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			return nil, errors.New("forced failure")
 		},
 	}
@@ -795,7 +796,7 @@ func TestResilientRawProxyPoolRotatesOnRetry(t *testing.T) {
 	engine := &engineMock{
 		name:        "google",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			attemptedProxies = append(attemptedProxies, q.ProxyURL)
 			if q.ProxyURL == "http://bad-proxy:8080" {
 				return nil, errors.New("proxy failed")
@@ -898,7 +899,7 @@ func TestGlobalProxyForcesAllEnginesRaw(t *testing.T) {
 	googleEngine := &engineMock{
 		name:        "google",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			googleProxy = q.ProxyURL
 			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
 		},
@@ -906,7 +907,7 @@ func TestGlobalProxyForcesAllEnginesRaw(t *testing.T) {
 	yandexEngine := &engineMock{
 		name:        "yandex",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			yandexProxy = q.ProxyURL
 			return []SearchResult{{Rank: 1, URL: "https://example.com/yandex", Title: "yandex"}}, nil
 		},
@@ -944,7 +945,7 @@ func TestRequestProxyOverrideDirectBeatsGlobal(t *testing.T) {
 	engine := &engineMock{
 		name:        "google",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			googleProxy = q.ProxyURL
 			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
 		},
@@ -979,7 +980,7 @@ func TestRequestProxyOverrideTagBeatsGlobal(t *testing.T) {
 	engine := &engineMock{
 		name:        "google",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			googleProxy = q.ProxyURL
 			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
 		},
@@ -1017,7 +1018,7 @@ func TestBrowserProxyPoolRotatesPerRequest(t *testing.T) {
 	engine := &engineMock{
 		name:        "google",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			attemptedProxies = append(attemptedProxies, q.ProxyURL)
 			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
 		},
@@ -1079,7 +1080,7 @@ func TestMegaProxyOverrideHeaderBeatsGlobal(t *testing.T) {
 	engine := &engineMock{
 		name:        "google",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			googleProxy = q.ProxyURL
 			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
 		},
@@ -1137,7 +1138,7 @@ func TestEngineOverrideProxyBehaviorRaw(t *testing.T) {
 	googleEngine := &engineMock{
 		name:        "google",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			googleProxy = q.ProxyURL
 			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
 		},
@@ -1145,7 +1146,7 @@ func TestEngineOverrideProxyBehaviorRaw(t *testing.T) {
 	yandexEngine := &engineMock{
 		name:        "yandex",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			yandexProxy = q.ProxyURL
 			return []SearchResult{{Rank: 1, URL: "https://example.com/yandex", Title: "yandex"}}, nil
 		},
@@ -1183,7 +1184,7 @@ func TestRetryAppliesRateLimiterOnEachAttempt(t *testing.T) {
 		name:        "google",
 		initialized: true,
 		limiter:     rate.NewLimiter(rate.Every(120*time.Millisecond), 1),
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			return nil, errors.New("always fail")
 		},
 	}
@@ -1236,7 +1237,7 @@ func TestCacheStatsReflectActivity(t *testing.T) {
 	primary := &engineMock{
 		name:        "google",
 		initialized: true,
-		searchFn: func(q Query) ([]SearchResult, error) {
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			if q.Text == "fallback" {
 				return nil, errors.New("fallback path")
 			}

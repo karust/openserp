@@ -4,6 +4,7 @@
 package google
 
 import (
+	"context"
 	"testing"
 
 	"github.com/karust/openserp/core"
@@ -18,7 +19,7 @@ func TestSearchGoogle(t *testing.T) {
 	gogl := New(*browser, core.SearchEngineOptions{})
 
 	query := core.Query{Text: "golang programming", Limit: 10}
-	results, err := gogl.Search(query)
+	results, err := gogl.Search(context.Background(), query)
 	ithelper.HandleError(t, "google web search", err)
 
 	if len(results) == 0 {
@@ -39,7 +40,7 @@ func TestImageSearchGoogle(t *testing.T) {
 	gogl := New(*browser, core.SearchEngineOptions{})
 
 	query := core.Query{Text: "golden retriever puppy", Limit: 10}
-	results, err := gogl.SearchImage(query)
+	results, err := gogl.SearchImage(context.Background(), query)
 	ithelper.HandleError(t, "google image search", err)
 
 	if len(results) == 0 {

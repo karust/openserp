@@ -1,6 +1,7 @@
 package baidu
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -70,7 +71,8 @@ func (baid *Baidu) isTimeout(page *rod.Page) bool {
 
 // Search executes a Baidu web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
+func (baid *Baidu) Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+	ctx = core.EnsureContext(ctx)
 	baid.logger.Debug("Starting search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}
@@ -81,7 +83,7 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 		return nil, err
 	}
 
-	page, err := baid.Navigate(url)
+	page, err := baid.Navigate(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +155,8 @@ func (baid *Baidu) Search(query core.Query) ([]core.SearchResult, error) {
 
 // SearchImage executes a Baidu image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
+func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+	ctx = core.EnsureContext(ctx)
 	baid.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}
@@ -166,7 +169,7 @@ func (baid *Baidu) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		}
 
 		// Get anti-crawler cookies first, then reload page
-		page, err := baid.Navigate(url)
+		page, err := baid.Navigate(ctx, url)
 		if err != nil {
 			return nil, err
 		}

@@ -4,6 +4,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -34,7 +35,7 @@ func TestCreateBrowser(t *testing.T) {
 		t.Fatalf("Error failed initializing browser: %s", err)
 	}
 
-	page, err := browser.Navigate("about:blank")
+	page, err := browser.Navigate(context.Background(), "about:blank")
 	if err != nil {
 		t.Fatalf("navigate about:blank: %v", err)
 	}
@@ -133,7 +134,7 @@ func runSannysoftFingerprint(t *testing.T, useStealth bool) sannysoftRunSummary 
 
 	artifactPath := filepath.Join(botFingerprintArtifactDir, fmt.Sprintf("fingerprint_sannysoft_%s.png", label))
 
-	page, err := browser.Navigate(sannysoftURL)
+	page, err := browser.Navigate(context.Background(), sannysoftURL)
 	if err != nil {
 		t.Fatalf("navigate to sannysoft (%s): %v", label, err)
 	}

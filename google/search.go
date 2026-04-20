@@ -1,6 +1,7 @@
 package google
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -163,7 +164,8 @@ func (gogl *Google) acceptCookies(page *rod.Page) {
 
 // Search executes a Google web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
+func (gogl *Google) Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+	ctx = core.EnsureContext(ctx)
 	gogl.logger.Debug("Starting search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}
@@ -173,7 +175,7 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	page, err := gogl.Navigate(url)
+	page, err := gogl.Navigate(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +280,9 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 				}
 				//answ.Page().WaitRepaint()
 			}
-			time.Sleep(time.Millisecond * 2000)
+			if err := core.SleepContext(ctx, 2*time.Second); err != nil {
+				return nil, err
+			}
 
 			for i, answ := range answers {
 				answerText := strings.Split(answ.MustText(), "\n")
@@ -374,7 +378,8 @@ func (gogl *Google) Search(query core.Query) ([]core.SearchResult, error) {
 
 // SearchImage executes a Google image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
+func (gogl *Google) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+	ctx = core.EnsureContext(ctx)
 	gogl.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResultsMap := map[string]core.SearchResult{}
@@ -383,7 +388,7 @@ func (gogl *Google) SearchImage(query core.Query) ([]core.SearchResult, error) {
 		return nil, err
 	}
 
-	page, err := gogl.Navigate(url)
+	page, err := gogl.Navigate(ctx, url)
 	if err != nil {
 		return nil, err
 	}

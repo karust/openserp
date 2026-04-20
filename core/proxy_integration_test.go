@@ -78,7 +78,7 @@ func (e *proxyIntegrationEngine) GetRateLimiter() *rate.Limiter {
 	return e.limiter
 }
 
-func (e *proxyIntegrationEngine) Search(q Query) ([]SearchResult, error) {
+func (e *proxyIntegrationEngine) Search(_ context.Context, q Query) ([]SearchResult, error) {
 	e.proxies = append(e.proxies, q.ProxyURL)
 
 	body, err := fetchViaRawProxy(q.ProxyURL, q.Insecure, e.targetURL)
@@ -94,7 +94,8 @@ func (e *proxyIntegrationEngine) Search(q Query) ([]SearchResult, error) {
 	}}, nil
 }
 
-func (e *proxyIntegrationEngine) SearchImage(q Query) ([]SearchResult, error) {
+func (e *proxyIntegrationEngine) SearchImage(_ context.Context, q Query) ([]SearchResult, error) {
+	_ = q
 	return nil, ErrSearchTimeout
 }
 
