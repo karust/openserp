@@ -1,0 +1,14 @@
+.git
+.gitignore
+
+.release/
+docs/*.md
+*.md
+testdata/
+
+openserp
+openserp.exe
+bin/
+dist/
+*.tgz
+*.tar

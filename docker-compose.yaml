@@ -3,6 +3,9 @@ version: '3'
 services:
   openserp:
     container_name: serp
+    init: true
+    # Chrome crashes with "Out of memory" on page loads when /dev/shm is the default 64MB. Prefer an enlarged shm over `ipc:host` to keep the container isolated from the host IPC namespace.
+    shm_size: 2gb
     build:
       context: .
     ports: 
