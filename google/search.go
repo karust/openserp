@@ -73,7 +73,7 @@ func (gogl *Google) getTotalResults(page *rod.Page) (int, error) {
 	return total, nil
 }
 
-func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas string) bool {
+func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas, proxyURL string) bool {
 	gogl.logger.Debug("Solve captcha: sitekey=%s", sitekey)
 
 	if gogl.CaptchaSolver == nil {
@@ -91,7 +91,7 @@ func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas string) bool {
 		return false
 	}
 
-	resp, _, err := gogl.CaptchaSolver.SolveReCaptcha2(sitekey, info.URL, datas)
+	resp, _, err := gogl.CaptchaSolver.SolveReCaptcha2(sitekey, info.URL, datas, proxyURL)
 	if err != nil {
 		gogl.logger.Error("Captcha solve failed: %s", err)
 		return false
@@ -107,7 +107,7 @@ func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas string) bool {
 	return true
 }
 
-func (gogl *Google) checkCaptcha(page *rod.Page) bool {
+func (gogl *Google) checkCaptcha(page *rod.Page, queryProxyURL string) bool {
 	captchaDiv, err := page.Timeout(gogl.GetSelectorTimeout()).Search("div[data-sitekey]")
 	if err != nil {
 		return false
@@ -125,8 +125,12 @@ func (gogl *Google) checkCaptcha(page *rod.Page) bool {
 		return false
 	}
 
-	if gogl.IsSolveCaptcha {
-		return !gogl.solveCaptcha(page, *sitekey, *dataS)
+	if gogl.IsSolveCaptcha && gogl.CaptchaSolverEnabled {
+		proxyURL := queryProxyURL
+		if strings.TrimSpace(proxyURL) == "" {
+			proxyURL = gogl.ProxyURL
+		}
+		return !gogl.solveCaptcha(page, *sitekey, *dataS, proxyURL)
 	}
 	return true
 }
@@ -184,7 +188,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) ([]core.Search
 	gogl.preparePage(page)
 
 	// Check first if there captcha
-	if gogl.checkCaptcha(page) {
+	if gogl.checkCaptcha(page, query.ProxyURL) {
 		gogl.logger.Error("Captcha detected: %s", url)
 		return nil, core.ErrCaptcha
 	}
@@ -417,7 +421,7 @@ func (gogl *Google) SearchImage(ctx context.Context, query core.Query) ([]core.S
 
 		// Check why no results
 		if results == nil {
-			if gogl.checkCaptcha(page) {
+			if gogl.checkCaptcha(page, query.ProxyURL) {
 				gogl.logger.Error("Captcha detected: %s", url)
 				return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrCaptcha
 			}

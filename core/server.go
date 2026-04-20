@@ -320,6 +320,7 @@ func (s *Server) handleStats(c *fiber.Ctx) error {
 		"cache":            s.cacheStatsPayload(),
 		"proxy":            s.resilient.GetProxyStats(),
 		"circuit_breakers": s.resilient.GetCircuitBreakerStats(),
+		"captcha":          CaptchaSolverMetrics(),
 	})
 }
 

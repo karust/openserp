@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -32,6 +33,12 @@ func search(cmd *cobra.Command, args []string) {
 		Limit:    10,
 		Filter:   true,
 		Insecure: config.Server.Insecure,
+	}
+
+	captchaSolverEnabled, captchaSolverAPIKey, err := resolveCaptchaSolverConfig()
+	if err != nil {
+		logrus.Errorf("Error validating captcha solver config: %v", err)
+		os.Exit(1)
 	}
 
 	proxyRuntime := core.ProxyRuntimeBrowser
@@ -65,7 +72,7 @@ func search(cmd *cobra.Command, args []string) {
 		results, err = searchRaw(engineType, query)
 	} else {
 		logrus.Infof("Using browser mode for %s search", engineType)
-		results, err = searchBrowser(engineType, query, selectedProxy)
+		results, err = searchBrowser(engineType, query, selectedProxy, captchaSolverEnabled, captchaSolverAPIKey)
 	}
 
 	if err != nil {
@@ -84,7 +91,7 @@ func search(cmd *cobra.Command, args []string) {
 	fmt.Println(string(b))
 }
 
-func searchBrowser(engineType string, query core.Query, browserProxyURL string) ([]core.SearchResult, error) {
+func searchBrowser(engineType string, query core.Query, browserProxyURL string, captchaSolverEnabled bool, captchaSolverAPIKey string) ([]core.SearchResult, error) {
 	var engine core.SearchEngine
 	if core.IsAuthenticatedSocksProxyURL(browserProxyURL) {
 		return nil, fmt.Errorf(
@@ -95,15 +102,16 @@ func searchBrowser(engineType string, query core.Query, browserProxyURL string) 
 	}
 
 	opts := core.BrowserOpts{
-		IsHeadless:          !config.App.IsBrowserHead,
-		IsLeakless:          config.App.IsLeakless,
-		Timeout:             time.Second * time.Duration(config.App.Timeout),
-		LeavePageOpen:       config.App.IsLeaveHead,
-		CaptchaSolverApiKey: config.Config2Capcha.ApiKey,
-		BrowserPath:         config.App.BrowserPath,
-		ProxyURL:            browserProxyURL,
-		Insecure:            config.Server.Insecure,
-		UseStealth:          config.App.IsStealth,
+		IsHeadless:           !config.App.IsBrowserHead,
+		IsLeakless:           config.App.IsLeakless,
+		Timeout:              time.Second * time.Duration(config.App.Timeout),
+		LeavePageOpen:        config.App.IsLeaveHead,
+		CaptchaSolverEnabled: captchaSolverEnabled,
+		CaptchaSolverApiKey:  captchaSolverAPIKey,
+		BrowserPath:          config.App.BrowserPath,
+		ProxyURL:             browserProxyURL,
+		Insecure:             config.Server.Insecure,
+		UseStealth:           config.App.IsStealth,
 	}
 
 	if config.Server.IsDebug {

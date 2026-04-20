@@ -335,6 +335,20 @@ func TestStatsEndpointStructure(t *testing.T) {
 	if _, ok := first["failure_count"].(float64); !ok {
 		t.Fatalf("expected circuit_breakers[0].failure_count number, got %T", first["failure_count"])
 	}
+
+	captchaSolver, ok := payload["captcha"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected captcha object, got %T", payload["captcha"])
+	}
+	if _, ok := captchaSolver["solver_attempts"].(float64); !ok {
+		t.Fatalf("expected captcha.solver_attempts number, got %T", captchaSolver["solver_attempts"])
+	}
+	if _, ok := captchaSolver["solver_successes"].(float64); !ok {
+		t.Fatalf("expected captcha.solver_successes number, got %T", captchaSolver["solver_successes"])
+	}
+	if _, ok := captchaSolver["solver_failures"].(float64); !ok {
+		t.Fatalf("expected captcha.solver_failures number, got %T", captchaSolver["solver_failures"])
+	}
 }
 
 func TestHealthEndpointStatusSemantics(t *testing.T) {

@@ -51,10 +51,13 @@ cors:
 # 2captcha:
 #   apikey: "123123123123123"
 
+captcha:
+  solver_enabled: false # Global captcha solver gate (requires 2captcha.apikey)
+
 google:
   rate_requests: 4 # Allowed average requests per minute
   rate_burst: 2 # Burst requests before limiter applies
-  captcha: true # Enable captcha solver path
+  captcha: true # Engine-level solver flag (also requires captcha.solver_enabled=true)
 
 yandex:
   rate_requests: 4

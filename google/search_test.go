@@ -235,7 +235,7 @@ func TestParseSourceImageURL(t *testing.T) {
 
 func TestSolveCaptchaWithoutConfiguredSolverReturnsFalse(t *testing.T) {
 	gogl := New(core.Browser{}, core.SearchEngineOptions{})
-	if got := gogl.solveCaptcha(nil, "sitekey", "datas"); got {
+	if got := gogl.solveCaptcha(nil, "sitekey", "datas", ""); got {
 		t.Fatal("expected solveCaptcha to fail without solver/page context")
 	}
 }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -70,6 +71,12 @@ func serve(cmd *cobra.Command, args []string) {
 	corsCfg.AllowHeaders = config.CORS.AllowHeaders
 	corsCfg.MaxAge = config.CORS.MaxAge
 
+	captchaSolverEnabled, captchaSolverAPIKey, err := resolveCaptchaSolverConfig()
+	if err != nil {
+		logrus.Error(err)
+		os.Exit(1)
+	}
+
 	proxyRuntime := core.ProxyRuntimeBrowser
 	if config.Server.IsRawRequests {
 		proxyRuntime = core.ProxyRuntimeRaw
@@ -96,14 +103,15 @@ func serve(cmd *cobra.Command, args []string) {
 	}
 
 	baseOpts := core.BrowserOpts{
-		IsHeadless:          !config.App.IsBrowserHead,
-		IsLeakless:          config.App.IsLeakless,
-		Timeout:             time.Second * time.Duration(config.App.Timeout),
-		LeavePageOpen:       config.App.IsLeaveHead,
-		CaptchaSolverApiKey: config.Config2Capcha.ApiKey,
-		BrowserPath:         config.App.BrowserPath,
-		Insecure:            config.Server.Insecure,
-		UseStealth:          config.App.IsStealth,
+		IsHeadless:           !config.App.IsBrowserHead,
+		IsLeakless:           config.App.IsLeakless,
+		Timeout:              time.Second * time.Duration(config.App.Timeout),
+		LeavePageOpen:        config.App.IsLeaveHead,
+		CaptchaSolverEnabled: captchaSolverEnabled,
+		CaptchaSolverApiKey:  captchaSolverAPIKey,
+		BrowserPath:          config.App.BrowserPath,
+		Insecure:             config.Server.Insecure,
+		UseStealth:           config.App.IsStealth,
 	}
 	if config.Server.IsDebug {
 		baseOpts.IsHeadless = false

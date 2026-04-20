@@ -35,6 +35,8 @@ type BrowserOpts struct {
 	WaitLoadTime time.Duration
 	// CaptchaSolverApiKey enables 2Captcha integration for supported engines.
 	CaptchaSolverApiKey string
+	// CaptchaSolverEnabled gates solver invocation regardless of engine flags.
+	CaptchaSolverEnabled bool
 	// BrowserPath optionally points to a specific browser executable.
 	BrowserPath string
 	// ProxyURL defines the upstream proxy for browser traffic.
@@ -112,7 +114,7 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	b := Browser{BrowserOpts: opts}
 	b.browserAddr, err = l.Launch()
 
-	if opts.CaptchaSolverApiKey != "" {
+	if opts.CaptchaSolverEnabled && opts.CaptchaSolverApiKey != "" {
 		b.CaptchaSolver = NewSolver(opts.CaptchaSolverApiKey)
 		logrus.Debug("Captcha solver initialized")
 	}

@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	version               = "0.6.4"
+	version               = "0.6.5"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -27,6 +27,7 @@ type Config struct {
 	Resilience       ResilienceConfig     `mapstructure:"resilience"`
 	CircuitBreaker   CircuitBreakerConfig `mapstructure:"circuit_breaker"`
 	CORS             CORSConfig           `mapstructure:"cors"`
+	Captcha          CaptchaConfig        `mapstructure:"captcha"`
 	Config2Capcha    Config2Captcha       `mapstructure:"2captcha"`
 	GoogleConfig     EngineConfig         `mapstructure:"google"`
 	YandexConfig     EngineConfig         `mapstructure:"yandex"`
@@ -85,6 +86,10 @@ type CORSConfig struct {
 	AllowMethods string `mapstructure:"allow_methods"`
 	AllowHeaders string `mapstructure:"allow_headers"`
 	MaxAge       int    `mapstructure:"max_age"`
+}
+
+type CaptchaConfig struct {
+	SolverEnabled bool `mapstructure:"solver_enabled"`
 }
 
 var config = Config{}
@@ -322,6 +327,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("cors.allow_methods", "GET, POST, OPTIONS")
 	v.SetDefault("cors.allow_headers", "Origin, Content-Type, Accept, Authorization, X-Use-Proxy")
 	v.SetDefault("cors.max_age", 86400)
+	v.SetDefault("captcha.solver_enabled", false)
 }
 
 func init() {

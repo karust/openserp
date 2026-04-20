@@ -103,3 +103,69 @@ func TestValidateBrowserProxyPolicyRejectsTaggedAuthenticatedSocksInPool(t *test
 		t.Fatalf("expected explicit authenticated SOCKS error, got %v", err)
 	}
 }
+
+func TestResolveCaptchaSolverConfigDisabledWithoutKey(t *testing.T) {
+	origEnabled := config.Captcha.SolverEnabled
+	origKey := config.Config2Capcha.ApiKey
+	defer func() {
+		config.Captcha.SolverEnabled = origEnabled
+		config.Config2Capcha.ApiKey = origKey
+	}()
+
+	config.Captcha.SolverEnabled = false
+	config.Config2Capcha.ApiKey = ""
+
+	enabled, key, err := resolveCaptchaSolverConfig()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if enabled {
+		t.Fatal("expected solver to be disabled")
+	}
+	if key != "" {
+		t.Fatalf("expected empty solver key when disabled, got %q", key)
+	}
+}
+
+func TestResolveCaptchaSolverConfigEnabledWithoutKeyFails(t *testing.T) {
+	origEnabled := config.Captcha.SolverEnabled
+	origKey := config.Config2Capcha.ApiKey
+	defer func() {
+		config.Captcha.SolverEnabled = origEnabled
+		config.Config2Capcha.ApiKey = origKey
+	}()
+
+	config.Captcha.SolverEnabled = true
+	config.Config2Capcha.ApiKey = ""
+
+	_, _, err := resolveCaptchaSolverConfig()
+	if err == nil {
+		t.Fatal("expected missing API key error")
+	}
+	if !strings.Contains(err.Error(), "captcha solver is enabled") {
+		t.Fatalf("expected clear startup error, got %v", err)
+	}
+}
+
+func TestResolveCaptchaSolverConfigEnabledWithKey(t *testing.T) {
+	origEnabled := config.Captcha.SolverEnabled
+	origKey := config.Config2Capcha.ApiKey
+	defer func() {
+		config.Captcha.SolverEnabled = origEnabled
+		config.Config2Capcha.ApiKey = origKey
+	}()
+
+	config.Captcha.SolverEnabled = true
+	config.Config2Capcha.ApiKey = "api-key"
+
+	enabled, key, err := resolveCaptchaSolverConfig()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !enabled {
+		t.Fatal("expected solver to be enabled")
+	}
+	if key != "api-key" {
+		t.Fatalf("expected configured API key, got %q", key)
+	}
+}
