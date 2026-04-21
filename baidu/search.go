@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/go-rod/rod"
 	"github.com/karust/openserp/core"
@@ -71,9 +72,15 @@ func (baid *Baidu) isTimeout(page *rod.Page) bool {
 
 // Search executes a Baidu web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (baid *Baidu) Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.EnsureContext(ctx)
 	baid.logger.Debug("Starting search, query: %+v", query)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = core.RecoverEnginePanic(baid.Name(), recovered, baid.logger)
+			results = nil
+		}
+	}()
 
 	searchResults := []core.SearchResult{}
 
@@ -87,17 +94,25 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) ([]core.SearchR
 	if err != nil {
 		return nil, err
 	}
+	closePage := func() {
+		if baid.Browser.LeavePageOpen {
+			return
+		}
+		if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
+			baid.logger.Debug("Page close error: %v", closeErr)
+		}
+	}
 
-	results, err := page.Timeout(baid.Timeout).Search("div.c-container.new-pmd")
+	searchRes, err := page.Timeout(baid.Timeout).Search("div.c-container.new-pmd")
 	if err != nil {
-		defer page.Close()
+		closePage()
 		baid.logger.Error("Cannot parse search results: %s", err)
-		return nil, core.ErrSearchTimeout
+		return nil, core.ErrParser
 	}
 
 	// Check why no results, maybe captcha?
-	if results == nil {
-		defer page.Close()
+	if searchRes == nil {
+		closePage()
 
 		if baid.isCaptcha(page) {
 			baid.logger.Error("Captcha detected: %s", url)
@@ -109,8 +124,9 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) ([]core.SearchR
 		return nil, nil
 	}
 
-	resultElements, err := results.All()
+	resultElements, err := searchRes.All()
 	if err != nil {
+		closePage()
 		return nil, err
 	}
 
@@ -118,17 +134,21 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) ([]core.SearchR
 		// Get URL
 		link, err := r.Element("a")
 		if err != nil {
+			if core.IsRodObjectNotFound(err) {
+				break
+			}
 			continue
 		}
 		linkText, err := link.Property("href")
 		if err != nil {
-			baid.logger.Error("Missing href tag")
+			baid.logger.Debug("Missing href tag")
+			continue
 		}
 
 		// Get title
 		title, err := link.Text()
 		if err != nil {
-			baid.logger.Error("Failed to extract title")
+			baid.logger.Debug("Failed to extract title")
 			title = "No title"
 		}
 
@@ -143,12 +163,7 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) ([]core.SearchR
 		searchResults = append(searchResults, gR)
 	}
 
-	if !baid.Browser.LeavePageOpen {
-		err = page.Close()
-		if err != nil {
-			baid.logger.Error("Page close error: %v", err)
-		}
-	}
+	closePage()
 
 	return core.DeduplicateResults(searchResults), nil
 }
@@ -173,29 +188,35 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 		if err != nil {
 			return nil, err
 		}
-
-		if !baid.Browser.LeavePageOpen {
-			defer page.Close()
+		closePage := func() {
+			if baid.Browser.LeavePageOpen {
+				return
+			}
+			if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
+				baid.logger.Debug("Page close error: %v", closeErr)
+			}
 		}
 		if err := page.Reload(); err != nil {
+			closePage()
 			baid.logger.Error("Page reload failed: %s", err)
 			return nil, core.ErrSearchTimeout
 		}
 		if err := page.WaitLoad(); err != nil {
+			closePage()
 			baid.logger.Error("Page load wait failed: %s", err)
 			return nil, core.ErrSearchTimeout
 		}
 
 		result, err := page.Timeout(baid.Timeout).Search("body > pre")
 		if err != nil {
-			defer page.Close()
+			closePage()
 			baid.logger.Error("Cannot parse search results: %s", err)
-			return nil, core.ErrSearchTimeout
+			return nil, core.ErrParser
 		}
 
 		// Check why no results, maybe captcha?
 		if result == nil {
-			defer page.Close()
+			closePage()
 
 			if baid.isCaptcha(page) {
 				baid.logger.Error("Captcha detected: %s", url)
@@ -209,6 +230,7 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 
 		jsonText, err := result.First.Text()
 		if err != nil {
+			closePage()
 			return nil, err
 		}
 
@@ -216,17 +238,26 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 
 		// Fix broken JSON
 		jsonText = strings.ReplaceAll(jsonText, `\'`, "'")
-		matchNewlines := regexp.MustCompile(`[\r\n\t]`)
+		matchNewlines, err := regexp.Compile(`[\r\n\t]`)
+		if err != nil {
+			closePage()
+			return nil, core.ErrParser
+		}
 		escapeNewlines := func(s string) string {
 			return matchNewlines.ReplaceAllString(s, "\\n")
 		}
-		re := regexp.MustCompile(`"[^"\\]*(?:\\[\s\S][^"\\]*)*"`)
+		re, err := regexp.Compile(`"[^"\\]*(?:\\[\s\S][^"\\]*)*"`)
+		if err != nil {
+			closePage()
+			return nil, core.ErrParser
+		}
 		fixedJson := re.ReplaceAllStringFunc(jsonText, escapeNewlines)
 
 		err = json.Unmarshal([]byte(fixedJson), &data)
 		if err != nil {
+			closePage()
 			baid.logger.Error("Failed to unmarshal JSON: %v", err)
-			return nil, err
+			return nil, core.ErrParser
 		}
 
 		for i, img := range data.Data {
@@ -251,11 +282,7 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 
 		searchPage += 1
 
-		if !baid.Browser.LeavePageOpen {
-			if err := page.Close(); err != nil {
-				baid.logger.Debug("Page close error: %v", err)
-			}
-		}
+		closePage()
 	}
 
 	return core.DeduplicateResults(searchResults), nil

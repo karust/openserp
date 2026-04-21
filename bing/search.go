@@ -94,22 +94,17 @@ func (bing *Bing) acceptCookies(ctx context.Context, page *rod.Page) error {
 	return core.SleepContext(ctx, 500*time.Millisecond)
 }
 
-func (bing *Bing) close(page *rod.Page) {
-	if !bing.Browser.LeavePageOpen {
-		if page != nil {
-			err := page.Close()
-			if err != nil {
-				bing.logger.Debug("Page close error: %v", err)
-			}
-		}
-	}
-}
-
 // Search executes a Bing web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (bing *Bing) Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.EnsureContext(ctx)
 	bing.logger.Debug("Starting search, query: %+v", query)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = core.RecoverEnginePanic(bing.Name(), recovered, bing.logger)
+			results = nil
+		}
+	}()
 
 	searchResults := []core.SearchResult{}
 
@@ -122,7 +117,14 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) ([]core.SearchRe
 	if err != nil {
 		return nil, err
 	}
-	defer bing.close(page)
+	defer func() {
+		if bing.Browser.LeavePageOpen {
+			return
+		}
+		if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
+			bing.logger.Debug("Page close error: %v", closeErr)
+		}
+	}()
 
 	if err := page.WaitLoad(); err != nil {
 		bing.logger.Error("Initial page load wait failed: %s", err)
@@ -145,7 +147,7 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) ([]core.SearchRe
 	organicElements, err := page.Timeout(bing.Timeout).Elements("li.b_algo")
 	if err != nil {
 		bing.logger.Error("Cannot parse organic results: %s", err)
-		return nil, core.ErrSearchTimeout
+		return nil, core.ErrParser
 	}
 
 	adElements, err := page.Timeout(bing.Timeout).Elements("li.b_ad")
@@ -281,7 +283,14 @@ func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.Sea
 	if err != nil {
 		return nil, err
 	}
-	defer bing.close(page)
+	defer func() {
+		if bing.Browser.LeavePageOpen {
+			return
+		}
+		if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
+			bing.logger.Debug("Page close error: %v", closeErr)
+		}
+	}()
 
 	if err := page.WaitLoad(); err != nil {
 		bing.logger.Error("Initial image page load wait failed: %s", err)

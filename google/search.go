@@ -45,6 +45,10 @@ func (gogl *Google) GetRateLimiter() *rate.Limiter {
 }
 
 func (gogl *Google) getTotalResults(page *rod.Page) (int, error) {
+	if gogl.rgxpGetDigits == nil {
+		return 0, core.ErrParser
+	}
+
 	resultsStats, err := page.Timeout(gogl.GetSelectorTimeout()).Search("div#result-stats")
 	if err != nil {
 		return 0, errors.New("Result stats not found: " + err.Error())
@@ -168,9 +172,15 @@ func (gogl *Google) acceptCookies(page *rod.Page) {
 
 // Search executes a Google web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (gogl *Google) Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+func (gogl *Google) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.EnsureContext(ctx)
 	gogl.logger.Debug("Starting search, query: %+v", query)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = core.RecoverEnginePanic(gogl.Name(), recovered, gogl.logger)
+			results = nil
+		}
+	}()
 
 	searchResults := []core.SearchResult{}
 
@@ -184,7 +194,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) ([]core.Search
 		return nil, err
 	}
 
-	defer gogl.close(page)
+	defer gogl.close(ctx, page)
 	gogl.preparePage(page)
 
 	// Check first if there captcha
@@ -199,13 +209,13 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) ([]core.Search
 	}
 
 	// Find all results using stable attributes
-	results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved]")
+	searchRes, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved]")
 	if err != nil {
 		gogl.logger.Error("Cannot parse search results: %s", err)
-		return nil, core.ErrSearchTimeout
+		return nil, core.ErrParser
 	}
 
-	if results == nil {
+	if searchRes == nil {
 		return nil, nil
 	}
 
@@ -215,7 +225,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) ([]core.Search
 	}
 	gogl.logger.Info("Found %d total results", totalResults)
 
-	searchResultElems, err := results.All()
+	searchResultElems, err := searchRes.All()
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +234,15 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) ([]core.Search
 	for _, resEl := range searchResultElems {
 		srchRes := core.SearchResult{}
 
-		attrs := strings.Join(resEl.MustDescribe().Attributes, " ")
+		describe, err := resEl.Describe(1, false)
+		if err != nil {
+			gogl.logger.Debug("Result describe failed: %s", err)
+			if core.IsRodObjectNotFound(err) {
+				break
+			}
+			continue
+		}
+		attrs := strings.Join(describe.Attributes, " ")
 
 		if strings.Contains(attrs, "data-text-ad") {
 			// 1. Parse ads
@@ -249,10 +267,19 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) ([]core.Search
 			srchRes.URL = href.String()
 
 			// Get title
-			srchRes.Title = link.MustText()
+			titleText, err := link.Text()
+			if err != nil {
+				gogl.logger.Debug("Missing ad title text")
+				continue
+			}
+			srchRes.Title = titleText
 
 			// Get description
-			text := resEl.MustText()
+			text, err := resEl.Text()
+			if err != nil {
+				gogl.logger.Debug("Missing ad description text")
+				continue
+			}
 			textSliced := strings.Split(text, "\n")
 			srchRes.Description = strings.Join(textSliced[4:], "\n")
 			rank += 1
@@ -289,7 +316,12 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) ([]core.Search
 			}
 
 			for i, answ := range answers {
-				answerText := strings.Split(answ.MustText(), "\n")
+				answerRawText, err := answ.Text()
+				if err != nil {
+					gogl.logger.Debug("Missing answer text")
+					continue
+				}
+				answerText := strings.Split(answerRawText, "\n")
 				if len(answerText) < 2 {
 					gogl.logger.Debug("Short answer text: %s", answerText)
 					continue
@@ -328,9 +360,15 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) ([]core.Search
 
 			// Get URL from parent link of h3
 			link, err := titleTag.Parent()
-			if err == nil && link.MustMatches("a") {
-				href, _ := link.Property("href")
-				srchRes.URL = href.String()
+			if err == nil {
+				isLink, matchErr := link.Matches("a")
+				if matchErr != nil {
+					gogl.logger.Debug("Failed to match link selector: %s", matchErr)
+				}
+				if isLink {
+					href, _ := link.Property("href")
+					srchRes.URL = href.String()
+				}
 			}
 
 			// Skip if URL is empty
@@ -341,9 +379,9 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) ([]core.Search
 			// Get description using multiple fallback strategies
 			desc := ""
 			if descTag, err := resEl.Element("div[data-sncf='1'] div"); err == nil {
-				desc = descTag.MustText()
+				desc, _ = descTag.Text()
 			} else if descTag, err := resEl.Element("div.VwiC3b"); err == nil {
-				desc = descTag.MustText()
+				desc, _ = descTag.Text()
 			} else {
 				// Structural fallback
 				parent, err := titleTag.Parent()
@@ -354,7 +392,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) ([]core.Search
 						if err == nil {
 							if descTag, err := parent.Next(); err == nil {
 								if descDiv, err := descTag.Element("div"); err == nil {
-									desc = descDiv.MustText()
+									desc, _ = descDiv.Text()
 								}
 							}
 						}
@@ -397,7 +435,7 @@ func (gogl *Google) SearchImage(ctx context.Context, query core.Query) ([]core.S
 		return nil, err
 	}
 
-	defer gogl.close(page)
+	defer gogl.close(ctx, page)
 
 	for len(searchResultsMap) < query.Limit {
 		if err := page.WaitLoad(); err != nil {
@@ -464,7 +502,8 @@ func (gogl *Google) SearchImage(ctx context.Context, query core.Query) ([]core.S
 
 			linkText, err := link.Property("href")
 			if err != nil {
-				gogl.logger.Error("Missing href")
+				gogl.logger.Debug("Missing href")
+				continue
 			}
 
 			imgSrc, err := parseSourceImageURL(linkText.String())
@@ -503,9 +542,9 @@ func (gogl *Google) SearchImage(ctx context.Context, query core.Query) ([]core.S
 	return *core.ConvertSearchResultsMap(searchResultsMap), nil
 }
 
-func (gogl *Google) close(page *rod.Page) {
+func (gogl *Google) close(ctx context.Context, page *rod.Page) {
 	if !gogl.Browser.LeavePageOpen {
-		err := page.Close()
+		err := core.ClosePageWithTimeout(ctx, page, time.Second)
 		if err != nil {
 			gogl.logger.Debug("Page close error: %v", err)
 		}

@@ -17,6 +17,14 @@ var ErrCaptcha = errors.New("captcha detected")
 // selector or page timeouts expire.
 var ErrSearchTimeout = errors.New("timeout. Cannot find element on page")
 
+// ErrParser is returned when SERP parsing selectors drift or expected fields
+// cannot be extracted from an otherwise loaded page.
+var ErrParser = errors.New("parser failure")
+
+// ErrEngineInternal is returned when an engine recovered from an unexpected
+// panic and converted it into a typed error.
+var ErrEngineInternal = errors.New("engine internal error")
+
 // SearchResult represents one normalized result item returned by any engine.
 type SearchResult struct {
 	// Rank is a 1-based position in engine output. Some engines use negative

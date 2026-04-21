@@ -84,23 +84,27 @@ func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.Searc
 		// Get URL
 		link, err := r.Element("a")
 		if err != nil {
+			if core.IsRodObjectNotFound(err) {
+				break
+			}
 			continue
 		}
 		linkText, err := link.Property("href")
 		if err != nil {
-			yand.logger.Error("Missing href")
+			yand.logger.Debug("Missing href")
+			continue
 		}
 
 		// Get title
 		titleTag, err := link.Element("h2")
 		if err != nil {
-			yand.logger.Error("Missing h2 title")
+			yand.logger.Debug("Missing h2 title")
 			continue
 		}
 
 		title, err := titleTag.Text()
 		if err != nil {
-			yand.logger.Error("Failed to extract title")
+			yand.logger.Debug("Failed to extract title")
 			title = "No title"
 		}
 
@@ -110,7 +114,7 @@ func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.Searc
 		if err != nil {
 			yand.logger.Debug("No description")
 		} else {
-			desc = descTag.MustText()
+			desc, _ = descTag.Text()
 		}
 
 		r := core.SearchResult{Rank: (pageNum * 10) + (i + 1), URL: linkText.String(), Title: title, Description: desc}
@@ -122,9 +126,15 @@ func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.Searc
 
 // Search executes a Yandex web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (yand *Yandex) Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.EnsureContext(ctx)
 	yand.logger.Debug("Starting search, query: %+v", query)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = core.RecoverEnginePanic(yand.Name(), recovered, yand.logger)
+			results = nil
+		}
+	}()
 	if query.Start < 0 {
 		return nil, fmt.Errorf("incorrect start provided")
 	}
@@ -147,18 +157,26 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) ([]core.Search
 		if err != nil {
 			return nil, err
 		}
+		closePage := func() {
+			if yand.Browser.LeavePageOpen {
+				return
+			}
+			if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
+				yand.logger.Debug("Page close error: %v", closeErr)
+			}
+		}
 
 		// Get all search results in page
 		searchRes, err := page.Timeout(yand.Timeout).Search("li.serp-item")
 		if err != nil {
-			defer page.Close()
+			closePage()
 			yand.logger.Error("Cannot parse search results: %s", err)
-			return nil, core.ErrSearchTimeout
+			return nil, core.ErrParser
 		}
 
 		// Check why no results, maybe captcha?
 		if searchRes == nil {
-			defer page.Close()
+			closePage()
 
 			if yand.isNoResults(page) {
 				yand.logger.Warn("No results found")
@@ -172,6 +190,7 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) ([]core.Search
 		elements, err := searchRes.All()
 		if err != nil {
 			yand.logger.Error("Cannot get search elements: %s", err)
+			closePage()
 			break
 		}
 
@@ -187,13 +206,8 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) ([]core.Search
 
 		searchPage++
 
-		if !yand.Browser.LeavePageOpen {
-			// Close tab before opening new one during the cycle
-			err = page.Close()
-			if err != nil {
-				yand.logger.Debug("Page close error: %v", err)
-			}
-		}
+		// Close tab before opening new one during the cycle
+		closePage()
 
 		if err := core.SleepContext(ctx, yand.pageSleep); err != nil {
 			return nil, err
@@ -224,9 +238,13 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 		if err != nil {
 			return nil, err
 		}
-
-		if !yand.Browser.LeavePageOpen {
-			defer page.Close()
+		closePage := func() {
+			if yand.Browser.LeavePageOpen {
+				return
+			}
+			if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
+				yand.logger.Debug("Page close error: %v", closeErr)
+			}
 		}
 
 		//page.Keyboard.Press(input.End)
@@ -235,11 +253,14 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 
 		results, err := page.Timeout(yand.Timeout).Search("div[role='main'] div[data-state]")
 		if err != nil {
+			closePage()
 			yand.logger.Error("Cannot find search results: %s", err)
+			return searchResults, core.ErrParser
 		}
 
 		// Check why no results
 		if results == nil {
+			closePage()
 			if yand.isCaptcha(page) {
 				yand.logger.Error("Captcha detected: %s", url)
 				return searchResults, core.ErrCaptcha
@@ -251,11 +272,13 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 
 		data, err := results.First.Attribute("data-state")
 		if err != nil {
+			closePage()
 			return nil, err
 		}
 
 		var imgData ImageData
 		if err := json.Unmarshal([]byte(*data), &imgData); err != nil {
+			closePage()
 			return nil, err
 		}
 
@@ -271,9 +294,7 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 			searchResults = append(searchResults, res)
 		}
 
-		if !yand.Browser.LeavePageOpen {
-			page.Close()
-		}
+		closePage()
 	}
 
 	sort.Slice(searchResults, func(i, j int) bool {

@@ -36,7 +36,7 @@ type RetryResult struct {
 }
 
 // RetryableSearch executes searchFn with exponential backoff retries.
-// CAPTCHA and proxy-unavailable errors are not retried.
+// CAPTCHA, parser, engine-internal, and proxy-unavailable errors are not retried.
 func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, searchFn func(context.Context) ([]SearchResult, error)) RetryResult {
 	ctx = EnsureContext(ctx)
 	if cfg.BackoffFactor <= 0 {
@@ -88,6 +88,22 @@ func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, se
 		}
 		if errors.Is(err, ErrProxyUnavailable) {
 			logrus.Warnf("[%s] Proxy unavailable, skipping retries", engineName)
+			return RetryResult{
+				Err:      err,
+				Attempts: attempt + 1,
+				Engine:   engineName,
+			}
+		}
+		if errors.Is(err, ErrParser) {
+			logrus.Warnf("[%s] Parser failure, skipping retries", engineName)
+			return RetryResult{
+				Err:      err,
+				Attempts: attempt + 1,
+				Engine:   engineName,
+			}
+		}
+		if errors.Is(err, ErrEngineInternal) {
+			logrus.Warnf("[%s] Engine panic recovered, skipping retries", engineName)
 			return RetryResult{
 				Err:      err,
 				Attempts: attempt + 1,

@@ -67,6 +67,40 @@ func TestRetryableSearch_CaptchaNotRetried(t *testing.T) {
 	}
 }
 
+func TestRetryableSearch_ParserNotRetried(t *testing.T) {
+	cfg := RetryConfig{MaxRetries: 3, InitialBackoff: 10 * time.Millisecond, MaxBackoff: 100 * time.Millisecond, BackoffFactor: 2.0}
+	calls := 0
+
+	result := RetryableSearch(context.Background(), cfg, "test", func(context.Context) ([]SearchResult, error) {
+		calls++
+		return nil, ErrParser
+	})
+
+	if !errors.Is(result.Err, ErrParser) {
+		t.Fatalf("expected ErrParser, got: %v", result.Err)
+	}
+	if calls != 1 {
+		t.Errorf("expected 1 call, got: %d", calls)
+	}
+}
+
+func TestRetryableSearch_EngineInternalNotRetried(t *testing.T) {
+	cfg := RetryConfig{MaxRetries: 3, InitialBackoff: 10 * time.Millisecond, MaxBackoff: 100 * time.Millisecond, BackoffFactor: 2.0}
+	calls := 0
+
+	result := RetryableSearch(context.Background(), cfg, "test", func(context.Context) ([]SearchResult, error) {
+		calls++
+		return nil, ErrEngineInternal
+	})
+
+	if !errors.Is(result.Err, ErrEngineInternal) {
+		t.Fatalf("expected ErrEngineInternal, got: %v", result.Err)
+	}
+	if calls != 1 {
+		t.Errorf("expected 1 call, got: %d", calls)
+	}
+}
+
 func TestRetryableSearch_ContextCanceledStopsBackoffImmediately(t *testing.T) {
 	cfg := RetryConfig{
 		MaxRetries:     3,

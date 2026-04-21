@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -312,4 +313,43 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 // Close closes the active browser connection.
 func (b *Browser) Close() error {
 	return b.browser.Close()
+}
+
+// ClosePageWithTimeout bounds page close calls so shutdown paths don't hang.
+func ClosePageWithTimeout(ctx context.Context, page *rod.Page, timeout time.Duration) error {
+	if page == nil {
+		return nil
+	}
+	if timeout <= 0 {
+		timeout = time.Second
+	}
+	closeCtx, cancel := context.WithTimeout(EnsureContext(ctx), timeout)
+	defer cancel()
+	return page.Context(closeCtx).Close()
+}
+
+// RecoverEnginePanic converts recovered panics to a typed engine error and
+// logs stack trace with engine context.
+func RecoverEnginePanic(engine string, recovered interface{}, logger *EngineLogger) error {
+	stack := debug.Stack()
+	if logger != nil {
+		logger.Error("Recovered panic in %s Search: panic=%v\n%s", engine, recovered, string(stack))
+	} else {
+		logrus.Errorf("Recovered panic in %s Search: panic=%v\n%s", engine, recovered, string(stack))
+	}
+	return fmt.Errorf("%w: %s", ErrEngineInternal, engine)
+}
+
+// IsRodObjectNotFound reports element/object lookup misses across rod error
+// variants used by selector calls.
+func IsRodObjectNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var objectErr *rod.ObjectNotFoundError
+	if errors.As(err, &objectErr) {
+		return true
+	}
+	var elementErr *rod.ElementNotFoundError
+	return errors.As(err, &elementErr)
 }

@@ -101,8 +101,14 @@ func googleResultParser(response *http.Response) ([]core.SearchResult, error) {
 	return core.DeduplicateResults(results), err
 }
 
-func Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.EnsureContext(ctx)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = core.RecoverEnginePanic("google", recovered, nil)
+			results = nil
+		}
+	}()
 
 	googleURL, err := BuildURL(query)
 	if err != nil {
@@ -117,17 +123,17 @@ func Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) 
 	defer core.DrainAndCloseResponse(res)
 	logrus.Debugf("Google Raw response: code=%d", res.StatusCode)
 
-	results, err := googleResultParser(res)
+	parsedResults, err := googleResultParser(res)
 	if err != nil {
 		return nil, err
 	}
 
 	if query.Start > 0 {
-		for i := range results {
-			results[i].Rank = query.Start + i + 1
+		for i := range parsedResults {
+			parsedResults[i].Rank = query.Start + i + 1
 		}
 	}
-	logrus.Debugf("Google Raw results : %v", results)
+	logrus.Debugf("Google Raw results : %v", parsedResults)
 
-	return results, nil
+	return parsedResults, nil
 }

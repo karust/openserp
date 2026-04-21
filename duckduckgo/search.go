@@ -82,6 +82,9 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 
 		if err != nil {
 			ddg.logger.Debug("Missing link")
+			if core.IsRodObjectNotFound(err) {
+				break
+			}
 			continue
 		}
 
@@ -134,7 +137,7 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 		for _, selector := range descSelectors {
 			descTag, err := r.Element(selector)
 			if err == nil {
-				desc = descTag.MustText()
+				desc, _ = descTag.Text()
 				break
 			}
 		}
@@ -170,9 +173,15 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 
 // Search executes a DuckDuckGo web search and returns normalized search
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
-func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
+func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.EnsureContext(ctx)
 	ddg.logger.Debug("Starting search, query: %+v", query)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = core.RecoverEnginePanic(ddg.Name(), recovered, ddg.logger)
+			results = nil
+		}
+	}()
 
 	allResults := []core.SearchResult{}
 	searchPage := 0
@@ -186,6 +195,14 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) ([]core.Sea
 		page, err := ddg.Navigate(ctx, url)
 		if err != nil {
 			return nil, err
+		}
+		closePage := func() {
+			if ddg.Browser.LeavePageOpen {
+				return
+			}
+			if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
+				ddg.logger.Debug("Page close error: %v", closeErr)
+			}
 		}
 
 		// Get all search results in page - try multiple selectors
@@ -211,14 +228,14 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) ([]core.Sea
 		}
 
 		if searchErr != nil {
-			defer page.Close()
+			closePage()
 			ddg.logger.Error("Cannot parse search results: %s", searchErr)
-			return nil, core.ErrSearchTimeout
+			return nil, core.ErrParser
 		}
 
 		// Check why no results, maybe captcha?
 		if searchRes == nil {
-			defer page.Close()
+			closePage()
 
 			if ddg.isNoResults(page) {
 				ddg.logger.Warn("No results found")
@@ -232,6 +249,7 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) ([]core.Sea
 		elements, err := searchRes.All()
 		if err != nil {
 			ddg.logger.Error("Cannot get search elements: %s", err)
+			closePage()
 			break
 		}
 
@@ -239,19 +257,15 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) ([]core.Sea
 
 		if len(r) == 0 {
 			ddg.logger.Debug("No valid results found on page %d", searchPage)
-			return nil, core.ErrSearchTimeout
+			closePage()
+			return nil, core.ErrParser
 		}
 
 		allResults = append(allResults, r...)
 		searchPage++
 
-		if !ddg.Browser.LeavePageOpen {
-			// Close tab before opening new one during the cycle
-			err = page.Close()
-			if err != nil {
-				ddg.logger.Debug("Page close error: %v", err)
-			}
-		}
+		// Close tab before opening new one during the cycle
+		closePage()
 
 		// Break if we've reached or exceeded the limit
 		if len(allResults) >= query.Limit {
@@ -294,7 +308,11 @@ func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]cor
 	}
 
 	if !ddg.Browser.LeavePageOpen {
-		defer page.Close()
+		defer func() {
+			if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
+				ddg.logger.Debug("Page close error: %v", closeErr)
+			}
+		}()
 	}
 
 	// Wait for page to load

@@ -192,15 +192,17 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 
 	if searchErr != nil {
 		errToReturn := searchErr
-		switch searchErr {
-		case ErrCaptcha:
+		switch {
+		case errors.Is(searchErr, ErrCaptcha):
 			errToReturn = fmt.Errorf("captcha found, please stop sending requests for a while: %w", searchErr)
-		case ErrSearchTimeout:
+		case errors.Is(searchErr, ErrSearchTimeout):
 			errToReturn = fmt.Errorf("%s", searchErr)
-		default:
-			if errors.Is(searchErr, ErrProxyUnavailable) {
-				errToReturn = fmt.Errorf("%s", searchErr)
-			}
+		case errors.Is(searchErr, ErrParser):
+			errToReturn = fmt.Errorf("%w", ErrParser)
+		case errors.Is(searchErr, ErrEngineInternal):
+			errToReturn = fmt.Errorf("%w", ErrEngineInternal)
+		case errors.Is(searchErr, ErrProxyUnavailable):
+			errToReturn = fmt.Errorf("%s", searchErr)
 		}
 		logrus.Errorf("Error during resilient %s %s: %s", engine.Name(), action, searchErr)
 		return fiber.NewError(fiber.StatusServiceUnavailable, errToReturn.Error())

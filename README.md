@@ -5,9 +5,8 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/karust/openserp)](https://goreportcard.com/report/github.com/karust/openserp)
 [![Go Reference](https://pkg.go.dev/badge/github/karust/openserp?style=for-the-badge)](https://pkg.go.dev/github.com/karust/openserp)
 [![release](https://img.shields.io/github/release/karust/openserp)](https://github.com/karust/openserp/releases)
+[![Docker Pulls](https://img.shields.io/docker/v/karust/openserp)](https://hub.docker.com/repository/docker/karust/openserp)
 [![CI](https://github.com/karust/openserp/actions/workflows/ci.yml/badge.svg?branch=tests)](https://github.com/karust/openserp/actions/workflows/ci.yml)
-
-<!-- [![Docker Pulls](https://img.shields.io/docker/pulls/karust/openserp)](https://hub.docker.com/repository/docker/karust/openserp) -->
 
 **OpenSERP** is an API and CLI for accessing search engine results from **Google, Yandex, Baidu, Bing, and DuckDuckGo**.  
 A developer-friendly alternative to paid SERP API services!
