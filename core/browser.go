@@ -365,7 +365,7 @@ func ClosePageWithTimeout(ctx context.Context, page *rod.Page, timeout time.Dura
 // RecoverEnginePanic converts recovered panics to a typed engine error and
 // logs stack trace with engine context.
 func RecoverEnginePanic(engine string, recovered interface{}, logger *EngineLogger) error {
-	return RecoverEnginePanicWithContext(nil, engine, recovered, logger)
+	return RecoverEnginePanicWithContext(context.TODO(), engine, recovered, logger)
 }
 
 func RecoverEnginePanicWithContext(ctx context.Context, engine string, recovered interface{}, logger *EngineLogger) error {

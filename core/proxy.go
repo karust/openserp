@@ -352,7 +352,7 @@ func NewProxyRegistry(entries []ProxyEntryConfig, failureThreshold int) (*ProxyR
 }
 
 func (r *ProxyRegistry) NextByTag(tag string) string {
-	return r.NextByTagWithContext(nil, tag)
+	return r.NextByTagWithContext(context.TODO(), tag)
 }
 
 func (r *ProxyRegistry) NextByTagWithContext(ctx context.Context, tag string) string {
