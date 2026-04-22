@@ -174,11 +174,16 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 // Search executes a DuckDuckGo web search and returns normalized search
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.EnsureContext(ctx)
+	ctx = core.WithEngine(core.EnsureContext(ctx), ddg.Name())
+	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	scoped := *ddg
+	scoped.logger = ddg.logger.WithRequest(ctx)
+	ddg = &scoped
+
 	ddg.logger.Debug("Starting search, query: %+v", query)
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanic(ddg.Name(), recovered, ddg.logger)
+			err = core.RecoverEnginePanicWithContext(ctx, ddg.Name(), recovered, ddg.logger)
 			results = nil
 		}
 	}()
@@ -292,7 +297,12 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 // SearchImage executes a DuckDuckGo image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.EnsureContext(ctx)
+	ctx = core.WithEngine(core.EnsureContext(ctx), ddg.Name())
+	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	scoped := *ddg
+	scoped.logger = ddg.logger.WithRequest(ctx)
+	ddg = &scoped
+
 	ddg.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}

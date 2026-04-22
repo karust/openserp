@@ -84,7 +84,7 @@ func serve(cmd *cobra.Command, args []string) {
 
 	proxyCfg, err := buildNormalizedProxyConfig(proxyRuntime)
 	if err != nil {
-		logrus.Errorf("invalid proxy configuration: %v", err)
+		logrus.WithError(err).Error(fmt.Sprintf("invalid proxy configuration: %v", err))
 		return
 	}
 

@@ -57,6 +57,7 @@ type AppConfig struct {
 	IsLeaveHead   bool   `mapstructure:"leave_head"`
 	IsLeakless    bool   `mapstructure:"leakless"`
 	IsStealth     bool   `mapstructure:"stealth"`
+	LogFormat     string `mapstructure:"log_format"`
 }
 
 type EngineConfig struct {
@@ -117,6 +118,7 @@ var flagToConfigKey = map[string]string{
 	"cb_failures":             "circuit_breaker.failures",
 	"cb_recovery":             "circuit_breaker.recovery_seconds",
 	"cb_successes":            "circuit_breaker.successes",
+	"log_format":              "app.log_format",
 }
 
 var RootCmd = &cobra.Command{
@@ -131,8 +133,14 @@ var RootCmd = &cobra.Command{
 			return err
 		}
 
-		core.InitLogger(config.Server.IsVerbose, config.Server.IsDebug)
-		logrus.Debugf("Final config: %+v", config)
+		logFormat, err := core.NormalizeLogFormat(config.App.LogFormat)
+		if err != nil {
+			return err
+		}
+		config.App.LogFormat = logFormat
+
+		core.InitLogger(config.Server.IsVerbose, config.Server.IsDebug, config.App.LogFormat)
+		logrus.WithField("config", fmt.Sprintf("%+v", config)).Debug("Final config")
 		return nil
 	},
 }
@@ -146,13 +154,13 @@ func bindFlags(cmd *cobra.Command, vpr *viper.Viper) {
 		}
 
 		if err := vpr.BindPFlag(configName, flg); err != nil {
-			logrus.Errorf("Unable to bind flag %s: %v", flg.Name, err)
+			logrus.WithError(err).Error(fmt.Sprintf("Unable to bind flag %s: %v", flg.Name, err))
 		}
 
 		if flg.Changed {
 			val, err := parseFlagValue(flg)
 			if err != nil {
-				logrus.Errorf("Unable to parse flag %s: %v", flg.Name, err)
+				logrus.WithError(err).Error(fmt.Sprintf("Unable to parse flag %s: %v", flg.Name, err))
 				return
 			}
 			vpr.Set(configName, val)
@@ -206,7 +214,7 @@ func initializeConfig(cmd *cobra.Command) error {
 		envKey := envPrefix + "_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
 		err := v.BindEnv(key, envKey)
 		if err != nil {
-			logrus.Errorf("Unable to bind ENV valye: %v", err)
+			logrus.WithError(err).Error(fmt.Sprintf("Unable to bind ENV valye: %v", err))
 		}
 	}
 
@@ -302,6 +310,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("server.verbose", false)
 	v.SetDefault("server.raw_requests", false)
 	v.SetDefault("server.insecure", false)
+	v.SetDefault("app.log_format", "")
 
 	v.SetDefault("app.timeout", 30)
 	v.SetDefault("app.browser_path", "")
@@ -325,7 +334,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("cors.enabled", true)
 	v.SetDefault("cors.allow_origins", "*")
 	v.SetDefault("cors.allow_methods", "GET, POST, OPTIONS")
-	v.SetDefault("cors.allow_headers", "Origin, Content-Type, Accept, Authorization, X-Use-Proxy")
+	v.SetDefault("cors.allow_headers", "Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Request-ID, X-Tenant")
 	v.SetDefault("cors.max_age", 86400)
 	v.SetDefault("captcha.solver_enabled", false)
 }
@@ -353,4 +362,5 @@ func init() {
 	RootCmd.PersistentFlags().IntVar(&config.CircuitBreaker.Failures, "cb_failures", 5, "Consecutive failures before circuit breaker opens")
 	RootCmd.PersistentFlags().IntVar(&config.CircuitBreaker.RecoverySeconds, "cb_recovery", 60, "Seconds before retrying an engine with open circuit")
 	RootCmd.PersistentFlags().IntVar(&config.CircuitBreaker.Successes, "cb_successes", 2, "Consecutive successful half-open checks needed to close circuit")
+	RootCmd.PersistentFlags().StringVar(&config.App.LogFormat, "log_format", "", "Log format: json or text (default: json in production, text in debug)")
 }

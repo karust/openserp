@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -351,6 +352,10 @@ func NewProxyRegistry(entries []ProxyEntryConfig, failureThreshold int) (*ProxyR
 }
 
 func (r *ProxyRegistry) NextByTag(tag string) string {
+	return r.NextByTagWithContext(nil, tag)
+}
+
+func (r *ProxyRegistry) NextByTagWithContext(ctx context.Context, tag string) string {
 	tag = normalizeTag(tag)
 	if tag == "" {
 		return ""
@@ -365,7 +370,9 @@ func (r *ProxyRegistry) NextByTag(tag string) string {
 	}
 
 	if r.allDisabledLocked(urls) {
-		logrus.Warnf("Proxy tag pool exhausted for %q, re-enabling tagged proxies", tag)
+		WithRequest(ctx).WithField("proxy_tag", tag).Warn(
+			fmt.Sprintf("Proxy tag pool exhausted for %q, re-enabling tagged proxies", tag),
+		)
 		for _, proxyURL := range urls {
 			state := r.states[proxyURL]
 			state.disabled = false
@@ -383,14 +390,17 @@ func (r *ProxyRegistry) NextByTag(tag string) string {
 		}
 
 		r.nextByTag[tag] = (idx + 1) % len(urls)
-		logrus.Debugf("Selected proxy for tag=%s: %s", tag, MaskProxyURL(proxyURL))
+		WithRequest(ctx).WithFields(logrus.Fields{
+			"proxy_tag": tag,
+			"proxy":     MaskProxyURL(proxyURL),
+		}).Debugf("Selected proxy for tag=%s: %s", tag, MaskProxyURL(proxyURL))
 		return proxyURL
 	}
 
 	return ""
 }
 
-func (r *ProxyRegistry) ReportFailure(proxyURL string) {
+func (r *ProxyRegistry) ReportFailure(ctx context.Context, proxyURL string) {
 	proxyURL, err := NormalizeProxyURL(proxyURL)
 	if err != nil || proxyURL == "" {
 		return
@@ -407,11 +417,14 @@ func (r *ProxyRegistry) ReportFailure(proxyURL string) {
 	state.failures++
 	if state.failures >= r.failureThreshold {
 		state.disabled = true
-		logrus.Warnf("Disabled proxy after %d failures: %s", state.failures, MaskProxyURL(proxyURL))
+		WithRequest(ctx).WithFields(logrus.Fields{
+			"failure_count": state.failures,
+			"proxy":         MaskProxyURL(proxyURL),
+		}).Warnf("Disabled proxy after %d failures: %s", state.failures, MaskProxyURL(proxyURL))
 	}
 }
 
-func (r *ProxyRegistry) ReportSuccess(proxyURL string) {
+func (r *ProxyRegistry) ReportSuccess(_ context.Context, proxyURL string) {
 	proxyURL, err := NormalizeProxyURL(proxyURL)
 	if err != nil || proxyURL == "" {
 		return

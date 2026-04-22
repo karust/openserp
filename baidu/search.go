@@ -73,11 +73,16 @@ func (baid *Baidu) isTimeout(page *rod.Page) bool {
 // Search executes a Baidu web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.EnsureContext(ctx)
+	ctx = core.WithEngine(core.EnsureContext(ctx), baid.Name())
+	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	scoped := *baid
+	scoped.logger = baid.logger.WithRequest(ctx)
+	baid = &scoped
+
 	baid.logger.Debug("Starting search, query: %+v", query)
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanic(baid.Name(), recovered, baid.logger)
+			err = core.RecoverEnginePanicWithContext(ctx, baid.Name(), recovered, baid.logger)
 			results = nil
 		}
 	}()
@@ -171,7 +176,12 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 // SearchImage executes a Baidu image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.EnsureContext(ctx)
+	ctx = core.WithEngine(core.EnsureContext(ctx), baid.Name())
+	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	scoped := *baid
+	scoped.logger = baid.logger.WithRequest(ctx)
+	baid = &scoped
+
 	baid.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}

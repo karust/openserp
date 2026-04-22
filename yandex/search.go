@@ -127,11 +127,16 @@ func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.Searc
 // Search executes a Yandex web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.EnsureContext(ctx)
+	ctx = core.WithEngine(core.EnsureContext(ctx), yand.Name())
+	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	scoped := *yand
+	scoped.logger = yand.logger.WithRequest(ctx)
+	yand = &scoped
+
 	yand.logger.Debug("Starting search, query: %+v", query)
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanic(yand.Name(), recovered, yand.logger)
+			err = core.RecoverEnginePanicWithContext(ctx, yand.Name(), recovered, yand.logger)
 			results = nil
 		}
 	}()
@@ -221,7 +226,12 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 // SearchImage executes a Yandex image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.EnsureContext(ctx)
+	ctx = core.WithEngine(core.EnsureContext(ctx), yand.Name())
+	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	scoped := *yand
+	scoped.logger = yand.logger.WithRequest(ctx)
+	yand = &scoped
+
 	yand.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}

@@ -1,11 +1,10 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 type CircuitState int
@@ -64,7 +63,7 @@ func NewCircuitBreaker(name string, cfg CircuitBreakerConfig) *CircuitBreaker {
 	}
 }
 
-func (cb *CircuitBreaker) AllowRequest() bool {
+func (cb *CircuitBreaker) AllowRequest(ctx context.Context) bool {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
@@ -74,7 +73,7 @@ func (cb *CircuitBreaker) AllowRequest() bool {
 	case CircuitOpen:
 		if time.Since(cb.lastFailureTime) >= cb.config.RecoveryTimeout {
 			cb.setState(CircuitHalfOpen)
-			logrus.Infof("[CircuitBreaker][%s] Recovery timeout elapsed, moving to half-open", cb.name)
+			WithRequestEngine(ctx, cb.name).Info("Recovery timeout elapsed, moving to half-open")
 			return true
 		}
 		return false
@@ -85,7 +84,7 @@ func (cb *CircuitBreaker) AllowRequest() bool {
 	}
 }
 
-func (cb *CircuitBreaker) RecordSuccess() {
+func (cb *CircuitBreaker) RecordSuccess(ctx context.Context) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
@@ -96,14 +95,14 @@ func (cb *CircuitBreaker) RecordSuccess() {
 			cb.setState(CircuitClosed)
 			cb.failureCount = 0
 			cb.successCount = 0
-			logrus.Infof("[CircuitBreaker][%s] Recovered, circuit closed", cb.name)
+			WithRequestEngine(ctx, cb.name).Info("Circuit recovered, closed")
 		}
 	case CircuitClosed:
 		cb.failureCount = 0
 	}
 }
 
-func (cb *CircuitBreaker) RecordFailure() {
+func (cb *CircuitBreaker) RecordFailure(ctx context.Context) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
@@ -114,13 +113,15 @@ func (cb *CircuitBreaker) RecordFailure() {
 		cb.failureCount++
 		if cb.failureCount >= cb.config.FailureThreshold {
 			cb.setState(CircuitOpen)
-			logrus.Warnf("[CircuitBreaker][%s] Circuit OPENED after %d consecutive failures (will retry in %s)",
-				cb.name, cb.failureCount, cb.config.RecoveryTimeout)
+			WithRequestEngine(ctx, cb.name).
+				WithField("failure_count", cb.failureCount).
+				WithField("recovery_timeout", cb.config.RecoveryTimeout.String()).
+				Warn("Circuit opened after consecutive failures")
 		}
 	case CircuitHalfOpen:
 		cb.setState(CircuitOpen)
 		cb.successCount = 0
-		logrus.Warnf("[CircuitBreaker][%s] Failed during half-open, circuit re-opened", cb.name)
+		WithRequestEngine(ctx, cb.name).Warn("Failed during half-open, circuit re-opened")
 	}
 }
 

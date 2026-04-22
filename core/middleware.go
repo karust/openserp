@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
 
@@ -26,8 +27,30 @@ func DefaultCORSConfig() CORSConfig {
 	return CORSConfig{
 		AllowOrigins: "*",
 		AllowMethods: "GET, POST, OPTIONS",
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization, X-Use-Proxy",
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Request-ID, X-Tenant",
 		MaxAge:       86400,
+	}
+}
+
+func RequestContextMiddleware() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		requestID := strings.TrimSpace(c.Get("X-Request-ID"))
+		if requestID == "" {
+			id, err := uuid.NewV7()
+			if err != nil {
+				requestID = uuid.NewString()
+			} else {
+				requestID = id.String()
+			}
+		}
+
+		requestCtx := WithRequestID(c.UserContext(), requestID)
+		requestCtx = WithTenant(requestCtx, strings.TrimSpace(c.Get("X-Tenant")))
+		requestCtx = WithQueryHash(requestCtx, QueryHash(c.Query("text")))
+		c.SetUserContext(requestCtx)
+
+		c.Set("X-Request-ID", requestID)
+		return c.Next()
 	}
 }
 
@@ -83,23 +106,23 @@ func RequestLoggerMiddleware() fiber.Handler {
 		}
 
 		logFields := logrus.Fields{
-			"method":  c.Method(),
-			"path":    c.Path(),
-			"status":  status,
-			"latency": latency.String(),
-			"ip":      c.IP(),
+			"method": c.Method(),
+			"path":   c.Path(),
+			"status": status,
+			"ip":     c.IP(),
 		}
+		logFields["latency_ms"] = latency.Milliseconds()
 		if query := c.Query("text"); query != "" {
-			logFields["query"] = query
+			logFields["query_hash"] = QueryHash(query)
 		}
 
-		entry := logrus.WithFields(logFields)
+		entry := WithRequest(c.UserContext()).WithFields(logFields)
 		if status >= 500 {
-			entry.Errorf("%s - request failed", c.Path())
+			entry.Error("request failed")
 		} else if status >= 400 {
-			entry.Warnf("%s - request error", c.Path())
+			entry.Warn("request error")
 		} else {
-			entry.Infof("%s - request completed", c.Path())
+			entry.Info("request completed")
 		}
 
 		return err

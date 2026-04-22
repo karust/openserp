@@ -104,9 +104,13 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 	}
 	if opts.CacheTTL > 0 && opts.CacheMaxSize > 0 {
 		serv.cache = NewResponseCache(opts.CacheTTL, opts.CacheMaxSize)
-		logrus.Infof("Response cache enabled: TTL=%s, MaxSize=%d", opts.CacheTTL, opts.CacheMaxSize)
+		logrus.WithFields(logrus.Fields{
+			"cache_ttl":      opts.CacheTTL.String(),
+			"cache_max_size": opts.CacheMaxSize,
+		}).Info("Response cache enabled")
 	}
 
+	app.Use(RequestContextMiddleware())
 	if opts.EnableCORS {
 		app.Use(CORSMiddleware(opts.CORS))
 	}
@@ -146,17 +150,25 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 }
 
 func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isImage bool) error {
+	requestCtx := WithEngine(c.UserContext(), engine.Name())
+	c.SetUserContext(requestCtx)
+
 	q := Query{}
 	if err := q.InitFromContext(c); err != nil {
-		logrus.Errorf("Error while setting %s query: %s", engine.Name(), err)
+		WithRequest(c.UserContext()).WithError(err).Error("Invalid query parameters")
 		return err
 	}
+
+	requestCtx = WithQueryHash(c.UserContext(), QueryHashFromQuery(q))
+	c.SetUserContext(requestCtx)
 
 	action := "search"
 	if isImage {
 		action = "image"
 	}
-	logrus.Infof("Starting SERP %s request using %s engine for query: %s", action, engine.Name(), q.Text)
+	WithRequest(requestCtx).
+		WithField("action", action).
+		Debugf("Starting %s request for query: %s", action, q.Text)
 
 	if hit, err := s.tryServeCacheHit(
 		c,
@@ -177,15 +189,15 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 
 	if isImage {
 		if s.opts.AllowEndpointFallback {
-			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchImageWithFallback(c.UserContext(), engine, q)
+			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchImageWithFallback(requestCtx, engine, q)
 		} else {
-			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchImagePrimary(c.UserContext(), engine, q)
+			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchImagePrimary(requestCtx, engine, q)
 		}
 	} else {
 		if s.opts.AllowEndpointFallback {
-			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchWithFallback(c.UserContext(), engine, q)
+			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchWithFallback(requestCtx, engine, q)
 		} else {
-			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchPrimary(c.UserContext(), engine, q)
+			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchPrimary(requestCtx, engine, q)
 		}
 	}
 	s.applyProxyHeaders(c, proxyMeta)
@@ -204,7 +216,10 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		case errors.Is(searchErr, ErrProxyUnavailable):
 			errToReturn = fmt.Errorf("%s", searchErr)
 		}
-		logrus.Errorf("Error during resilient %s %s: %s", engine.Name(), action, searchErr)
+		WithRequest(requestCtx).
+			WithFields(logrus.Fields{"action": action}).
+			WithError(searchErr).
+			Error("Search failed")
 		return fiber.NewError(fiber.StatusServiceUnavailable, errToReturn.Error())
 	}
 
@@ -231,7 +246,13 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		c.Set("X-Fallback-Engine", usedEngine)
 	}
 
-	logrus.Infof("Successfully completed SERP %s using %s, returned %d results", action, usedEngine, len(res))
+	completionCtx := requestCtx
+	if usedEngine != "" {
+		completionCtx = WithEngine(completionCtx, usedEngine)
+	}
+	WithRequest(completionCtx).
+		WithFields(logrus.Fields{"action": action, "results_count": len(res)}).
+		Info("Search completed")
 	return c.JSON(res)
 }
 
@@ -355,11 +376,16 @@ func (s *Server) handleMegaImage(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(context.Context, Query, []SearchEngine) []MegaSearchResult) error {
+	requestCtx := WithEngine(c.UserContext(), "mega")
+	c.SetUserContext(requestCtx)
+
 	q := Query{}
 	if err := q.InitFromContext(c); err != nil {
-		logrus.Errorf("Error while setting mega %s query: %s", action, err)
+		WithRequest(c.UserContext()).WithError(err).Error("Invalid query parameters")
 		return err
 	}
+	requestCtx = WithQueryHash(c.UserContext(), QueryHashFromQuery(q))
+	c.SetUserContext(requestCtx)
 
 	enginesToUse := s.resolveEngines(c.Query("engines", ""))
 	if len(enginesToUse) == 0 {
@@ -372,7 +398,10 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 	}
 	engineNamesJoined := strings.Join(engineNames, ",")
 	s.applyProxyHeaders(c, s.resilient.ResolveMegaProxyMeta(q, enginesToUse))
-	logrus.Infof("Starting SERP mega %s request using engines: %s for query: %s", action, engineNamesJoined, q.Text)
+	WithRequest(requestCtx).WithFields(logrus.Fields{
+		"action":  action,
+		"engines": engineNamesJoined,
+	}).Debugf("Starting mega %s request for query: %s", action, q.Text)
 
 	cacheHitCandidates := []cacheHitCandidate{
 		{
@@ -391,14 +420,18 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 		return err
 	}
 
-	results := run(c.UserContext(), q, enginesToUse)
+	results := run(requestCtx, q, enginesToUse)
 	dedupedResults := s.deduplicateMegaResults(results)
 
 	if s.cache != nil {
 		c.Set("X-Cache", s.cacheMegaResults(action, enginesToUse, q, dedupedResults))
 	}
 
-	logrus.Infof("Successfully completed SERP mega %s using %d engines, returned %d deduplicated results", action, len(enginesToUse), len(dedupedResults))
+	WithRequest(requestCtx).WithFields(logrus.Fields{
+		"action":        action,
+		"engines_count": len(enginesToUse),
+		"results_count": len(dedupedResults),
+	}).Info("Mega search completed")
 	return c.JSON(dedupedResults)
 }
 
@@ -491,7 +524,7 @@ func (s *Server) tryServeCacheHit(c *fiber.Ctx, candidates ...cacheHitCandidate)
 		}
 		c.Set("Content-Type", "application/json")
 		c.Set("X-Cache", "HIT")
-		logrus.Info(candidate.logMessage)
+		WithRequest(c.UserContext()).Debug(candidate.logMessage)
 		return true, c.Send(cached)
 	}
 	return false, nil

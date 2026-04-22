@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -141,20 +142,20 @@ func TestProxyRegistryRoundRobinAndFailureRecovery(t *testing.T) {
 		t.Fatalf("expected second proxy2, got %s", got)
 	}
 
-	registry.ReportFailure("http://proxy1:8080")
-	registry.ReportFailure("http://proxy1:8080")
+	registry.ReportFailure(context.Background(), "http://proxy1:8080")
+	registry.ReportFailure(context.Background(), "http://proxy1:8080")
 	if got := registry.NextByTag("default"); got != "http://proxy2:8080" {
 		t.Fatalf("expected proxy2 while proxy1 disabled, got %s", got)
 	}
 
-	registry.ReportFailure("http://proxy2:8080")
-	registry.ReportFailure("http://proxy2:8080")
+	registry.ReportFailure(context.Background(), "http://proxy2:8080")
+	registry.ReportFailure(context.Background(), "http://proxy2:8080")
 	if got := registry.NextByTag("default"); got != "http://proxy1:8080" {
 		t.Fatalf("expected tag pool reset to proxy1 after exhaustion, got %s", got)
 	}
 
-	registry.ReportFailure("http://proxy1:8080")
-	registry.ReportSuccess("http://proxy1:8080")
+	registry.ReportFailure(context.Background(), "http://proxy1:8080")
+	registry.ReportSuccess(context.Background(), "http://proxy1:8080")
 	stats := registry.BuildStats()
 	if stats.UnhealthyCount != 0 {
 		t.Fatalf("expected no unhealthy proxies after success recovery, got %d", stats.UnhealthyCount)

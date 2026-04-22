@@ -237,7 +237,7 @@ func BuildURL(q core.Query) (string, error) {
 			text += " filetype:" + q.Filetype
 		}
 
-		logrus.Tracef("Query text: %s", text)
+		logrus.WithField("query_hash", core.QueryHash(text)).Trace(fmt.Sprintf("Query text: %s", text))
 		params.Add("q", text)
 		params.Add("oq", text)
 	}

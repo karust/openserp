@@ -37,7 +37,7 @@ func search(cmd *cobra.Command, args []string) {
 
 	captchaSolverEnabled, captchaSolverAPIKey, err := resolveCaptchaSolverConfig()
 	if err != nil {
-		logrus.Errorf("Error validating captcha solver config: %v", err)
+		logrus.WithError(err).Error(fmt.Sprintf("Error validating captcha solver config: %v", err))
 		os.Exit(1)
 	}
 
@@ -48,7 +48,7 @@ func search(cmd *cobra.Command, args []string) {
 
 	proxyCfg, err := buildNormalizedProxyConfig(proxyRuntime)
 	if err != nil {
-		logrus.Errorf("Error validating proxy config: %v", err)
+		logrus.WithError(err).Error(fmt.Sprintf("Error validating proxy config: %v", err))
 		return
 	}
 
@@ -56,7 +56,7 @@ func search(cmd *cobra.Command, args []string) {
 
 	selectedProxy, err := selectCLIProxy(proxyCfg, policy)
 	if err != nil {
-		logrus.Errorf("Error selecting proxy for %s: %v", engineType, err)
+		logrus.WithError(err).Error(fmt.Sprintf("Error selecting proxy for %s: %v", engineType, err))
 		return
 	}
 
@@ -64,23 +64,29 @@ func search(cmd *cobra.Command, args []string) {
 		query.ProxyURL = selectedProxy
 	}
 
-	logrus.Infof("Starting SERP search request using %s engine for query: %s", engineType, query.Text)
+	logrus.WithFields(logrus.Fields{
+		"engine":     engineType,
+		"query_hash": core.QueryHashFromQuery(query),
+	}).Info(fmt.Sprintf("Starting SERP search request using %s engine for query: %s", engineType, query.Text))
 
 	var results []core.SearchResult
 	if config.Server.IsRawRequests {
-		logrus.Infof("Using raw requests mode for %s search", engineType)
+		logrus.WithField("engine", engineType).Info(fmt.Sprintf("Using raw requests mode for %s search", engineType))
 		results, err = searchRaw(engineType, query)
 	} else {
-		logrus.Infof("Using browser mode for %s search", engineType)
+		logrus.WithField("engine", engineType).Info(fmt.Sprintf("Using browser mode for %s search", engineType))
 		results, err = searchBrowser(engineType, query, selectedProxy, captchaSolverEnabled, captchaSolverAPIKey)
 	}
 
 	if err != nil {
-		logrus.Errorf("Error during %s search: %s", engineType, err)
+		logrus.WithError(err).WithField("engine", engineType).Error(fmt.Sprintf("Error during %s search: %s", engineType, err))
 		return
 	}
 
-	logrus.Infof("Successfully completed SERP search using %s engine, returned %d results", engineType, len(results))
+	logrus.WithFields(logrus.Fields{
+		"engine":        engineType,
+		"results_count": len(results),
+	}).Info(fmt.Sprintf("Successfully completed SERP search using %s engine, returned %d results", engineType, len(results)))
 
 	b, err := json.MarshalIndent(results, "", " ")
 	if err != nil {

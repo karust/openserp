@@ -47,7 +47,7 @@ func DefaultResilientConfig() ResilientConfig {
 func NewResilientSearcher(engines []SearchEngine, cfg ResilientConfig) *ResilientSearcher {
 	proxyCfg, err := NormalizeProxyConfig(cfg.Proxy)
 	if err != nil {
-		logrus.Errorf("Invalid proxy config, using defaults: %v", err)
+		logrus.WithError(err).Error("Invalid proxy config, using defaults")
 		proxyCfg = DefaultProxyConfig()
 		proxyCfg, _ = NormalizeProxyConfig(proxyCfg)
 	}
@@ -110,18 +110,18 @@ func (rs *ResilientSearcher) searchWithFallback(ctx context.Context, primaryEngi
 		return nil, primaryEngine.Name(), proxyMeta, ctx.Err()
 	}
 	if errors.Is(err, ErrProxyUnavailable) {
-		logrus.Warnf("[Resilient] Primary engine %s proxy policy failed closed: %s", primaryEngine.Name(), err)
+		WithRequestEngine(ctx, primaryEngine.Name()).WithError(err).Warn("Proxy policy failed closed")
 		return nil, primaryEngine.Name(), proxyMeta, err
 	}
 
-	action := "failed"
 	successMessage := "Fallback to %s succeeded with %d results"
 	if isImage {
-		action = "image search failed"
 		successMessage = "Image fallback to %s succeeded with %d results"
 	}
 
-	logrus.Warnf("[Resilient] Primary engine %s %s: %s. Trying fallback engines...", primaryEngine.Name(), action, err)
+	WithRequestEngine(ctx, primaryEngine.Name()).
+		WithError(err).
+		Warn("Primary engine failed, trying fallbacks")
 	for _, fallbackEngine := range rs.engines {
 		if ctx.Err() != nil {
 			return nil, primaryEngine.Name(), proxyMeta, ctx.Err()
@@ -132,10 +132,12 @@ func (rs *ResilientSearcher) searchWithFallback(ctx context.Context, primaryEngi
 
 		results, fallbackMeta, fallbackErr := rs.searchWithProtection(ctx, fallbackEngine, q, isImage)
 		if fallbackErr == nil {
-			logrus.Infof("[Resilient] "+successMessage, fallbackEngine.Name(), len(results))
+			WithRequestEngine(ctx, fallbackEngine.Name()).
+				WithField("results_count", len(results)).
+				Infof(successMessage, fallbackEngine.Name(), len(results))
 			return results, fallbackEngine.Name(), fallbackMeta, nil
 		}
-		logrus.Warnf("[Resilient] Fallback engine %s also failed: %s", fallbackEngine.Name(), fallbackErr)
+		WithRequestEngine(ctx, fallbackEngine.Name()).WithError(fallbackErr).Debug("Fallback engine also failed")
 	}
 
 	return nil, primaryEngine.Name(), proxyMeta, ErrAllEnginesFailed
@@ -148,7 +150,8 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 		return nil, ProxyExecutionMeta{}, ctx.Err()
 	}
 	cb := rs.cbManager.Get(engine.Name())
-	if !cb.AllowRequest() {
+	engineCtx := WithEngine(ctx, engine.Name())
+	if !cb.AllowRequest(engineCtx) {
 		return nil, ProxyExecutionMeta{}, ErrCircuitOpen
 	}
 
@@ -173,7 +176,7 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 			attemptQuery.ProxyURL = ""
 			attemptMeta.Used = "direct"
 		case ProxyModeTagPool:
-			proxyURL = rs.selectProxyForQuery(policy, q)
+			proxyURL = rs.selectProxyForQuery(policy, q, engineCtx)
 			if proxyURL == "" {
 				return nil, fmt.Errorf("%w: no healthy proxy available for tag %q", ErrProxyUnavailable, policy.Tag)
 			}
@@ -193,7 +196,7 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 		}
 
 		if reportToRegistry {
-			rs.reportProxyAttempt(proxyURL, err)
+			rs.reportProxyAttempt(engineCtx, proxyURL, err)
 		}
 
 		return results, err
@@ -201,12 +204,12 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 
 	if result.Err != nil {
 		if !errors.Is(result.Err, ErrProxyUnavailable) {
-			cb.RecordFailure()
+			cb.RecordFailure(engineCtx)
 		}
 		return nil, attemptMeta, result.Err
 	}
 
-	cb.RecordSuccess()
+	cb.RecordSuccess(engineCtx)
 	return result.Results, attemptMeta, nil
 }
 
@@ -225,8 +228,9 @@ func (rs *ResilientSearcher) SearchAllParallel(ctx context.Context, q Query, eng
 		if !engine.IsInitialized() {
 			continue
 		}
-		if !rs.cbManager.Get(engine.Name()).AllowRequest() {
-			logrus.Infof("[Resilient] Skipping %s in megasearch (circuit open)", engine.Name())
+		engineCtx := WithEngine(ctx, engine.Name())
+		if !rs.cbManager.Get(engine.Name()).AllowRequest(engineCtx) {
+			WithRequest(engineCtx).Debug("Skipping engine in megasearch: circuit open")
 			continue
 		}
 
@@ -268,8 +272,9 @@ func (rs *ResilientSearcher) SearchAllImageParallel(ctx context.Context, q Query
 		if !engine.IsInitialized() {
 			continue
 		}
-		if !rs.cbManager.Get(engine.Name()).AllowRequest() {
-			logrus.Infof("[Resilient] Skipping %s in megaimage (circuit open)", engine.Name())
+		engineCtx := WithEngine(ctx, engine.Name())
+		if !rs.cbManager.Get(engine.Name()).AllowRequest(engineCtx) {
+			WithRequest(engineCtx).Debug("Skipping engine in megaimage: circuit open")
 			continue
 		}
 
@@ -424,27 +429,27 @@ func (rs *ResilientSearcher) effectivePolicyForQuery(engineName string, q Query)
 	}
 }
 
-func (rs *ResilientSearcher) selectProxyForTag(tag string) string {
+func (rs *ResilientSearcher) selectProxyForTag(ctx context.Context, tag string) string {
 	if rs.proxyRegistry == nil {
 		return ""
 	}
-	return rs.proxyRegistry.NextByTag(tag)
+	return rs.proxyRegistry.NextByTagWithContext(ctx, tag)
 }
 
-func (rs *ResilientSearcher) reportProxyAttempt(proxyURL string, err error) {
+func (rs *ResilientSearcher) reportProxyAttempt(ctx context.Context, proxyURL string, err error) {
 	if rs.proxyRegistry == nil || proxyURL == "" {
 		return
 	}
 
 	if err != nil {
-		rs.proxyRegistry.ReportFailure(proxyURL)
+		rs.proxyRegistry.ReportFailure(ctx, proxyURL)
 		return
 	}
 
-	rs.proxyRegistry.ReportSuccess(proxyURL)
+	rs.proxyRegistry.ReportSuccess(ctx, proxyURL)
 }
 
-func (rs *ResilientSearcher) selectProxyForQuery(policy ProxyPolicy, q Query) string {
+func (rs *ResilientSearcher) selectProxyForQuery(policy ProxyPolicy, q Query, ctx context.Context) string {
 	if policy.Mode != ProxyModeTagPool {
 		return ""
 	}
@@ -453,7 +458,7 @@ func (rs *ResilientSearcher) selectProxyForQuery(policy ProxyPolicy, q Query) st
 			return global
 		}
 	}
-	return rs.selectProxyForTag(policy.Tag)
+	return rs.selectProxyForTag(ctx, policy.Tag)
 }
 
 var ErrAllEnginesFailed = fmt.Errorf("all search engines failed")

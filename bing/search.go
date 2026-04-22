@@ -97,11 +97,16 @@ func (bing *Bing) acceptCookies(ctx context.Context, page *rod.Page) error {
 // Search executes a Bing web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.EnsureContext(ctx)
+	ctx = core.WithEngine(core.EnsureContext(ctx), bing.Name())
+	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	scoped := *bing
+	scoped.logger = bing.logger.WithRequest(ctx)
+	bing = &scoped
+
 	bing.logger.Debug("Starting search, query: %+v", query)
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanic(bing.Name(), recovered, bing.logger)
+			err = core.RecoverEnginePanicWithContext(ctx, bing.Name(), recovered, bing.logger)
 			results = nil
 		}
 	}()
@@ -268,7 +273,12 @@ type BingImageData struct {
 // SearchImage executes a Bing image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.EnsureContext(ctx)
+	ctx = core.WithEngine(core.EnsureContext(ctx), bing.Name())
+	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	scoped := *bing
+	scoped.logger = bing.logger.WithRequest(ctx)
+	bing = &scoped
+
 	bing.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}

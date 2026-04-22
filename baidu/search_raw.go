@@ -2,6 +2,7 @@ package baidu
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -86,15 +87,19 @@ func baiduResultParser(response *http.Response) ([]core.SearchResult, error) {
 		}
 	}
 
-	logrus.Tracef("Baidu search document size: %d", len(doc.Text()))
+	logrus.WithField("document_size", len(doc.Text())).Trace(
+		fmt.Sprintf("Baidu search document size: %d", len(doc.Text())),
+	)
 	return results, err
 }
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.EnsureContext(ctx)
+	ctx = core.WithEngine(ctx, "baidu")
+	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanic("baidu", recovered, nil)
+			err = core.RecoverEnginePanicWithContext(ctx, "baidu", recovered, nil)
 			results = nil
 		}
 	}()
@@ -103,14 +108,16 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 	if err != nil {
 		return nil, err
 	}
-	logrus.Debugf("Baidu URL built: %s", googleURL)
+	core.WithRequest(ctx).WithField("url", googleURL).Debug(fmt.Sprintf("Baidu URL built: %s", googleURL))
 
 	res, err := baiduRequest(ctx, googleURL, query)
 	if err != nil {
 		return nil, err
 	}
 	defer core.DrainAndCloseResponse(res)
-	logrus.Debugf("Baidu Raw response: code=%d", res.StatusCode)
+	core.WithRequest(ctx).WithField("status_code", res.StatusCode).Debug(
+		fmt.Sprintf("Baidu Raw response: code=%d", res.StatusCode),
+	)
 
 	parsedResults, err := baiduResultParser(res)
 	if err != nil {
@@ -121,7 +128,9 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 			parsedResults[i].Rank = query.Start + i + 1
 		}
 	}
-	logrus.Debugf("Baidu Raw results : %v", parsedResults)
+	core.WithRequest(ctx).WithField("results_count", len(parsedResults)).Debug(
+		fmt.Sprintf("Baidu Raw results : %v", parsedResults),
+	)
 
 	return core.DeduplicateResults(parsedResults), nil
 }

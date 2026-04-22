@@ -1,6 +1,7 @@
 package core
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -106,4 +107,58 @@ func TestDefaultCORSConfig_IncludesProxyOverrideHeader(t *testing.T) {
 	if got := cfg.AllowHeaders; !strings.Contains(got, "X-Use-Proxy") {
 		t.Fatalf("expected allow_headers to include X-Use-Proxy, got %q", got)
 	}
+}
+
+func TestRequestContextMiddleware_EchoesProvidedRequestID(t *testing.T) {
+	app := fiber.New()
+	app.Use(RequestContextMiddleware())
+	app.Get("/id", func(c *fiber.Ctx) error {
+		return c.SendString(RequestIDFromContext(c.UserContext()))
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/id", nil)
+	req.Header.Set("X-Request-ID", "foo")
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+
+	if got := resp.Header.Get("X-Request-ID"); got != "foo" {
+		t.Fatalf("expected response X-Request-ID=foo, got %q", got)
+	}
+	if got := readBody(t, resp); got != "foo" {
+		t.Fatalf("expected context request id to be echoed, got %q", got)
+	}
+}
+
+func TestRequestContextMiddleware_GeneratesRequestID(t *testing.T) {
+	app := fiber.New()
+	app.Use(RequestContextMiddleware())
+	app.Get("/id", func(c *fiber.Ctx) error {
+		return c.SendString(RequestIDFromContext(c.UserContext()))
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/id", nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+
+	requestID := resp.Header.Get("X-Request-ID")
+	if requestID == "" {
+		t.Fatal("expected generated X-Request-ID")
+	}
+	if got := readBody(t, resp); got != requestID {
+		t.Fatalf("expected request id in context to match header: body=%q header=%q", got, requestID)
+	}
+}
+
+func readBody(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body failed: %v", err)
+	}
+	return string(body)
 }

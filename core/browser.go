@@ -71,7 +71,7 @@ type Browser struct {
 // Browser wrapper configured with proxy and captcha solver settings.
 func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	opts.Check()
-	logrus.Debugf("Browser options: %+v", opts)
+	logrus.WithField("browser_options", fmt.Sprintf("%+v", opts)).Debug("Browser options")
 
 	path, err := resolveBrowserBinaryPath(opts.BrowserPath, launcher.LookPath)
 	if err != nil {
@@ -82,7 +82,7 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	l := launcher.New().Leakless(opts.IsLeakless).Headless(opts.IsHeadless).Set("disable-blink-features", "AutomationControlled").
 		Delete("enable-automation")
 	if path != "" {
-		logrus.Debugf("Using browser binary: %s", path)
+		logrus.WithField("browser_path", path).Debug("Using browser binary")
 		l = l.Bin(path)
 	}
 
@@ -102,13 +102,16 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 		// Chrome's proxy-server flag must not contain credentials.
 		// Auth (if needed) is handled separately via DevTools auth callbacks.
 		proxyStr := proxyURLForBrowserLaunch(proxyUrl)
-		logrus.Debugf("Setting up proxy: %s", MaskProxyURL(proxyStr))
+		logrus.WithField("proxy", MaskProxyURL(proxyStr)).Debug("Setting up proxy")
 		l = l.Proxy(proxyStr)
 
 		// Check if proxy has auth credentials
 		if proxyUrl.User != nil {
 			username := proxyUrl.User.Username()
-			logrus.Debugf("Proxy credentials configured for %s proxy: %s:****", proxyUrl.Scheme, username)
+			logrus.WithFields(logrus.Fields{
+				"proxy_scheme":   proxyUrl.Scheme,
+				"proxy_username": username,
+			}).Debugf("Proxy credentials configured for %s proxy: %s:****", proxyUrl.Scheme, username)
 		}
 	}
 
@@ -187,7 +190,7 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 		return nil, err
 	}
 
-	logrus.Debug("Navigate to: ", URL)
+	WithRequest(ctx).WithField("url", URL).Debug("Navigate to")
 
 	browser := rod.New().ControlURL(b.browserAddr).Timeout(b.Timeout)
 	if err := browser.Connect(); err != nil {
@@ -214,7 +217,7 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 			// Launch auth handler before any navigation occurs
 			go func() {
 				if err := b.browser.HandleAuth(username, password)(); err != nil {
-					logrus.Debugf("Proxy auth handler stopped: %v", err)
+					WithRequest(ctx).WithError(err).Debug("Proxy auth handler stopped")
 				}
 			}()
 		} else if proxyUrl.User != nil && (proxyUrl.Scheme == "socks5" || proxyUrl.Scheme == "socks5h") {
@@ -252,7 +255,7 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	// when the caller context is canceled or navigation fails.
 	closeOnErr := func() {
 		if cerr := page.Close(); cerr != nil {
-			logrus.Debugf("Close page after navigate error failed: %v", cerr)
+			WithRequest(ctx).WithError(cerr).Debug("Close page after navigate error failed")
 		}
 	}
 
@@ -291,9 +294,11 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 		if errors.Is(werr, context.DeadlineExceeded) {
 			// Some engines keep loading background resources while the DOM is already usable.
 			// Treat load timeout as non-fatal and let engine-specific selector timeouts decide.
-			logrus.Debugf("WaitLoad timed out after %s; continuing with partial page state", b.Timeout)
+			WithRequest(ctx).WithField("timeout", b.Timeout.String()).Debug(
+				fmt.Sprintf("WaitLoad timed out after %s; continuing with partial page state", b.Timeout),
+			)
 		} else {
-			logrus.Debugf("WaitLoad returned early: %v", werr)
+			WithRequest(ctx).WithError(werr).Debug("WaitLoad returned early")
 		}
 	}
 
@@ -331,11 +336,15 @@ func ClosePageWithTimeout(ctx context.Context, page *rod.Page, timeout time.Dura
 // RecoverEnginePanic converts recovered panics to a typed engine error and
 // logs stack trace with engine context.
 func RecoverEnginePanic(engine string, recovered interface{}, logger *EngineLogger) error {
+	return RecoverEnginePanicWithContext(nil, engine, recovered, logger)
+}
+
+func RecoverEnginePanicWithContext(ctx context.Context, engine string, recovered interface{}, logger *EngineLogger) error {
 	stack := debug.Stack()
 	if logger != nil {
 		logger.Error("Recovered panic in %s Search: panic=%v\n%s", engine, recovered, string(stack))
 	} else {
-		logrus.Errorf("Recovered panic in %s Search: panic=%v\n%s", engine, recovered, string(stack))
+		WithRequestEngine(ctx, engine).Errorf("Recovered panic in %s Search: panic=%v\n%s", engine, recovered, string(stack))
 	}
 	return fmt.Errorf("%w: %s", ErrEngineInternal, engine)
 }

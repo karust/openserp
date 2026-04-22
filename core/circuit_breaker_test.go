@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -20,17 +21,17 @@ func TestCircuitBreaker_OpensAfterThreshold(t *testing.T) {
 	}
 	cb := newTestCircuitBreaker(t, cfg)
 
-	cb.RecordFailure()
-	cb.RecordFailure()
+	cb.RecordFailure(context.Background())
+	cb.RecordFailure(context.Background())
 	if cb.State() != CircuitClosed {
 		t.Fatalf("expected closed after 2 failures, got: %s", cb.State())
 	}
 
-	cb.RecordFailure()
+	cb.RecordFailure(context.Background())
 	if cb.State() != CircuitOpen {
 		t.Fatalf("expected open after %d failures, got: %s", cfg.FailureThreshold, cb.State())
 	}
-	if cb.AllowRequest() {
+	if cb.AllowRequest(context.Background()) {
 		t.Error("expected request blocked in open state")
 	}
 }
@@ -45,14 +46,14 @@ func TestCircuitBreaker_RecoveryToHalfOpen(t *testing.T) {
 	}
 	cb := newTestCircuitBreaker(t, cfg)
 
-	cb.RecordFailure()
-	cb.RecordFailure()
+	cb.RecordFailure(context.Background())
+	cb.RecordFailure(context.Background())
 	if cb.State() != CircuitOpen {
 		t.Fatal("expected open")
 	}
 
 	time.Sleep(60 * time.Millisecond)
-	if !cb.AllowRequest() {
+	if !cb.AllowRequest(context.Background()) {
 		t.Error("should allow request after recovery timeout")
 	}
 	if cb.State() != CircuitHalfOpen {
@@ -70,25 +71,25 @@ func TestCircuitBreaker_HalfOpenSuccessClosesCircuit(t *testing.T) {
 	}
 	cb := newTestCircuitBreaker(t, cfg)
 
-	cb.RecordFailure()
+	cb.RecordFailure(context.Background())
 	if cb.State() != CircuitOpen {
 		t.Fatalf("expected open, got: %s", cb.State())
 	}
 
 	time.Sleep(30 * time.Millisecond)
-	if !cb.AllowRequest() {
+	if !cb.AllowRequest(context.Background()) {
 		t.Fatal("expected request to pass in recovery window")
 	}
 	if cb.State() != CircuitHalfOpen {
 		t.Fatalf("expected half-open after recovery timeout, got: %s", cb.State())
 	}
 
-	cb.RecordSuccess()
+	cb.RecordSuccess(context.Background())
 	if cb.State() != CircuitHalfOpen {
 		t.Fatalf("expected to stay half-open until success threshold reached, got: %s", cb.State())
 	}
 
-	cb.RecordSuccess()
+	cb.RecordSuccess(context.Background())
 	if cb.State() != CircuitClosed {
 		t.Fatalf("expected closed after success threshold reached, got: %s", cb.State())
 	}
@@ -104,16 +105,16 @@ func TestCircuitBreaker_HalfOpenFailureReopens(t *testing.T) {
 	}
 	cb := newTestCircuitBreaker(t, cfg)
 
-	cb.RecordFailure()
+	cb.RecordFailure(context.Background())
 	time.Sleep(30 * time.Millisecond)
-	if !cb.AllowRequest() {
+	if !cb.AllowRequest(context.Background()) {
 		t.Fatal("expected probe request in half-open")
 	}
 	if cb.State() != CircuitHalfOpen {
 		t.Fatalf("expected half-open, got: %s", cb.State())
 	}
 
-	cb.RecordFailure()
+	cb.RecordFailure(context.Background())
 	if cb.State() != CircuitOpen {
 		t.Fatalf("expected open after failed half-open probe, got: %s", cb.State())
 	}
@@ -123,7 +124,7 @@ func TestCircuitBreaker_HalfOpenFailureReopens(t *testing.T) {
 // only when breaker is open.
 func TestCircuitBreaker_Stats(t *testing.T) {
 	cb := NewCircuitBreaker("test-engine", DefaultCircuitBreakerConfig())
-	cb.RecordFailure()
+	cb.RecordFailure(context.Background())
 
 	stats := cb.Stats()
 	if stats["engine"] != "test-engine" {
@@ -141,7 +142,7 @@ func TestCircuitBreaker_Stats(t *testing.T) {
 
 	openCfg := CircuitBreakerConfig{FailureThreshold: 1, RecoveryTimeout: time.Second, SuccessThreshold: 1}
 	openCB := NewCircuitBreaker("open-engine", openCfg)
-	openCB.RecordFailure()
+	openCB.RecordFailure(context.Background())
 	openStats := openCB.Stats()
 	retryIn, ok := openStats["retry_in"].(int64)
 	if !ok {

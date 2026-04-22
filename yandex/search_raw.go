@@ -2,6 +2,7 @@ package yandex
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -85,15 +86,19 @@ func yandexResultParser(response *http.Response) ([]core.SearchResult, error) {
 		}
 	}
 
-	logrus.Tracef("Yandex search document size: %d", len(doc.Text()))
+	logrus.WithField("document_size", len(doc.Text())).Trace(
+		fmt.Sprintf("Yandex search document size: %d", len(doc.Text())),
+	)
 	return core.DeduplicateResults(results), err
 }
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.EnsureContext(ctx)
+	ctx = core.WithEngine(ctx, "yandex")
+	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanic("yandex", recovered, nil)
+			err = core.RecoverEnginePanicWithContext(ctx, "yandex", recovered, nil)
 			results = nil
 		}
 	}()
@@ -107,14 +112,16 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 	if err != nil {
 		return nil, err
 	}
-	logrus.Debugf("Yandex URL built: %s", googleURL)
+	core.WithRequest(ctx).WithField("url", googleURL).Debug(fmt.Sprintf("Yandex URL built: %s", googleURL))
 
 	res, err := yandexRequest(ctx, googleURL, query)
 	if err != nil {
 		return nil, err
 	}
 	defer core.DrainAndCloseResponse(res)
-	logrus.Debugf("Yandex Raw response: code=%d", res.StatusCode)
+	core.WithRequest(ctx).WithField("status_code", res.StatusCode).Debug(
+		fmt.Sprintf("Yandex Raw response: code=%d", res.StatusCode),
+	)
 
 	parsedResults, err := yandexResultParser(res)
 	if err != nil {
@@ -133,7 +140,9 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 			parsedResults[i].Rank = query.Start + i + 1
 		}
 	}
-	logrus.Debugf("Yandex Raw results : %v", parsedResults)
+	core.WithRequest(ctx).WithField("results_count", len(parsedResults)).Debug(
+		fmt.Sprintf("Yandex Raw results : %v", parsedResults),
+	)
 
 	return parsedResults, nil
 }

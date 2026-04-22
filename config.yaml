@@ -7,6 +7,8 @@ server:
   insecure: true # Allow insecure TLS connections
 
 app:
+  # json|text. Empty means auto: text in debug mode, json otherwise.
+  log_format: "text"
   timeout: 15 # Browser/search timeout in seconds
   browser_path: "" # Custom browser binary path (chrome/chromium/edge..)
   head: false # Show browser UI (headful mode)

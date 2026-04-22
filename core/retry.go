@@ -38,7 +38,8 @@ type RetryResult struct {
 // RetryableSearch executes searchFn with exponential backoff retries.
 // CAPTCHA, parser, engine-internal, and proxy-unavailable errors are not retried.
 func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, searchFn func(context.Context) ([]SearchResult, error)) RetryResult {
-	ctx = EnsureContext(ctx)
+	ctx = WithEngine(EnsureContext(ctx), engineName)
+	logger := WithRequest(ctx)
 	if cfg.BackoffFactor <= 0 {
 		cfg.BackoffFactor = 2.0
 	}
@@ -55,7 +56,10 @@ func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, se
 
 		if attempt > 0 {
 			backoff := calculateBackoff(cfg, attempt)
-			logrus.Warnf("[%s] Retry attempt %d/%d after %s", engineName, attempt, cfg.MaxRetries, backoff)
+			logger.WithFields(logrus.Fields{
+				"attempt": attempt,
+				"backoff": backoff.String(),
+			}).Warnf("Retry %d/%d after %s", attempt, cfg.MaxRetries, backoff)
 			if err := SleepContext(ctx, backoff); err != nil {
 				return RetryResult{
 					Err:      err,
@@ -67,9 +71,6 @@ func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, se
 
 		results, err := searchFn(ctx)
 		if err == nil {
-			if attempt > 0 {
-				logrus.Infof("[%s] Succeeded on retry attempt %d", engineName, attempt)
-			}
 			return RetryResult{
 				Results:  results,
 				Attempts: attempt + 1,
@@ -79,7 +80,7 @@ func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, se
 
 		lastErr = err
 		if errors.Is(err, ErrCaptcha) {
-			logrus.Warnf("[%s] CAPTCHA detected, skipping retries", engineName)
+			logger.Warn("CAPTCHA detected, skipping retries")
 			return RetryResult{
 				Err:      err,
 				Attempts: attempt + 1,
@@ -87,7 +88,7 @@ func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, se
 			}
 		}
 		if errors.Is(err, ErrProxyUnavailable) {
-			logrus.Warnf("[%s] Proxy unavailable, skipping retries", engineName)
+			logger.Warn("Proxy unavailable, skipping retries")
 			return RetryResult{
 				Err:      err,
 				Attempts: attempt + 1,
@@ -95,7 +96,7 @@ func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, se
 			}
 		}
 		if errors.Is(err, ErrParser) {
-			logrus.Warnf("[%s] Parser failure, skipping retries", engineName)
+			logger.Warn("Parser failure, skipping retries")
 			return RetryResult{
 				Err:      err,
 				Attempts: attempt + 1,
@@ -103,7 +104,7 @@ func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, se
 			}
 		}
 		if errors.Is(err, ErrEngineInternal) {
-			logrus.Warnf("[%s] Engine panic recovered, skipping retries", engineName)
+			logger.Warn("Engine panic recovered, skipping retries")
 			return RetryResult{
 				Err:      err,
 				Attempts: attempt + 1,
@@ -111,7 +112,7 @@ func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, se
 			}
 		}
 		if IsContextDone(err) {
-			logrus.Warnf("[%s] Context canceled/deadline exceeded, skipping retries", engineName)
+			logger.Warn("Context canceled/deadline exceeded, skipping retries")
 			return RetryResult{
 				Err:      err,
 				Attempts: attempt + 1,
@@ -119,7 +120,7 @@ func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, se
 			}
 		}
 
-		logrus.Warnf("[%s] Attempt %d failed: %s", engineName, attempt+1, err)
+		logger.WithField("attempt", attempt+1).Debugf("Attempt %d failed: %s", attempt+1, err)
 	}
 
 	return RetryResult{

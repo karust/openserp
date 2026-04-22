@@ -2,6 +2,7 @@ package google
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -97,15 +98,19 @@ func googleResultParser(response *http.Response) ([]core.SearchResult, error) {
 		}
 	}
 
-	logrus.Tracef("Google search document size: %d", len(doc.Text()))
+	logrus.WithField("document_size", len(doc.Text())).Trace(
+		fmt.Sprintf("Google search document size: %d", len(doc.Text())),
+	)
 	return core.DeduplicateResults(results), err
 }
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.EnsureContext(ctx)
+	ctx = core.WithEngine(ctx, "google")
+	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanic("google", recovered, nil)
+			err = core.RecoverEnginePanicWithContext(ctx, "google", recovered, nil)
 			results = nil
 		}
 	}()
@@ -114,14 +119,16 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 	if err != nil {
 		return nil, err
 	}
-	logrus.Debugf("Google URL built: %s", googleURL)
+	core.WithRequest(ctx).WithField("url", googleURL).Debug(fmt.Sprintf("Google URL built: %s", googleURL))
 
 	res, err := googleRequest(ctx, googleURL, query)
 	if err != nil {
 		return nil, err
 	}
 	defer core.DrainAndCloseResponse(res)
-	logrus.Debugf("Google Raw response: code=%d", res.StatusCode)
+	core.WithRequest(ctx).WithField("status_code", res.StatusCode).Debug(
+		fmt.Sprintf("Google Raw response: code=%d", res.StatusCode),
+	)
 
 	parsedResults, err := googleResultParser(res)
 	if err != nil {
@@ -133,7 +140,9 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 			parsedResults[i].Rank = query.Start + i + 1
 		}
 	}
-	logrus.Debugf("Google Raw results : %v", parsedResults)
+	core.WithRequest(ctx).WithField("results_count", len(parsedResults)).Debug(
+		fmt.Sprintf("Google Raw results : %v", parsedResults),
+	)
 
 	return parsedResults, nil
 }

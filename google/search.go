@@ -173,11 +173,16 @@ func (gogl *Google) acceptCookies(page *rod.Page) {
 // Search executes a Google web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (gogl *Google) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.EnsureContext(ctx)
+	ctx = core.WithEngine(core.EnsureContext(ctx), gogl.Name())
+	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	scoped := *gogl
+	scoped.logger = gogl.logger.WithRequest(ctx)
+	gogl = &scoped
+
 	gogl.logger.Debug("Starting search, query: %+v", query)
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanic(gogl.Name(), recovered, gogl.logger)
+			err = core.RecoverEnginePanicWithContext(ctx, gogl.Name(), recovered, gogl.logger)
 			results = nil
 		}
 	}()
@@ -421,7 +426,12 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 // SearchImage executes a Google image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (gogl *Google) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.EnsureContext(ctx)
+	ctx = core.WithEngine(core.EnsureContext(ctx), gogl.Name())
+	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	scoped := *gogl
+	scoped.logger = gogl.logger.WithRequest(ctx)
+	gogl = &scoped
+
 	gogl.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResultsMap := map[string]core.SearchResult{}

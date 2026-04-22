@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/time/rate"
 )
 
@@ -72,6 +73,36 @@ func requestWithHeader(t *testing.T, s *Server, path string, header string, valu
 		t.Fatalf("request failed for %s: %v", path, err)
 	}
 	return resp
+}
+
+func TestRequestIDHeaderIsEchoedWhenProvided(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	srv := NewServerWithOptions("127.0.0.1", 7110, DefaultServerOptions(), engine)
+
+	resp := requestWithHeader(t, srv, "/google/search?text=golang", "X-Request-ID", "foo")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected request to succeed, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Request-ID"); got != "foo" {
+		t.Fatalf("expected X-Request-ID=foo, got %q", got)
+	}
+}
+
+func TestRequestIDHeaderIsGeneratedWhenMissing(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	srv := NewServerWithOptions("127.0.0.1", 7111, DefaultServerOptions(), engine)
+
+	resp := request(t, srv, "/google/search?text=golang")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected request to succeed, got %d", resp.StatusCode)
+	}
+	requestID := resp.Header.Get("X-Request-ID")
+	if requestID == "" {
+		t.Fatal("expected non-empty X-Request-ID header")
+	}
+	if _, err := uuid.Parse(requestID); err != nil {
+		t.Fatalf("expected X-Request-ID to be a UUID, got %q (%v)", requestID, err)
+	}
 }
 
 func TestOpenAPISpecEndpoint(t *testing.T) {
