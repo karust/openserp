@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -41,10 +43,69 @@ func TestCreateBrowser(t *testing.T) {
 	}
 	defer closeTestBrowser(t, browser)
 	defer func() {
-		if err := page.Close(); err != nil {
+		if err := ClosePageWithTimeout(context.Background(), page, time.Second); err != nil {
 			t.Logf("close page: %v", err)
 		}
 	}()
+}
+
+func TestNavigateUsesIsolatedBrowserContext(t *testing.T) {
+	testutil.RequireIntegration(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/cookies/set":
+			http.SetCookie(w, &http.Cookie{
+				Name:  "openserp_session",
+				Value: "request-a",
+				Path:  "/",
+			})
+			_, _ = w.Write([]byte("cookie-set"))
+		case "/cookies":
+			_, _ = w.Write([]byte(r.Header.Get("Cookie")))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	opts := BrowserOpts{IsHeadless: true, IsLeakless: false, Timeout: 15 * time.Second}
+	browser, err := NewBrowser(opts)
+	if err != nil {
+		t.Fatalf("failed initializing browser: %s", err)
+	}
+	defer closeTestBrowser(t, browser)
+
+	pageA, err := browser.Navigate(context.Background(), srv.URL+"/cookies/set")
+	if err != nil {
+		t.Fatalf("navigate cookie setter: %v", err)
+	}
+	if err := ClosePageWithTimeout(context.Background(), pageA, time.Second); err != nil {
+		t.Fatalf("close setter page: %v", err)
+	}
+
+	pageB, err := browser.Navigate(context.Background(), srv.URL+"/cookies")
+	if err != nil {
+		t.Fatalf("navigate cookie reader: %v", err)
+	}
+	defer func() {
+		if err := ClosePageWithTimeout(context.Background(), pageB, time.Second); err != nil {
+			t.Logf("close reader page: %v", err)
+		}
+	}()
+
+	body, err := pageB.Timeout(5 * time.Second).Element("body")
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	cookieHeader, err := body.Text()
+	if err != nil {
+		t.Fatalf("extract response text: %v", err)
+	}
+
+	if strings.Contains(cookieHeader, "openserp_session=request-a") {
+		t.Fatalf("cookie leaked between requests; got header %q", cookieHeader)
+	}
 }
 
 func TestFingerprintSannysoft(t *testing.T) {
@@ -139,7 +200,7 @@ func runSannysoftFingerprint(t *testing.T, useStealth bool) sannysoftRunSummary 
 		t.Fatalf("navigate to sannysoft (%s): %v", label, err)
 	}
 	defer func() {
-		if err := page.Close(); err != nil {
+		if err := ClosePageWithTimeout(context.Background(), page, time.Second); err != nil {
 			t.Logf("close page (%s): %v", label, err)
 		}
 	}()
@@ -402,7 +463,7 @@ func isCriticalFingerprintFailure(checkName string) bool {
 
 func closeTestBrowser(t *testing.T, browser *Browser) {
 	t.Helper()
-	if browser == nil || browser.browser == nil {
+	if browser == nil {
 		return
 	}
 	if err := browser.Close(); err != nil {

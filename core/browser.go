@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -63,8 +64,14 @@ func (o *BrowserOpts) Check() {
 type Browser struct {
 	BrowserOpts
 	browserAddr   string
-	browser       *rod.Browser
+	conn          *browserConnection
 	CaptchaSolver *CaptchaSolver
+}
+
+type browserConnection struct {
+	mu            sync.Mutex
+	browser       *rod.Browser
+	cachedUserAgent string
 }
 
 // NewBrowser launches a new Chromium process via Rod launcher and returns a
@@ -115,7 +122,10 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 		}
 	}
 
-	b := Browser{BrowserOpts: opts}
+	b := Browser{
+		BrowserOpts: opts,
+		conn:        &browserConnection{},
+	}
 	b.browserAddr, err = l.Launch()
 
 	if opts.CaptchaSolverEnabled && opts.CaptchaSolverApiKey != "" {
@@ -177,6 +187,143 @@ func (b *Browser) IsInitialized() bool {
 	return b.browserAddr != ""
 }
 
+func (b *Browser) connectionState() *browserConnection {
+	if b.conn == nil {
+		b.conn = &browserConnection{}
+	}
+	return b.conn
+}
+
+func (b *Browser) newRodBrowser() *rod.Browser {
+	browser := rod.New().NoDefaultDevice().ControlURL(b.browserAddr)
+	if b.Timeout > 0 {
+		browser = browser.Timeout(b.Timeout)
+	}
+	return browser
+}
+
+func (b *Browser) connectBrowser() (*rod.Browser, string, error) {
+	browser := b.newRodBrowser()
+	if err := browser.Connect(); err != nil {
+		return nil, "", err
+	}
+
+	// Keep cert handling on the persistent browser session.
+	// Proxy runtime can surface MITM certs, and insecure mode is explicit opt-in.
+	if b.ProxyURL != "" || b.Insecure {
+		if err := browser.IgnoreCertErrors(true); err != nil {
+			return nil, "", err
+		}
+	}
+
+	version, err := browser.Version()
+	if err != nil {
+		return nil, "", fmt.Errorf("read browser version: %w", err)
+	}
+	ua := strings.ReplaceAll(version.UserAgent, "HeadlessChrome/", "Chrome/")
+
+	return browser, ua, nil
+}
+
+func (b *Browser) ensureConnectedBrowser(ctx context.Context, forceReconnect bool) (*rod.Browser, string, error) {
+	if b == nil || b.browserAddr == "" {
+		return nil, "", fmt.Errorf("browser is not initialized")
+	}
+
+	state := b.connectionState()
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	if state.browser == nil || forceReconnect {
+		connected, ua, err := b.connectBrowser()
+		if err != nil {
+			return nil, "", err
+		}
+		state.browser = connected
+		state.cachedUserAgent = ua
+		return state.browser, ua, nil
+	}
+
+	if _, err := state.browser.Version(); err != nil {
+		WithRequest(ctx).WithError(err).Debug("Browser ping failed, reconnecting")
+		connected, ua, reconnectErr := b.connectBrowser()
+		if reconnectErr != nil {
+			return nil, "", reconnectErr
+		}
+		state.browser = connected
+		state.cachedUserAgent = ua
+	}
+
+	return state.browser, state.cachedUserAgent, nil
+}
+
+func createIsolatedPage(browser *rod.Browser) (*rod.Page, proto.BrowserBrowserContextID, error) {
+	browserContext, err := (proto.TargetCreateBrowserContext{}).Call(browser)
+	if err != nil {
+		return nil, "", err
+	}
+
+	target, err := (proto.TargetCreateTarget{
+		URL:              "about:blank",
+		BrowserContextID: browserContext.BrowserContextID,
+	}).Call(browser)
+	if err != nil {
+		_ = disposeBrowserContext(browser, browserContext.BrowserContextID)
+		return nil, "", err
+	}
+
+	page, err := browser.PageFromTarget(target.TargetID)
+	if err != nil {
+		_ = disposeBrowserContext(browser, browserContext.BrowserContextID)
+		return nil, "", err
+	}
+
+	return page, browserContext.BrowserContextID, nil
+}
+
+func disposeBrowserContext(browser *rod.Browser, browserContextID proto.BrowserBrowserContextID) error {
+	if browser == nil || browserContextID == "" {
+		return nil
+	}
+	return (proto.TargetDisposeBrowserContext{
+		BrowserContextID: browserContextID,
+	}).Call(browser)
+}
+
+func (b *Browser) startProxyAuthHandler(ctx context.Context, browser *rod.Browser) (context.CancelFunc, error) {
+	if browser == nil || b.ProxyURL == "" {
+		return nil, nil
+	}
+
+	proxyURL, err := url.Parse(b.ProxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse proxy URL: %w", err)
+	}
+
+	if proxyURL.User == nil {
+		return nil, nil
+	}
+
+	if proxyURL.Scheme != "http" && proxyURL.Scheme != "https" {
+		if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
+			logrus.Debug("SOCKS proxy credentials are not handled by browser auth callback")
+		}
+		return nil, nil
+	}
+
+	username := proxyURL.User.Username()
+	password, _ := proxyURL.User.Password()
+	authCtx, cancel := context.WithCancel(EnsureContext(ctx))
+
+	go func() {
+		if err := browser.Context(authCtx).HandleAuth(username, password)(); err != nil && !errors.Is(err, context.Canceled) {
+			WithRequest(ctx).WithError(err).Debug("Proxy auth handler stopped")
+		}
+	}()
+
+	return cancel, nil
+}
+
 // Navigate connects to Chromium, creates a page, applies stealth/emulation and
 // proxy auth, then navigates to URL. It returns an initialized page ready for
 // selector queries, or an error when browser setup/navigation fails.
@@ -188,70 +335,49 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 
 	WithRequest(ctx).WithField("url", URL).Debug("Navigate to")
 
-	browser := rod.New().ControlURL(b.browserAddr).Timeout(b.Timeout)
-	if err := browser.Connect(); err != nil {
+	browser, ua, err := b.ensureConnectedBrowser(ctx, false)
+	if err != nil {
 		return nil, fmt.Errorf("browser connect failed: %w", err)
 	}
-	b.browser = browser
-	if err := b.browser.SetCookies(nil); err != nil {
-		return nil, fmt.Errorf("browser cookie reset failed: %w", err)
-	}
 
-	// Handle proxy authentication before any navigations
-	if b.ProxyURL != "" {
-		proxyUrl, _ := url.Parse(b.ProxyURL)
-
-		// Always ignore certificate errors when using proxies
-		// This fixes the ERR_CERT_AUTHORITY_INVALID error for SOCKS5 proxies
-		if err := b.browser.IgnoreCertErrors(true); err != nil {
-			return nil, fmt.Errorf("configure proxy cert handling failed: %w", err)
-		}
-
-		if proxyUrl.User != nil && (proxyUrl.Scheme == "http" || proxyUrl.Scheme == "https") {
-			username := proxyUrl.User.Username()
-			password, _ := proxyUrl.User.Password()
-			// Launch auth handler before any navigation occurs
-			go func() {
-				if err := b.browser.HandleAuth(username, password)(); err != nil {
-					WithRequest(ctx).WithError(err).Debug("Proxy auth handler stopped")
-				}
-			}()
-		} else if proxyUrl.User != nil && (proxyUrl.Scheme == "socks5" || proxyUrl.Scheme == "socks5h") {
-			// This callback handles HTTP proxy auth challenges; it doesn't authenticate SOCKS proxies.
-			logrus.Debug("SOCKS proxy credentials are not handled by browser auth callback")
-		}
-	} else if b.Insecure {
-		// Still respect the insecure flag if no proxy is used
-		if err := b.browser.IgnoreCertErrors(true); err != nil {
-			return nil, fmt.Errorf("configure insecure mode failed: %w", err)
-		}
-	}
-
-	version, err := b.browser.Version()
+	page, browserContextID, err := createIsolatedPage(browser)
 	if err != nil {
-		return nil, fmt.Errorf("read browser version failed: %w", err)
+		// Single-shot reconnect for stale websocket sessions.
+		browser, ua, err = b.ensureConnectedBrowser(ctx, true)
+		if err != nil {
+			return nil, fmt.Errorf("create isolated page failed, reconnect also failed: %w", err)
+		}
+		page, browserContextID, err = createIsolatedPage(browser)
+		if err != nil {
+			return nil, fmt.Errorf("create isolated page failed after reconnect: %w", err)
+		}
 	}
-	ua := strings.ReplaceAll(version.UserAgent, "HeadlessChrome/", "Chrome/")
 
-	var page *rod.Page
+	// closeOnErr closes page then disposes context. Order matters: disposing the
+	// context first causes Chrome to kill the page target before our Close call,
+	// producing a spurious "target closed" error on the page.Close() that follows.
+	closeOnErr := func() {
+		if cerr := page.Close(); cerr != nil && !isBrowserClosedError(cerr) {
+			WithRequest(ctx).WithError(cerr).Debug("Close page after navigate error failed")
+		}
+		if derr := disposeBrowserContext(browser, browserContextID); derr != nil && !isBrowserClosedError(derr) {
+			WithRequest(ctx).WithError(derr).Debug("Dispose browser context after navigate error failed")
+		}
+	}
+
+	cancelProxyAuth, err := b.startProxyAuthHandler(ctx, browser)
+	if err != nil {
+		closeOnErr()
+		return nil, fmt.Errorf("proxy auth setup failed: %w", err)
+	}
+	if cancelProxyAuth != nil {
+		defer cancelProxyAuth()
+	}
 
 	if b.UseStealth {
-		page, err = stealth.Page(b.browser)
-		if err != nil {
+		if _, err := page.EvalOnNewDocument(stealth.JS); err != nil {
+			closeOnErr()
 			return nil, fmt.Errorf("create stealth page failed: %w", err)
-		}
-	} else {
-		page, err = b.browser.Page(proto.TargetCreateTarget{URL: "about:blank"})
-		if err != nil {
-			return nil, fmt.Errorf("create page failed: %w", err)
-		}
-	}
-
-	// From here on, any error path must close the page to avoid leaking tabs
-	// when the caller context is canceled or navigation fails.
-	closeOnErr := func() {
-		if cerr := page.Close(); cerr != nil {
-			WithRequest(ctx).WithError(cerr).Debug("Close page after navigate error failed")
 		}
 	}
 
@@ -317,12 +443,13 @@ func (b *Browser) Close() error {
 		return nil
 	}
 
-	browser := b.browser
+	state := b.connectionState()
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	browser := state.browser
 	if browser == nil {
-		browser = rod.New().ControlURL(b.browserAddr)
-		if b.Timeout > 0 {
-			browser = browser.Timeout(b.Timeout)
-		}
+		browser = b.newRodBrowser()
 		if err := browser.Connect(); err != nil {
 			if isBrowserClosedError(err) {
 				return nil
@@ -331,7 +458,7 @@ func (b *Browser) Close() error {
 		}
 	}
 
-	b.browser = nil
+	state.browser = nil
 	if err := browser.Close(); err != nil && !isBrowserClosedError(err) {
 		return err
 	}
@@ -357,9 +484,26 @@ func ClosePageWithTimeout(ctx context.Context, page *rod.Page, timeout time.Dura
 	if timeout <= 0 {
 		timeout = time.Second
 	}
-	closeCtx, cancel := context.WithTimeout(EnsureContext(ctx), timeout)
+	baseCtx := EnsureContext(ctx)
+	if baseCtx.Err() != nil {
+		baseCtx = context.Background()
+	}
+	closeCtx, cancel := context.WithTimeout(baseCtx, timeout)
 	defer cancel()
-	return page.Context(closeCtx).Close()
+
+	pageWithTimeout := page.Context(closeCtx)
+	info, _ := pageWithTimeout.Info()
+
+	if err := pageWithTimeout.Close(); err != nil && !isBrowserClosedError(err) {
+		return err
+	}
+
+	if info != nil && info.BrowserContextID != "" {
+		if derr := disposeBrowserContext(page.Browser().Context(closeCtx), info.BrowserContextID); derr != nil && !isBrowserClosedError(derr) {
+			return derr
+		}
+	}
+	return nil
 }
 
 // RecoverEnginePanic converts recovered panics to a typed engine error and
