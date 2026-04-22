@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -43,6 +44,7 @@ type Server struct {
 	resilient     *ResilientSearcher
 	startTime     time.Time
 	opts          ServerOptions
+	draining      atomic.Bool
 }
 
 // ServerOptions configures HTTP server middleware and resilience behavior.
@@ -98,6 +100,7 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 		startTime:     time.Now(),
 		opts:          opts,
 	}
+	serv.draining.Store(false)
 	logrus.Info("Resilient search enabled: retry + circuit breaker")
 	if opts.AllowEndpointFallback {
 		logrus.Warn("Dedicated endpoint fallback is enabled")
@@ -120,6 +123,7 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 	app.Get("/docs", serv.handleSwaggerUI)
 	app.Get("/docs/", serv.handleSwaggerUI)
 	app.Get("/health", serv.handleHealthCheck)
+	app.Get("/ready", serv.handleReadinessCheck)
 	app.Get("/stats", serv.handleStats)
 	app.Get("/stats/cache", serv.handleCacheStats)
 	app.Get("/stats/proxy", serv.handleProxyStats)
@@ -264,6 +268,12 @@ type HealthStatus struct {
 	System  map[string]interface{} `json:"system"`
 }
 
+// ReadinessStatus is returned by /ready to indicate if this instance can
+// receive new traffic.
+type ReadinessStatus struct {
+	Status string `json:"status"`
+}
+
 // EngineHealth describes availability of one configured engine.
 type EngineHealth struct {
 	Name        string `json:"name"`
@@ -336,6 +346,15 @@ func (s *Server) handleHealthCheck(c *fiber.Ctx) error {
 		c.Status(fiber.StatusServiceUnavailable)
 	}
 	return c.JSON(health)
+}
+
+func (s *Server) handleReadinessCheck(c *fiber.Ctx) error {
+	status := ReadinessStatus{Status: "ready"}
+	if s.draining.Load() {
+		status.Status = "draining"
+		return c.Status(fiber.StatusServiceUnavailable).JSON(status)
+	}
+	return c.JSON(status)
 }
 
 func (s *Server) handleStats(c *fiber.Ctx) error {
@@ -672,12 +691,30 @@ func (s *Server) handleSwaggerUI(c *fiber.Ctx) error {
 	return c.SendString(page)
 }
 
+// SetDraining controls readiness state exposed by /ready.
+func (s *Server) SetDraining(draining bool) {
+	s.draining.Store(draining)
+}
+
+const defaultShutdownTimeout = 30 * time.Second
+
 // Listen starts the Fiber HTTP server on the configured address.
 func (s *Server) Listen() error {
+	s.SetDraining(false)
 	return s.app.Listen(s.addr)
 }
 
 // Shutdown gracefully stops the Fiber HTTP server.
 func (s *Server) Shutdown() error {
-	return s.app.Shutdown()
+	return s.ShutdownWithTimeout(defaultShutdownTimeout)
+}
+
+// ShutdownWithTimeout drains the server before force-closing active
+// connections when timeout is exceeded.
+func (s *Server) ShutdownWithTimeout(timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = defaultShutdownTimeout
+	}
+	s.SetDraining(true)
+	return s.app.ShutdownWithTimeout(timeout)
 }

@@ -408,6 +408,37 @@ func TestHealthEndpointStatusSemantics(t *testing.T) {
 	}
 }
 
+func TestReadinessEndpointStatusSemantics(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	srv := NewServerWithOptions("127.0.0.1", 7077, DefaultServerOptions(), engine)
+
+	resp := request(t, srv, "/ready")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected ready endpoint to return 200 while serving, got %d", resp.StatusCode)
+	}
+
+	var ready ReadinessStatus
+	if err := json.NewDecoder(resp.Body).Decode(&ready); err != nil {
+		t.Fatalf("decode ready response: %v", err)
+	}
+	if ready.Status != "ready" {
+		t.Fatalf("expected readiness status=ready, got %q", ready.Status)
+	}
+
+	srv.SetDraining(true)
+	resp = request(t, srv, "/ready")
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected ready endpoint to return 503 while draining, got %d", resp.StatusCode)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&ready); err != nil {
+		t.Fatalf("decode draining response: %v", err)
+	}
+	if ready.Status != "draining" {
+		t.Fatalf("expected readiness status=draining, got %q", ready.Status)
+	}
+}
+
 func TestDedicatedEndpointNoFallbackByDefault(t *testing.T) {
 	primary := &engineMock{
 		name:        "google",

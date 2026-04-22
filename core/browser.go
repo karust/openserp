@@ -174,11 +174,7 @@ func resolveBrowserBinaryPath(browserPath string, lookPath func() (string, bool)
 
 // IsInitialized reports whether the browser launcher has been created.
 func (b *Browser) IsInitialized() bool {
-	if b.browserAddr != "" {
-		return true
-	} else {
-		return false
-	}
+	return b.browserAddr != ""
 }
 
 // Navigate connects to Chromium, creates a page, applies stealth/emulation and
@@ -317,7 +313,40 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 
 // Close closes the active browser connection.
 func (b *Browser) Close() error {
-	return b.browser.Close()
+	if b == nil || b.browserAddr == "" {
+		return nil
+	}
+
+	browser := b.browser
+	if browser == nil {
+		browser = rod.New().ControlURL(b.browserAddr)
+		if b.Timeout > 0 {
+			browser = browser.Timeout(b.Timeout)
+		}
+		if err := browser.Connect(); err != nil {
+			if isBrowserClosedError(err) {
+				return nil
+			}
+			return err
+		}
+	}
+
+	b.browser = nil
+	if err := browser.Close(); err != nil && !isBrowserClosedError(err) {
+		return err
+	}
+	return nil
+}
+
+func isBrowserClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "closed network connection") ||
+		strings.Contains(msg, "target closed") ||
+		strings.Contains(msg, "eof")
 }
 
 // ClosePageWithTimeout bounds page close calls so shutdown paths don't hang.

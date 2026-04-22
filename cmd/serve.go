@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/karust/openserp/baidu"
@@ -96,7 +99,7 @@ func serve(cmd *cobra.Command, args []string) {
 			&rawEngine{name: "yandex"},
 			&rawEngine{name: "baidu"},
 		)
-		if err := serv.Listen(); err != nil {
+		if err := listenWithGracefulShutdown(serv, nil); err != nil {
 			logrus.Error(err)
 		}
 		return
@@ -117,7 +120,7 @@ func serve(cmd *cobra.Command, args []string) {
 		baseOpts.IsHeadless = false
 	}
 
-	engines, err := buildBrowserEngines(baseOpts, proxyCfg)
+	engines, closeBrowsers, err := buildBrowserEngines(baseOpts, proxyCfg)
 	if err != nil {
 		logrus.Error(err)
 		return
@@ -125,7 +128,7 @@ func serve(cmd *cobra.Command, args []string) {
 
 	serverOpts := buildServerOptions(corsCfg, proxyCfg)
 	serv := core.NewServerWithOptions(config.Server.Host, config.Server.Port, serverOpts, engines...)
-	if err := serv.Listen(); err != nil {
+	if err := listenWithGracefulShutdown(serv, closeBrowsers); err != nil {
 		logrus.Error(err)
 	}
 }
@@ -152,6 +155,71 @@ func buildServerOptions(corsCfg core.CORSConfig, proxyCfg core.ProxyConfig) core
 			Proxy: proxyCfg,
 		},
 	}
+}
+
+const gracefulShutdownTimeout = 30 * time.Second
+
+func listenWithGracefulShutdown(serv *core.Server, onShutdown func() error) error {
+	listenErrCh := make(chan error, 1)
+	go func() {
+		listenErrCh <- serv.Listen()
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	select {
+	case err := <-listenErrCh:
+		return err
+	case sig := <-sigCh:
+		logrus.WithField("signal", sig.String()).Info("Shutdown signal received, draining traffic")
+	}
+
+	serv.SetDraining(true)
+
+	shutdownErr := serv.ShutdownWithTimeout(gracefulShutdownTimeout)
+	if isServerNotRunningError(shutdownErr) {
+		shutdownErr = nil
+	}
+
+	if onShutdown != nil {
+		resourceErr := onShutdown()
+		if resourceErr != nil {
+			shutdownErr = errors.Join(shutdownErr, resourceErr)
+		}
+	}
+
+	if listenErr := waitForListenExit(listenErrCh); listenErr != nil && !isExpectedListenShutdownError(listenErr) {
+		shutdownErr = errors.Join(shutdownErr, listenErr)
+	}
+
+	return shutdownErr
+}
+
+func waitForListenExit(listenErrCh <-chan error) error {
+	select {
+	case err := <-listenErrCh:
+		return err
+	case <-time.After(time.Second):
+		return nil
+	}
+}
+
+func isExpectedListenShutdownError(err error) bool {
+	if err == nil {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "server closed") ||
+		strings.Contains(msg, "closed network connection")
+}
+
+func isServerNotRunningError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "server is not running")
 }
 
 type browserPool struct {
@@ -191,6 +259,27 @@ func (p *browserPool) get(proxyURL string) (*core.Browser, error) {
 	// and engines with identical proxy policy don't spawn duplicate browser processes.
 	p.browser[key] = b
 	return b, nil
+}
+
+func (p *browserPool) close() error {
+	p.mu.Lock()
+	browsers := make([]*core.Browser, 0, len(p.browser))
+	for key, b := range p.browser {
+		browsers = append(browsers, b)
+		delete(p.browser, key)
+	}
+	p.mu.Unlock()
+
+	var closeErr error
+	for _, browser := range browsers {
+		if browser == nil {
+			continue
+		}
+		if err := browser.Close(); err != nil {
+			closeErr = errors.Join(closeErr, err)
+		}
+	}
+	return closeErr
 }
 
 type pooledBrowserEngine struct {
@@ -301,7 +390,7 @@ func browserEngineSpecs() []browserEngineSpec {
 	}
 }
 
-func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) ([]core.SearchEngine, error) {
+func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) ([]core.SearchEngine, func() error, error) {
 	pool := newBrowserPool(baseOpts)
 	specs := browserEngineSpecs()
 
@@ -309,7 +398,7 @@ func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) (
 	for _, spec := range specs {
 		policy := resolveEngineProxyPolicy(proxyCfg, spec.name)
 		if err := validateBrowserProxyPolicy(proxyCfg, policy); err != nil {
-			return nil, fmt.Errorf("browser proxy validation failed for engine %s: %w", spec.name, err)
+			return nil, nil, fmt.Errorf("browser proxy validation failed for engine %s: %w", spec.name, err)
 		}
 
 		opts := spec.opts
@@ -324,7 +413,7 @@ func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) (
 		})
 	}
 
-	return engines, nil
+	return engines, pool.close, nil
 }
 
 func validateBrowserProxyPolicy(proxyCfg core.ProxyConfig, policy core.ProxyPolicy) error {

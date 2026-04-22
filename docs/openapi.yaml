@@ -303,6 +303,34 @@ paths:
                       go_version: go1.24.6
         "404":
           $ref: "#/components/responses/NotFoundError"
+  /ready:
+    get:
+      tags: [Health]
+      operationId: readinessCheck
+      summary: Service readiness status
+      responses:
+        "200":
+          description: Instance is ready to receive traffic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessStatus"
+              examples:
+                ready:
+                  value:
+                    status: ready
+        "503":
+          description: Instance is draining and should not receive new traffic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessStatus"
+              examples:
+                draining:
+                  value:
+                    status: draining
+        "404":
+          $ref: "#/components/responses/NotFoundError"
   /stats:
     get:
       tags: [Stats]
@@ -730,6 +758,13 @@ components:
               type: integer
             go_version:
               type: string
+    ReadinessStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ready, draining]
     CacheStatsEnabled:
       type: object
       required: [status, entries, hits, misses, bypasses, evictions, ttl_seconds, max_size]
