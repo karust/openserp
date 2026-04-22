@@ -6,17 +6,26 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/karust/openserp/core/fpcheck"
+	"github.com/karust/openserp/core/fpcheck/detectors"
 	apidocs "github.com/karust/openserp/docs"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
+
+// DefaultFingerprintArtifactDir is the artifact directory used when none is
+// configured. It is relative to the server's working directory at start time.
+var DefaultFingerprintArtifactDir = filepath.Join("core", "testdata")
 
 // SearchEngine defines the contract required by the HTTP server and resilient
 // search pipeline.
@@ -60,6 +69,12 @@ type ServerOptions struct {
 	// AllowEndpointFallback allows dedicated engine routes to fall back to other
 	// healthy engines when the primary engine fails.
 	AllowEndpointFallback bool
+	// EnableDebugEndpoints enables debug-only routes such as fingerprint checks.
+	EnableDebugEndpoints bool
+	// FingerprintArtifactDir is where debug fingerprint screenshots are written.
+	FingerprintArtifactDir string
+	// FingerprintBrowserOpts are the defaults for debug fingerprint runs.
+	FingerprintBrowserOpts BrowserOpts
 	// Resilience defines retry/circuit-breaker/proxy strategy settings.
 	Resilience ResilientConfig
 }
@@ -68,12 +83,18 @@ type ServerOptions struct {
 // and resilient search policies.
 func DefaultServerOptions() ServerOptions {
 	return ServerOptions{
-		CacheTTL:              5 * time.Minute,
-		CacheMaxSize:          1000,
-		EnableCORS:            true,
-		CORS:                  DefaultCORSConfig(),
-		AllowEndpointFallback: false,
-		Resilience:            DefaultResilientConfig(),
+		CacheTTL:               5 * time.Minute,
+		CacheMaxSize:           1000,
+		EnableCORS:             true,
+		CORS:                   DefaultCORSConfig(),
+		AllowEndpointFallback:  false,
+		EnableDebugEndpoints:   false,
+		FingerprintArtifactDir: DefaultFingerprintArtifactDir,
+		FingerprintBrowserOpts: BrowserOpts{
+			IsHeadless: true,
+			Timeout:    30 * time.Second,
+		},
+		Resilience: DefaultResilientConfig(),
 	}
 }
 
@@ -128,6 +149,9 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 	app.Get("/stats/cache", serv.handleCacheStats)
 	app.Get("/stats/proxy", serv.handleProxyStats)
 	app.Get("/stats/cb", serv.handleCircuitBreakerStats)
+	if opts.EnableDebugEndpoints {
+		app.Get("/debug/fingerprint-check", serv.handleFingerprintCheck)
+	}
 
 	for _, engine := range searchEngines {
 		locEngine := engine
@@ -378,6 +402,168 @@ func (s *Server) handleCircuitBreakerStats(c *fiber.Ctx) error {
 	return c.JSON(map[string]interface{}{
 		"circuit_breakers": s.resilient.GetCircuitBreakerStats(),
 	})
+}
+
+func (s *Server) handleFingerprintCheck(c *fiber.Ctx) error {
+	req, err := s.parseFingerprintCheckRequest(c)
+	if err != nil {
+		return err
+	}
+
+	runCtx, cancel := context.WithTimeout(c.UserContext(), time.Duration(req.timeoutMs)*time.Millisecond)
+	defer cancel()
+
+	browser, err := NewBrowser(req.browserOpts)
+	if err != nil {
+		return fiber.NewError(fiber.StatusServiceUnavailable, fmt.Sprintf("failed to create debug browser: %v", err))
+	}
+	defer func() {
+		if closeErr := browser.Close(); closeErr != nil {
+			WithRequest(c.UserContext()).WithError(closeErr).Warn("failed to close debug fingerprint browser")
+		}
+	}()
+
+	artifactDir := defaultFingerprintArtifactDir(s.opts.FingerprintArtifactDir)
+
+	reports := make([]fpcheck.Report, 0, len(req.detectors))
+	for idx, detector := range req.detectors {
+		runOpts := fpcheck.RunOptions{
+			UseStealth:  req.browserOpts.UseStealth,
+			ArtifactDir: artifactDir,
+		}
+		if req.waitMs > 0 && idx == len(req.detectors)-1 {
+			runOpts.WaitBeforeClose = time.Duration(req.waitMs) * time.Millisecond
+		}
+
+		report, runErr := fpcheck.RunWithOptions(runCtx, browser, detector, runOpts)
+		if runErr != nil {
+			if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+				return fiber.NewError(fiber.StatusGatewayTimeout, fmt.Sprintf("fingerprint check timed out after %dms", req.timeoutMs))
+			}
+			return fiber.NewError(
+				fiber.StatusServiceUnavailable,
+				fmt.Sprintf("detector %s failed: %v", detector.Name(), runErr),
+			)
+		}
+		reports = append(reports, report)
+	}
+
+	return c.JSON(reports)
+}
+
+type fingerprintCheckRequest struct {
+	detectors   []fpcheck.Detector
+	timeoutMs   int
+	waitMs      int
+	browserOpts BrowserOpts
+}
+
+func (s *Server) parseFingerprintCheckRequest(c *fiber.Ctx) (fingerprintCheckRequest, error) {
+	detectorName := strings.TrimSpace(c.Query("detector", "all"))
+	customURL := strings.TrimSpace(c.Query("url", ""))
+	selectedDetectors, err := detectors.Select(detectorName, customURL)
+	if err != nil {
+		return fingerprintCheckRequest{}, fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+
+	useStealth, err := parseOptionalBoolQuery(c.Query("stealth", ""), s.opts.FingerprintBrowserOpts.UseStealth)
+	if err != nil {
+		return fingerprintCheckRequest{}, fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("invalid stealth query value: %v", err))
+	}
+
+	headless, err := parseOptionalBoolQuery(c.Query("headless", ""), true)
+	if err != nil {
+		return fingerprintCheckRequest{}, fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("invalid headless query value: %v", err))
+	}
+	if !headless && strings.TrimSpace(os.Getenv("DISPLAY")) == "" {
+		WithRequest(c.UserContext()).Warn("headless=false ignored because DISPLAY is not set; forcing headless mode")
+		headless = true
+	}
+
+	timeoutMs, err := parsePositiveIntQuery(c.Query("timeout_ms", ""), 150000)
+	if err != nil {
+		return fingerprintCheckRequest{}, fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("invalid timeout_ms query value: %v", err))
+	}
+	waitMs, err := parseNonNegativeIntQuery(c.Query("wait_ms", ""), 0)
+	if err != nil {
+		return fingerprintCheckRequest{}, fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("invalid wait_ms query value: %v", err))
+	}
+
+	browserOpts := s.opts.FingerprintBrowserOpts
+	browserOpts.IsHeadless = headless
+	browserOpts.UseStealth = useStealth
+	browserOpts.Timeout = time.Duration(timeoutMs) * time.Millisecond
+	browserOpts.LeavePageOpen = false
+	browserOpts.UserAgent = strings.TrimSpace(c.Query("user_agent", browserOpts.UserAgent))
+	browserOpts.ProxyURL = strings.TrimSpace(c.Query("proxy", browserOpts.ProxyURL))
+	browserOpts.LanguageCode = strings.TrimSpace(c.Query("language", browserOpts.LanguageCode))
+
+	insecureDefault := browserOpts.Insecure
+	if detectors.IsCustom(detectorName) {
+		insecureDefault = true
+	}
+	insecure, err := parseOptionalBoolQuery(c.Query("insecure", ""), insecureDefault)
+	if err != nil {
+		return fingerprintCheckRequest{}, fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("invalid insecure query value: %v", err))
+	}
+	browserOpts.Insecure = insecure
+
+	return fingerprintCheckRequest{
+		detectors:   selectedDetectors,
+		timeoutMs:   timeoutMs,
+		waitMs:      waitMs,
+		browserOpts: browserOpts,
+	}, nil
+}
+
+func defaultFingerprintArtifactDir(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return DefaultFingerprintArtifactDir
+	}
+	return trimmed
+}
+
+func parseOptionalBoolQuery(raw string, defaultValue bool) (bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultValue, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, err
+	}
+	return value, nil
+}
+
+func parsePositiveIntQuery(raw string, defaultValue int) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultValue, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, err
+	}
+	if value <= 0 {
+		return 0, fmt.Errorf("must be > 0")
+	}
+	return value, nil
+}
+
+func parseNonNegativeIntQuery(raw string, defaultValue int) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultValue, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, err
+	}
+	if value < 0 {
+		return 0, fmt.Errorf("must be >= 0")
+	}
+	return value, nil
 }
 
 // MegaSearchResult extends SearchResult with the engine source name.

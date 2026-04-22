@@ -91,9 +91,11 @@ func serve(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	fingerprintBrowserOpts := buildFingerprintBrowserOptions()
+
 	if config.Server.IsRawRequests {
 		logrus.Warn("Browserless results are very inconsistent or may not even work!")
-		serverOpts := buildServerOptions(corsCfg, proxyCfg)
+		serverOpts := buildServerOptions(corsCfg, proxyCfg, fingerprintBrowserOpts)
 		serv := core.NewServerWithOptions(config.Server.Host, config.Server.Port, serverOpts,
 			&rawEngine{name: "google"},
 			&rawEngine{name: "yandex"},
@@ -105,20 +107,10 @@ func serve(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	baseOpts := core.BrowserOpts{
-		IsHeadless:           !config.App.IsBrowserHead,
-		IsLeakless:           config.App.IsLeakless,
-		Timeout:              time.Second * time.Duration(config.App.Timeout),
-		LeavePageOpen:        config.App.IsLeaveHead,
-		CaptchaSolverEnabled: captchaSolverEnabled,
-		CaptchaSolverApiKey:  captchaSolverAPIKey,
-		BrowserPath:          config.App.BrowserPath,
-		Insecure:             config.Server.Insecure,
-		UseStealth:           config.App.IsStealth,
-	}
-	if config.Server.IsDebug {
-		baseOpts.IsHeadless = false
-	}
+	baseOpts := fingerprintBrowserOpts
+	baseOpts.LeavePageOpen = config.App.IsLeaveHead
+	baseOpts.CaptchaSolverEnabled = captchaSolverEnabled
+	baseOpts.CaptchaSolverApiKey = captchaSolverAPIKey
 
 	engines, closeBrowsers, err := buildBrowserEngines(baseOpts, proxyCfg)
 	if err != nil {
@@ -126,20 +118,38 @@ func serve(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	serverOpts := buildServerOptions(corsCfg, proxyCfg)
+	serverOpts := buildServerOptions(corsCfg, proxyCfg, fingerprintBrowserOpts)
 	serv := core.NewServerWithOptions(config.Server.Host, config.Server.Port, serverOpts, engines...)
 	if err := listenWithGracefulShutdown(serv, closeBrowsers); err != nil {
 		logrus.Error(err)
 	}
 }
 
-func buildServerOptions(corsCfg core.CORSConfig, proxyCfg core.ProxyConfig) core.ServerOptions {
+func buildFingerprintBrowserOptions() core.BrowserOpts {
+	opts := core.BrowserOpts{
+		IsHeadless:  !config.App.IsBrowserHead,
+		IsLeakless:  config.App.IsLeakless,
+		Timeout:     time.Second * time.Duration(config.App.Timeout),
+		BrowserPath: config.App.BrowserPath,
+		Insecure:    config.Server.Insecure,
+		UseStealth:  config.App.IsStealth,
+	}
+	if config.Server.IsDebug {
+		opts.IsHeadless = false
+	}
+	return opts
+}
+
+func buildServerOptions(corsCfg core.CORSConfig, proxyCfg core.ProxyConfig, fingerprintBrowserOpts core.BrowserOpts) core.ServerOptions {
 	return core.ServerOptions{
-		CacheTTL:              time.Duration(config.Cache.TTLSeconds) * time.Second,
-		CacheMaxSize:          config.Cache.MaxSize,
-		EnableCORS:            config.CORS.Enabled,
-		CORS:                  corsCfg,
-		AllowEndpointFallback: config.Resilience.AllowEndpointFallback,
+		CacheTTL:               time.Duration(config.Cache.TTLSeconds) * time.Second,
+		CacheMaxSize:           config.Cache.MaxSize,
+		EnableCORS:             config.CORS.Enabled,
+		CORS:                   corsCfg,
+		AllowEndpointFallback:  config.Resilience.AllowEndpointFallback,
+		EnableDebugEndpoints:   config.App.DebugEndpoints,
+		FingerprintArtifactDir: core.DefaultFingerprintArtifactDir,
+		FingerprintBrowserOpts: fingerprintBrowserOpts,
 		Resilience: core.ResilientConfig{
 			Retry: core.RetryConfig{
 				MaxRetries:     config.Resilience.MaxRetries,

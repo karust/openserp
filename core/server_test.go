@@ -151,6 +151,76 @@ func TestDocsEndpointServesSwaggerUI(t *testing.T) {
 	}
 }
 
+func TestDebugFingerprintEndpointDisabledByDefault(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	srv := NewServerWithOptions("127.0.0.1", 7109, DefaultServerOptions(), engine)
+
+	resp := request(t, srv, "/debug/fingerprint-check")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected disabled debug endpoint to return 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestDebugFingerprintEndpointValidatesDetectorParam(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.EnableDebugEndpoints = true
+	srv := NewServerWithOptions("127.0.0.1", 7112, opts, engine)
+
+	resp := request(t, srv, "/debug/fingerprint-check?detector=unknown")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected invalid detector to return 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestDebugFingerprintEndpointValidatesWaitParam(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.EnableDebugEndpoints = true
+	srv := NewServerWithOptions("127.0.0.1", 7113, opts, engine)
+
+	resp := request(t, srv, "/debug/fingerprint-check?detector=sannysoft&wait_ms=-1")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected invalid wait_ms to return 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestDebugFingerprintEndpointCustomDetectorRequiresURL(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.EnableDebugEndpoints = true
+	srv := NewServerWithOptions("127.0.0.1", 7114, opts, engine)
+
+	resp := request(t, srv, "/debug/fingerprint-check?detector=custom")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected custom detector without url to return 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestDebugFingerprintEndpointCustomDetectorValidatesInsecureParam(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.EnableDebugEndpoints = true
+	srv := NewServerWithOptions("127.0.0.1", 7115, opts, engine)
+
+	resp := request(t, srv, "/debug/fingerprint-check?detector=custom&url=https://localhost:9000&insecure=notabool")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected invalid insecure query value to return 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestDebugFingerprintEndpointCustomDetectorValidatesURL(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.EnableDebugEndpoints = true
+	srv := NewServerWithOptions("127.0.0.1", 7116, opts, engine)
+
+	resp := request(t, srv, "/debug/fingerprint-check?detector=custom&url=not-a-url")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected invalid custom URL to return 400, got %d", resp.StatusCode)
+	}
+}
+
 func TestInvalidQueryParametersReturnJSONError(t *testing.T) {
 	engine := &engineMock{name: "google", initialized: true}
 	srv := NewServerWithOptions("127.0.0.1", 7104, DefaultServerOptions(), engine)

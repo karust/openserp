@@ -51,13 +51,14 @@ type ServerConfig struct {
 }
 
 type AppConfig struct {
-	Timeout       int    `mapstructure:"timeout"`
-	BrowserPath   string `mapstructure:"browser_path"`
-	IsBrowserHead bool   `mapstructure:"head"`
-	IsLeaveHead   bool   `mapstructure:"leave_head"`
-	IsLeakless    bool   `mapstructure:"leakless"`
-	IsStealth     bool   `mapstructure:"stealth"`
-	LogFormat     string `mapstructure:"log_format"`
+	Timeout        int    `mapstructure:"timeout"`
+	BrowserPath    string `mapstructure:"browser_path"`
+	IsBrowserHead  bool   `mapstructure:"head"`
+	IsLeaveHead    bool   `mapstructure:"leave_head"`
+	IsLeakless     bool   `mapstructure:"leakless"`
+	IsStealth      bool   `mapstructure:"stealth"`
+	DebugEndpoints bool   `mapstructure:"debug_endpoints"`
+	LogFormat      string `mapstructure:"log_format"`
 }
 
 type EngineConfig struct {
@@ -110,6 +111,7 @@ var flagToConfigKey = map[string]string{
 	"2captcha_key":            "2captcha.apikey",
 	"proxy":                   "proxies.global",
 	"stealth":                 "app.stealth",
+	"debug-endpoints":         "app.debug_endpoints",
 	"insecure":                "server.insecure",
 	"cache_ttl":               "cache.ttl_seconds",
 	"cache_max_size":          "cache.max_size",
@@ -318,6 +320,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("app.leave_head", false)
 	v.SetDefault("app.leakless", false)
 	v.SetDefault("app.stealth", false)
+	v.SetDefault("app.debug_endpoints", false)
 
 	v.SetDefault("proxies.entries", []interface{}{})
 	v.SetDefault("proxies.global", "")
@@ -354,6 +357,7 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&config.Config2Capcha.ApiKey, "2captcha_key", "", "", "2 captcha api key")
 	RootCmd.PersistentFlags().StringVarP(&config.Proxies.Global, "proxy", "x", "", "Force a single proxy for all engines (same as proxies.global)")
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsStealth, "stealth", "s", false, "Use stealth browser plugin")
+	RootCmd.PersistentFlags().BoolVar(&config.App.DebugEndpoints, "debug-endpoints", false, "Enable debug-only HTTP endpoints")
 	RootCmd.PersistentFlags().BoolVarP(&config.Server.Insecure, "insecure", "k", false, "Allow insecure TLS connections")
 	RootCmd.PersistentFlags().IntVar(&config.Cache.TTLSeconds, "cache_ttl", 300, "Cache TTL in seconds (0 to disable)")
 	RootCmd.PersistentFlags().IntVar(&config.Cache.MaxSize, "cache_max_size", 1000, "Maximum number of cached responses")

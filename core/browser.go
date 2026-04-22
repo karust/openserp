@@ -47,6 +47,8 @@ type BrowserOpts struct {
 	Insecure bool
 	// UseStealth enables go-rod stealth page creation.
 	UseStealth bool
+	// UserAgent optionally overrides browser-reported user agent during emulation.
+	UserAgent string
 }
 
 // Check applies default option values when optional fields are unset.
@@ -69,8 +71,8 @@ type Browser struct {
 }
 
 type browserConnection struct {
-	mu            sync.Mutex
-	browser       *rod.Browser
+	mu              sync.Mutex
+	browser         *rod.Browser
 	cachedUserAgent string
 }
 
@@ -221,6 +223,9 @@ func (b *Browser) connectBrowser() (*rod.Browser, string, error) {
 		return nil, "", fmt.Errorf("read browser version: %w", err)
 	}
 	ua := strings.ReplaceAll(version.UserAgent, "HeadlessChrome/", "Chrome/")
+	if overrideUA := strings.TrimSpace(b.UserAgent); overrideUA != "" {
+		ua = overrideUA
+	}
 
 	return browser, ua, nil
 }
@@ -333,7 +338,7 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 		return nil, err
 	}
 
-	WithRequest(ctx).WithField("url", URL).Debug("Navigate to")
+	WithRequest(ctx).WithField("url", URL).Debug("Navigate")
 
 	browser, ua, err := b.ensureConnectedBrowser(ctx, false)
 	if err != nil {
