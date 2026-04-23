@@ -35,7 +35,8 @@ type BrowserOpts struct {
 	WaitRequests bool
 	// LeavePageOpen keeps pages open after search operations.
 	LeavePageOpen bool
-	// WaitLoadTime is an additional fixed wait after load/idle checks.
+	// WaitLoadTime is kept for config backwards-compatibility but no longer used;
+	// Navigate now calls WaitStable instead.
 	WaitLoadTime time.Duration
 	// CaptchaSolverApiKey enables 2Captcha integration for supported engines.
 	CaptchaSolverApiKey string
@@ -702,9 +703,10 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 		wait()
 	}
 
-	if err := SleepContext(ctx, b.WaitLoadTime); err != nil {
-		closeOnErr()
-		return nil, err
+	// WaitStable blocks until no layout changes occur for 800 ms, or falls
+	// through on error so engine-specific selector timeouts handle the result.
+	if err := page.Context(ctx).WaitStable(800 * time.Millisecond); err != nil {
+		WithRequest(ctx).WithError(err).Debug("WaitStable returned early; continuing")
 	}
 	return page, nil
 }

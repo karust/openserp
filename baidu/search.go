@@ -33,6 +33,16 @@ type imageDataJson struct {
 	}
 }
 
+var sel = struct {
+	Captcha string
+	Timeout string
+	Results string
+}{
+	Captcha: "div.passMod_dialog-body",
+	Timeout: "button.timeout-button",
+	Results: "div.c-container.new-pmd",
+}
+
 // Baidu implements core.SearchEngine for Baidu SERP pages.
 type Baidu struct {
 	core.Browser
@@ -61,13 +71,13 @@ func (baid *Baidu) GetRateLimiter() *rate.Limiter {
 }
 
 func (baid *Baidu) isCaptcha(page *rod.Page) bool {
-	_, err := page.Timeout(baid.GetSelectorTimeout()).Search("div.passMod_dialog-body")
-	return err == nil
+	has, _, _ := page.Has(sel.Captcha)
+	return has
 }
 
 func (baid *Baidu) isTimeout(page *rod.Page) bool {
-	_, err := page.Timeout(baid.GetSelectorTimeout()).Search("button.timeout-button")
-	return err == nil
+	has, _, _ := page.Has(sel.Timeout)
+	return has
 }
 
 // Search executes a Baidu web search and returns normalized search results.
@@ -109,7 +119,7 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 		}
 	}
 
-	searchRes, err := page.Timeout(baid.Timeout).Search("div.c-container.new-pmd")
+	searchRes, err := page.Timeout(baid.Timeout).Search(sel.Results)
 	if err != nil {
 		closePage()
 		baid.logger.Error("Cannot parse search results: %s", err)

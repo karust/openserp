@@ -36,6 +36,18 @@ type ImageData struct {
 	} `json:"initialState"`
 }
 
+var sel = struct {
+	Captcha    string
+	NoResults  string
+	Results    string
+	ImageItems string
+}{
+	Captcha:    "div.CheckboxCaptcha",
+	NoResults:  "div.EmptySearchResults",
+	Results:    "li[data-fast], li.serp-item",
+	ImageItems: "div[role='main'] div[data-state]",
+}
+
 // Yandex implements core.SearchEngine for Yandex SERP pages.
 type Yandex struct {
 	core.Browser
@@ -67,14 +79,13 @@ func (yand *Yandex) GetRateLimiter() *rate.Limiter {
 }
 
 func (yand *Yandex) isCaptcha(page *rod.Page) bool {
-	_, err := page.Timeout(yand.GetSelectorTimeout()).Search("form#checkbox-captcha-form")
-	return err == nil
+	has, _, _ := page.Has(sel.Captcha)
+	return has
 }
 
-// Check if nothig is found
 func (yand *Yandex) isNoResults(page *rod.Page) bool {
-	_, err := page.Timeout(yand.GetSelectorTimeout()).Search("div.Correction.SearchCorrection")
-	return err == nil
+	has, _, _ := page.Has(sel.NoResults)
+	return has
 }
 
 func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.SearchResult {
@@ -173,7 +184,7 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 		}
 
 		// Get all search results in page
-		searchRes, err := page.Timeout(yand.Timeout).Search("li.serp-item")
+		searchRes, err := page.Timeout(yand.Timeout).Search(sel.Results)
 		if err != nil {
 			closePage()
 			yand.logger.Error("Cannot parse search results: %s", err)
@@ -263,7 +274,7 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 		//page.WaitLoad()
 		//time.Sleep(time.Duration(time.Second * 2))
 
-		results, err := page.Timeout(yand.Timeout).Search("div[role='main'] div[data-state]")
+		results, err := page.Timeout(yand.Timeout).Search(sel.ImageItems)
 		if err != nil {
 			closePage()
 			yand.logger.Error("Cannot find search results: %s", err)

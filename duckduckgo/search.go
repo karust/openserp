@@ -11,6 +11,22 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// captchaBodyText is matched against the raw page HTML because DDG returns
+// a plain-text 202 rate-limit response rather than a structured captcha page.
+const captchaBodyText = "bots user"
+
+var sel = struct {
+	NoResults string
+	Results   []string
+}{
+	NoResults: "div[class*='no-results']",
+	Results: []string{
+		"article[data-testid='result']",
+		"div.result",
+		"div[data-testid='result']",
+	},
+}
+
 // DuckDuckGo implements core.SearchEngine for DuckDuckGo SERP pages.
 type DuckDuckGo struct {
 	core.Browser
@@ -46,13 +62,12 @@ func (ddg *DuckDuckGo) isCaptcha(page *rod.Page) bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(html, "bots user")
+	return strings.Contains(html, captchaBodyText)
 }
 
-// Check if no results are found
 func (ddg *DuckDuckGo) isNoResults(page *rod.Page) bool {
-	_, err := page.Timeout(ddg.GetSelectorTimeout()).Search("div[class*='no-results']")
-	return err == nil
+	has, _, _ := page.Has(sel.NoResults)
+	return has
 }
 
 func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.SearchResult {

@@ -15,6 +15,18 @@ import (
 	"golang.org/x/time/rate"
 )
 
+var sel = struct {
+	Captcha     string
+	ResultStats string
+	CookieBtn   string
+	Results     string
+}{
+	Captcha:     "div[data-sitekey]",
+	ResultStats: "div#result-stats",
+	CookieBtn:   "div[role='dialog'][aria-modal] button",
+	Results:     "div[data-hveid][data-ved]",
+}
+
 // Google implements core.SearchEngine for Google SERP pages.
 type Google struct {
 	core.Browser
@@ -49,7 +61,7 @@ func (gogl *Google) getTotalResults(page *rod.Page) (int, error) {
 		return 0, core.ErrParser
 	}
 
-	resultsStats, err := page.Timeout(gogl.GetSelectorTimeout()).Search("div#result-stats")
+	resultsStats, err := page.Timeout(gogl.GetSelectorTimeout()).Search(sel.ResultStats)
 	if err != nil {
 		return 0, errors.New("Result stats not found: " + err.Error())
 	}
@@ -112,21 +124,26 @@ func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas, proxyURL string
 }
 
 func (gogl *Google) checkCaptcha(page *rod.Page, queryProxyURL string) bool {
-	captchaDiv, err := page.Timeout(gogl.GetSelectorTimeout()).Search("div[data-sitekey]")
-	if err != nil {
+	has, _, _ := page.Has(sel.Captcha)
+	if !has {
 		return false
 	}
 
-	sitekey, err := captchaDiv.First.Attribute("data-sitekey")
+	captchaDiv, err := page.Element(sel.Captcha)
+	if err != nil {
+		return true
+	}
+
+	sitekey, err := captchaDiv.Attribute("data-sitekey")
 	if err != nil {
 		gogl.logger.Error("Cannot get captcha sitekey: %s", err)
-		return false
+		return true
 	}
 
-	dataS, err := captchaDiv.First.Attribute("data-s")
+	dataS, err := captchaDiv.Attribute("data-s")
 	if err != nil {
 		gogl.logger.Error("Cannot get captcha datas: %s", err)
-		return false
+		return true
 	}
 
 	if gogl.IsSolveCaptcha && gogl.CaptchaSolverEnabled {
@@ -150,7 +167,7 @@ func (gogl *Google) preparePage(page *rod.Page) {
 }
 
 func (gogl *Google) acceptCookies(page *rod.Page) {
-	diaglogBtns, err := page.Timeout(gogl.Timeout / 10).Search("div[role='dialog'][aria-modal] button")
+	diaglogBtns, err := page.Timeout(gogl.Timeout / 10).Search(sel.CookieBtn)
 	if err != nil {
 		gogl.logger.Debug("Cookie consent not found: %s", err)
 		return
@@ -215,7 +232,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 	}
 
 	// Find all results using stable attributes
-	searchRes, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved]")
+	searchRes, err := page.Timeout(gogl.Timeout).Search(sel.Results)
 	if err != nil {
 		gogl.logger.Error("Cannot parse search results: %s", err)
 		return nil, core.ErrParser
