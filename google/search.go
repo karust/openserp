@@ -174,6 +174,7 @@ func (gogl *Google) acceptCookies(page *rod.Page) {
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (gogl *Google) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.WithEngine(core.EnsureContext(ctx), gogl.Name())
+	ctx = core.WithProfileRegion(ctx, query.LangCode)
 	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	scoped := *gogl
 	scoped.logger = gogl.logger.WithRequest(ctx)
@@ -427,6 +428,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (gogl *Google) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
 	ctx = core.WithEngine(core.EnsureContext(ctx), gogl.Name())
+	ctx = core.WithProfileRegion(ctx, query.LangCode)
 	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	scoped := *gogl
 	scoped.logger = gogl.logger.WithRequest(ctx)

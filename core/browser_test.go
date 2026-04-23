@@ -113,15 +113,13 @@ func TestFingerprintDetectors(t *testing.T) {
 	criticalFailures := make([]string, 0)
 
 	for _, detector := range detectors.All() {
-		for _, useStealth := range []bool{false, true} {
-			report := runFingerprintDetector(t, detector, useStealth)
-			key := fmt.Sprintf("%s_%s", detector.Name(), stealthModeLabel(useStealth))
-			reports[key] = report
+		report := runFingerprintDetector(t, detector)
+		key := detector.Name()
+		reports[key] = report
 
-			if len(report.Summary.Critical) > 0 {
-				for _, critical := range report.Summary.Critical {
-					criticalFailures = append(criticalFailures, fmt.Sprintf("%s:%s", key, critical))
-				}
+		if len(report.Summary.Critical) > 0 {
+			for _, critical := range report.Summary.Critical {
+				criticalFailures = append(criticalFailures, fmt.Sprintf("%s:%s", key, critical))
 			}
 		}
 	}
@@ -142,31 +140,28 @@ func TestFingerprintDetectors(t *testing.T) {
 	}
 }
 
-func runFingerprintDetector(t *testing.T, detector fpcheck.Detector, useStealth bool) fpcheck.Report {
+func runFingerprintDetector(t *testing.T, detector fpcheck.Detector) fpcheck.Report {
 	t.Helper()
 
-	label := stealthModeLabel(useStealth)
 	opts := BrowserOpts{
 		IsHeadless: true,
 		IsLeakless: false,
 		Timeout:    20 * time.Second,
-		UseStealth: useStealth,
 	}
 	browser, err := NewBrowser(opts)
 	if err != nil {
-		t.Fatalf("create browser (%s): %v", label, err)
+		t.Fatalf("create browser: %v", err)
 	}
 	defer closeTestBrowser(t, browser)
 
-	report, err := fpcheck.Run(context.Background(), browser, detector, useStealth, botFingerprintArtifactDir)
+	report, err := fpcheck.Run(context.Background(), browser, detector, botFingerprintArtifactDir)
 	if err != nil {
-		t.Fatalf("run detector %s (%s): %v", detector.Name(), label, err)
+		t.Fatalf("run detector %s: %v", detector.Name(), err)
 	}
 
 	t.Logf(
-		"Fingerprint %s (%s): passed=%d failed=%d critical=%d",
+		"Fingerprint %s: passed=%d failed=%d critical=%d",
 		detector.Name(),
-		label,
 		report.Summary.Passed,
 		report.Summary.Failed,
 		len(report.Summary.Critical),
@@ -189,13 +184,6 @@ func writeFingerprintReport(path string, reports map[string]fpcheck.Report) erro
 		return fmt.Errorf("write report file %s: %w", path, err)
 	}
 	return nil
-}
-
-func stealthModeLabel(useStealth bool) string {
-	if useStealth {
-		return fpcheck.ModeStealthOn
-	}
-	return fpcheck.ModeStealthOff
 }
 
 func closeTestBrowser(t *testing.T, browser *Browser) {

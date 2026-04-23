@@ -7,25 +7,26 @@ toolchain go1.24.6
 require (
 	github.com/2captcha/2captcha-go v1.1.10
 	github.com/PuerkitoBio/goquery v1.10.3
+	github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5
 	github.com/corpix/uarand v0.2.0
 	github.com/go-rod/rod v0.116.2
-	github.com/go-rod/stealth v0.4.9
 	github.com/gofiber/fiber/v2 v2.52.9
+	github.com/google/uuid v1.6.0
 	github.com/refraction-networking/utls v1.8.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/pflag v1.0.7
 	github.com/spf13/viper v1.20.1
+	github.com/ysmood/gson v0.7.3
+	golang.org/x/net v0.43.0
 	golang.org/x/time v0.12.0
 )
 
 require (
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
-	github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
@@ -44,10 +45,8 @@ require (
 	github.com/ysmood/fetchup v0.3.0 // indirect
 	github.com/ysmood/goob v0.4.0 // indirect
 	github.com/ysmood/got v0.41.0 // indirect
-	github.com/ysmood/gson v0.7.3 // indirect
 	github.com/ysmood/leakless v0.9.0 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
-	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect

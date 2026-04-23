@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/karust/openserp/core"
+	browserprofile "github.com/karust/openserp/core/browser"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -14,7 +15,7 @@ import (
 )
 
 const (
-	version               = "0.6.5"
+	version               = "0.6.6"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -53,10 +54,10 @@ type ServerConfig struct {
 type AppConfig struct {
 	Timeout        int    `mapstructure:"timeout"`
 	BrowserPath    string `mapstructure:"browser_path"`
+	ProfilesJSON   string `mapstructure:"profiles"`
 	IsBrowserHead  bool   `mapstructure:"head"`
 	IsLeaveHead    bool   `mapstructure:"leave_head"`
 	IsLeakless     bool   `mapstructure:"leakless"`
-	IsStealth      bool   `mapstructure:"stealth"`
 	DebugEndpoints bool   `mapstructure:"debug_endpoints"`
 	LogFormat      string `mapstructure:"log_format"`
 }
@@ -102,6 +103,7 @@ var flagToConfigKey = map[string]string{
 	"timeout":                 "app.timeout",
 	"config":                  "server.config_path",
 	"browser-path":            "app.browser_path",
+	"profiles-json":           "app.profiles",
 	"verbose":                 "server.verbose",
 	"debug":                   "server.debug",
 	"head":                    "app.head",
@@ -110,7 +112,6 @@ var flagToConfigKey = map[string]string{
 	"leave":                   "app.leave_head",
 	"2captcha_key":            "2captcha.apikey",
 	"proxy":                   "proxies.global",
-	"stealth":                 "app.stealth",
 	"debug-endpoints":         "app.debug_endpoints",
 	"insecure":                "server.insecure",
 	"cache_ttl":               "cache.ttl_seconds",
@@ -133,6 +134,9 @@ var RootCmd = &cobra.Command{
 		err := initializeConfig(cmd)
 		if err != nil {
 			return err
+		}
+		if err := browserprofile.LoadProfilesFromJSON(config.App.ProfilesJSON); err != nil {
+			return fmt.Errorf("load app.profiles: %w", err)
 		}
 
 		logFormat, err := core.NormalizeLogFormat(config.App.LogFormat)
@@ -316,10 +320,10 @@ func setConfigDefaults(v *viper.Viper) {
 
 	v.SetDefault("app.timeout", 30)
 	v.SetDefault("app.browser_path", "")
+	v.SetDefault("app.profiles", "")
 	v.SetDefault("app.head", false)
 	v.SetDefault("app.leave_head", false)
 	v.SetDefault("app.leakless", false)
-	v.SetDefault("app.stealth", false)
 	v.SetDefault("app.debug_endpoints", false)
 
 	v.SetDefault("proxies.entries", []interface{}{})
@@ -348,6 +352,7 @@ func init() {
 	RootCmd.PersistentFlags().IntVarP(&config.App.Timeout, "timeout", "t", 30, "Timeout to fail request")
 	RootCmd.PersistentFlags().StringVarP(&config.Server.ConfigPath, "config", "c", "", "Configuration file path")
 	RootCmd.PersistentFlags().StringVarP(&config.App.BrowserPath, "browser-path", "", "", "Custom browser binary path (Chrome/Chromium/Edge/Brave..)")
+	RootCmd.PersistentFlags().StringVar(&config.App.ProfilesJSON, "profiles", "", "Path to browser profile catalog JSON")
 	RootCmd.PersistentFlags().BoolVarP(&config.Server.IsVerbose, "verbose", "v", false, "Use verbose output")
 	RootCmd.PersistentFlags().BoolVarP(&config.Server.IsDebug, "debug", "d", false, "Use debug output. Disable headless browser")
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsBrowserHead, "head", "", false, "Enable browser UI")
@@ -356,7 +361,6 @@ func init() {
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsLeaveHead, "leave", "", false, "Leave browser and tabs opened after search is made")
 	RootCmd.PersistentFlags().StringVarP(&config.Config2Capcha.ApiKey, "2captcha_key", "", "", "2 captcha api key")
 	RootCmd.PersistentFlags().StringVarP(&config.Proxies.Global, "proxy", "x", "", "Force a single proxy for all engines (same as proxies.global)")
-	RootCmd.PersistentFlags().BoolVarP(&config.App.IsStealth, "stealth", "s", false, "Use stealth browser plugin")
 	RootCmd.PersistentFlags().BoolVar(&config.App.DebugEndpoints, "debug-endpoints", false, "Enable debug-only HTTP endpoints")
 	RootCmd.PersistentFlags().BoolVarP(&config.Server.Insecure, "insecure", "k", false, "Allow insecure TLS connections")
 	RootCmd.PersistentFlags().IntVar(&config.Cache.TTLSeconds, "cache_ttl", 300, "Cache TTL in seconds (0 to disable)")

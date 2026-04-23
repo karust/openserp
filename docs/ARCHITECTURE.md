@@ -186,14 +186,14 @@ Defaults below are the shipped defaults in `config.yaml` (if present). If the co
 
 ### `app`
 
-| Key                | Default | Description                   |
-| ------------------ | ------- | ----------------------------- |
-| `app.timeout`      | `15`    | Request timeout in seconds    |
-| `app.browser_path` | `""`    | Custom browser binary path    |
-| `app.head`         | `false` | Headful browser UI            |
-| `app.leakless`     | `false` | Force browser process cleanup |
-| `app.leave_head`   | `false` | Keep browser tabs open        |
-| `app.stealth`      | `false` | Enable stealth plugin         |
+| Key                | Default | Description                    |
+| ------------------ | ------- | ------------------------------ |
+| `app.timeout`      | `15`    | Request timeout in seconds     |
+| `app.browser_path` | `""`    | Custom browser binary path     |
+| `app.profiles`     | `""`    | Override browser profiles JSON |
+| `app.head`         | `false` | Headful browser UI             |
+| `app.leakless`     | `false` | Force browser process cleanup  |
+| `app.leave_head`   | `false` | Keep browser tabs open         |
 
 ### `proxies`
 

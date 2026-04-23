@@ -2,21 +2,23 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/devices"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
-	"github.com/go-rod/stealth"
+	browserprofile "github.com/karust/openserp/core/browser"
 	"github.com/sirupsen/logrus"
+	"github.com/ysmood/gson"
 )
 
 // BrowserOpts configures Chromium launch and navigation behavior.
@@ -45,8 +47,6 @@ type BrowserOpts struct {
 	ProxyURL string
 	// Insecure allows invalid TLS certificates for browser requests.
 	Insecure bool
-	// UseStealth enables go-rod stealth page creation.
-	UseStealth bool
 	// UserAgent optionally overrides browser-reported user agent during emulation.
 	UserAgent string
 }
@@ -71,15 +71,18 @@ type Browser struct {
 }
 
 type browserConnection struct {
-	mu              sync.Mutex
-	browser         *rod.Browser
-	cachedUserAgent string
+	mu           sync.Mutex
+	browser      *rod.Browser
+	laneProfiles map[string]browserprofile.Profile
 }
 
 // NewBrowser launches a new Chromium process via Rod launcher and returns a
 // Browser wrapper configured with proxy and captcha solver settings.
 func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	opts.Check()
+	if strings.TrimSpace(opts.UserAgent) != "" {
+		logrus.Warn("custom user_agent override can reduce profile coherence; use only for diagnostics")
+	}
 	logrus.WithField("browser_options", fmt.Sprintf("%+v", opts)).Debug("Browser options")
 
 	path, err := resolveBrowserBinaryPath(opts.BrowserPath, launcher.LookPath)
@@ -87,9 +90,20 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 		return nil, err
 	}
 
-	// Create launcher
-	l := launcher.New().Leakless(opts.IsLeakless).Headless(opts.IsHeadless).Set("disable-blink-features", "AutomationControlled").
-		Delete("enable-automation")
+	// Create launcher.
+	// headless=new uses the full Chrome renderer; legacy --headless disables the
+	// GPU process entirely, making WebGL context creation fail even with SwiftShader.
+	// use-angle=swiftshader-webgl (Chrome ≥112) enables a software WebGL renderer.
+	l := launcher.New().Leakless(opts.IsLeakless).
+		Set("disable-blink-features", "AutomationControlled").
+		Delete("enable-automation").
+		Set("use-angle", "swiftshader-webgl").
+		Set("ignore-gpu-blocklist")
+	if opts.IsHeadless {
+		l = l.HeadlessNew(true)
+	} else {
+		l = l.Headless(false)
+	}
 	if path != "" {
 		logrus.WithField("browser_path", path).Debug("Using browser binary")
 		l = l.Bin(path)
@@ -204,35 +218,26 @@ func (b *Browser) newRodBrowser() *rod.Browser {
 	return browser
 }
 
-func (b *Browser) connectBrowser() (*rod.Browser, string, error) {
+func (b *Browser) connectBrowser() (*rod.Browser, error) {
 	browser := b.newRodBrowser()
 	if err := browser.Connect(); err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	// Keep cert handling on the persistent browser session.
 	// Proxy runtime can surface MITM certs, and insecure mode is explicit opt-in.
 	if b.ProxyURL != "" || b.Insecure {
 		if err := browser.IgnoreCertErrors(true); err != nil {
-			return nil, "", err
+			return nil, err
 		}
 	}
 
-	version, err := browser.Version()
-	if err != nil {
-		return nil, "", fmt.Errorf("read browser version: %w", err)
-	}
-	ua := strings.ReplaceAll(version.UserAgent, "HeadlessChrome/", "Chrome/")
-	if overrideUA := strings.TrimSpace(b.UserAgent); overrideUA != "" {
-		ua = overrideUA
-	}
-
-	return browser, ua, nil
+	return browser, nil
 }
 
-func (b *Browser) ensureConnectedBrowser(ctx context.Context, forceReconnect bool) (*rod.Browser, string, error) {
+func (b *Browser) ensureConnectedBrowser(ctx context.Context, forceReconnect bool) (*rod.Browser, error) {
 	if b == nil || b.browserAddr == "" {
-		return nil, "", fmt.Errorf("browser is not initialized")
+		return nil, fmt.Errorf("browser is not initialized")
 	}
 
 	state := b.connectionState()
@@ -240,26 +245,24 @@ func (b *Browser) ensureConnectedBrowser(ctx context.Context, forceReconnect boo
 	defer state.mu.Unlock()
 
 	if state.browser == nil || forceReconnect {
-		connected, ua, err := b.connectBrowser()
+		connected, err := b.connectBrowser()
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 		state.browser = connected
-		state.cachedUserAgent = ua
-		return state.browser, ua, nil
+		return state.browser, nil
 	}
 
 	if _, err := state.browser.Version(); err != nil {
 		WithRequest(ctx).WithError(err).Debug("Browser ping failed, reconnecting")
-		connected, ua, reconnectErr := b.connectBrowser()
+		connected, reconnectErr := b.connectBrowser()
 		if reconnectErr != nil {
-			return nil, "", reconnectErr
+			return nil, reconnectErr
 		}
 		state.browser = connected
-		state.cachedUserAgent = ua
 	}
 
-	return state.browser, state.cachedUserAgent, nil
+	return state.browser, nil
 }
 
 func createIsolatedPage(browser *rod.Browser) (*rod.Page, proto.BrowserBrowserContextID, error) {
@@ -329,7 +332,294 @@ func (b *Browser) startProxyAuthHandler(ctx context.Context, browser *rod.Browse
 	return cancel, nil
 }
 
-// Navigate connects to Chromium, creates a page, applies stealth/emulation and
+var chromeVersionPattern = regexp.MustCompile(`(?:HeadlessChrome|Chrome)/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)`)
+
+func (b *Browser) laneProfile(ctx context.Context, browser *rod.Browser) (browserprofile.Profile, string) {
+	engine := engineFromContext(ctx)
+	region := profileRegionFromContext(ctx)
+	if region == "" {
+		region = strings.TrimSpace(b.LanguageCode)
+	}
+	laneKey := browserprofile.LaneKey(engine, region)
+
+	state := b.connectionState()
+	state.mu.Lock()
+	if state.laneProfiles == nil {
+		state.laneProfiles = make(map[string]browserprofile.Profile)
+	}
+	if profile, ok := state.laneProfiles[laneKey]; ok {
+		state.mu.Unlock()
+		return profile, laneKey
+	}
+	state.mu.Unlock()
+
+	// Resolve profile outside the lock: SelectProfile reads from a separate
+	// RWMutex-guarded catalog, and applyRuntimeBrowserVersion makes a CDP
+	// round-trip (browser.Version). Holding state.mu over network I/O would
+	// serialize all concurrent Navigate calls.
+	profile := browserprofile.SelectProfile(engine, region)
+	profile = applyRuntimeBrowserVersion(profile, browser)
+	if overrideUA := strings.TrimSpace(b.UserAgent); overrideUA != "" {
+		profile.UserAgent = overrideUA
+	}
+
+	state.mu.Lock()
+	if state.laneProfiles == nil {
+		state.laneProfiles = make(map[string]browserprofile.Profile)
+	}
+	if _, exists := state.laneProfiles[laneKey]; !exists {
+		state.laneProfiles[laneKey] = profile
+	} else {
+		profile = state.laneProfiles[laneKey]
+	}
+	state.mu.Unlock()
+
+	return profile, laneKey
+}
+
+func applyRuntimeBrowserVersion(profile browserprofile.Profile, browser *rod.Browser) browserprofile.Profile {
+	fullVersion := ""
+	if browser != nil {
+		version, err := browser.Version()
+		if err == nil && version != nil {
+			fullVersion = extractChromeVersion(version.UserAgent)
+			if fullVersion == "" {
+				fullVersion = extractChromeVersion(version.Product)
+			}
+		}
+	}
+	if fullVersion == "" {
+		fullVersion = extractChromeVersion(profile.UserAgent)
+	}
+	if fullVersion == "" {
+		return profile
+	}
+
+	major := chromeMajorVersion(fullVersion)
+	if major == "" {
+		return profile
+	}
+
+	profile.UserAgent = replaceChromeUserAgentVersion(profile.UserAgent, major+".0.0.0")
+	profile.UACHBrands = patchBrandVersions(profile.UACHBrands, major, false)
+	profile.UACHFullVerList = patchBrandVersions(profile.UACHFullVerList, fullVersion, true)
+	return profile
+}
+
+func extractChromeVersion(value string) string {
+	matches := chromeVersionPattern.FindStringSubmatch(strings.TrimSpace(value))
+	if len(matches) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(matches[1])
+}
+
+func chromeMajorVersion(fullVersion string) string {
+	fullVersion = strings.TrimSpace(fullVersion)
+	if fullVersion == "" {
+		return ""
+	}
+	parts := strings.Split(fullVersion, ".")
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(parts[0])
+}
+
+func replaceChromeUserAgentVersion(userAgent string, replacement string) string {
+	replacement = strings.TrimSpace(replacement)
+	if replacement == "" {
+		return strings.ReplaceAll(strings.TrimSpace(userAgent), "HeadlessChrome/", "Chrome/")
+	}
+	normalized := strings.ReplaceAll(strings.TrimSpace(userAgent), "HeadlessChrome/", "Chrome/")
+	return chromeVersionPattern.ReplaceAllString(normalized, "Chrome/"+replacement)
+}
+
+func patchBrandVersions(values []browserprofile.BrandVersion, version string, patchNotABrand bool) []browserprofile.BrandVersion {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return values
+	}
+
+	out := make([]browserprofile.BrandVersion, 0, len(values))
+	for _, value := range values {
+		item := value
+		brandLower := strings.ToLower(strings.TrimSpace(item.Brand))
+		if brandLower == "chromium" || brandLower == "google chrome" {
+			item.Version = version
+		} else if patchNotABrand && strings.Contains(brandLower, "not_a brand") && strings.Count(version, ".") == 3 {
+			item.Version = "24.0.0.0"
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func navigatorPlatformForProfile(profile browserprofile.Profile) string {
+	switch strings.ToLower(strings.TrimSpace(profile.Platform)) {
+	case "windows":
+		return "Win32"
+	case "macos":
+		return "MacIntel"
+	case "linux":
+		return "Linux x86_64"
+	default:
+		return strings.TrimSpace(profile.Platform)
+	}
+}
+
+func applyProfile(page *rod.Page, profile browserprofile.Profile) error {
+	if page == nil {
+		return fmt.Errorf("page is nil")
+	}
+
+	navigatorLangs := profileNavigatorLanguages(profile)
+	acceptLanguage := strings.TrimSpace(profile.AcceptLanguage)
+	if acceptLanguage == "" {
+		acceptLanguage = navigatorLangs[0]
+	}
+	locale := strings.TrimSpace(profile.Locale)
+	if locale == "" {
+		locale = navigatorLangs[0]
+	}
+
+	width := profile.Viewport.Width
+	height := profile.Viewport.Height
+	if width <= 0 {
+		width = 1920
+	}
+	if height <= 0 {
+		height = 1080
+	}
+
+	metadata := &proto.EmulationUserAgentMetadata{
+		Brands:          toProtoBrandVersions(profile.UACHBrands),
+		FullVersionList: toProtoBrandVersions(profile.UACHFullVerList),
+		Platform:        strings.TrimSpace(profile.Platform),
+		PlatformVersion: strings.TrimSpace(profile.PlatformVersion),
+		Architecture:    strings.TrimSpace(profile.Architecture),
+		Bitness:         strings.TrimSpace(profile.Bitness),
+		Mobile:          profile.Mobile,
+	}
+
+	if err := (proto.NetworkSetUserAgentOverride{
+		UserAgent:         strings.TrimSpace(profile.UserAgent),
+		AcceptLanguage:    acceptLanguage,
+		Platform:          navigatorPlatformForProfile(profile),
+		UserAgentMetadata: metadata,
+	}).Call(page); err != nil {
+		return fmt.Errorf("set user agent override failed: %w", err)
+	}
+
+	if err := (proto.EmulationSetLocaleOverride{
+		Locale: locale,
+	}).Call(page); err != nil {
+		return fmt.Errorf("set locale override failed: %w", err)
+	}
+
+	if err := (proto.EmulationSetTimezoneOverride{
+		TimezoneID: strings.TrimSpace(profile.Timezone),
+	}).Call(page); err != nil {
+		return fmt.Errorf("set timezone override failed: %w", err)
+	}
+
+	if err := (proto.EmulationSetDeviceMetricsOverride{
+		Width:             width,
+		Height:            height,
+		DeviceScaleFactor: 1,
+		Mobile:            profile.Mobile,
+		ScreenWidth:       &width,
+		ScreenHeight:      &height,
+	}).Call(page); err != nil {
+		return fmt.Errorf("set device metrics failed: %w", err)
+	}
+
+	if err := (proto.NetworkSetExtraHTTPHeaders{
+		Headers: proto.NetworkHeaders{
+			"Accept-Language": gson.New(acceptLanguage),
+		},
+	}).Call(page); err != nil {
+		return fmt.Errorf("set extra headers failed: %w", err)
+	}
+
+	if err := evalPatchScript(page, navigatorLangs, width, height); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func profileNavigatorLanguages(profile browserprofile.Profile) []string {
+	langs := make([]string, 0, len(profile.NavigatorLangs))
+	for _, language := range profile.NavigatorLangs {
+		trimmed := strings.TrimSpace(language)
+		if trimmed == "" {
+			continue
+		}
+		langs = append(langs, trimmed)
+	}
+	if len(langs) > 0 {
+		return langs
+	}
+
+	acceptLanguage := strings.TrimSpace(profile.AcceptLanguage)
+	if acceptLanguage != "" {
+		parts := strings.Split(acceptLanguage, ",")
+		langs = make([]string, 0, len(parts))
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if idx := strings.Index(part, ";"); idx >= 0 {
+				part = strings.TrimSpace(part[:idx])
+			}
+			if part != "" {
+				langs = append(langs, part)
+			}
+		}
+		if len(langs) > 0 {
+			return langs
+		}
+	}
+
+	if locale := strings.TrimSpace(profile.Locale); locale != "" {
+		return []string{locale}
+	}
+	return []string{"en-US"}
+}
+
+func toProtoBrandVersions(values []browserprofile.BrandVersion) []*proto.EmulationUserAgentBrandVersion {
+	out := make([]*proto.EmulationUserAgentBrandVersion, 0, len(values))
+	for _, value := range values {
+		brand := strings.TrimSpace(value.Brand)
+		version := strings.TrimSpace(value.Version)
+		if brand == "" || version == "" {
+			continue
+		}
+		out = append(out, &proto.EmulationUserAgentBrandVersion{
+			Brand:   brand,
+			Version: version,
+		})
+	}
+	return out
+}
+
+func evalPatchScript(page *rod.Page, langs []string, width, height int) error {
+	langsJSON, err := json.Marshal(langs)
+	if err != nil {
+		return fmt.Errorf("marshal navigator languages: %w", err)
+	}
+	args := fmt.Sprintf("const __langs = %s;\nconst __w = %d;\nconst __h = %d;\n",
+		string(langsJSON), width, height)
+	_, err = page.EvalOnNewDocument(args + string(browserprofile.PatchJS))
+	if err != nil {
+		return fmt.Errorf("eval patch script: %w", err)
+	}
+	return nil
+}
+
+// Navigate connects to Chromium, creates a page, applies a coherent profile and
 // proxy auth, then navigates to URL. It returns an initialized page ready for
 // selector queries, or an error when browser setup/navigation fails.
 func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
@@ -340,7 +630,7 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 
 	WithRequest(ctx).WithField("url", URL).Debug("Navigate")
 
-	browser, ua, err := b.ensureConnectedBrowser(ctx, false)
+	browser, err := b.ensureConnectedBrowser(ctx, false)
 	if err != nil {
 		return nil, fmt.Errorf("browser connect failed: %w", err)
 	}
@@ -348,7 +638,7 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	page, browserContextID, err := createIsolatedPage(browser)
 	if err != nil {
 		// Single-shot reconnect for stale websocket sessions.
-		browser, ua, err = b.ensureConnectedBrowser(ctx, true)
+		browser, err = b.ensureConnectedBrowser(ctx, true)
 		if err != nil {
 			return nil, fmt.Errorf("create isolated page failed, reconnect also failed: %w", err)
 		}
@@ -379,33 +669,10 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 		defer cancelProxyAuth()
 	}
 
-	if b.UseStealth {
-		if _, err := page.EvalOnNewDocument(stealth.JS); err != nil {
-			closeOnErr()
-			return nil, fmt.Errorf("create stealth page failed: %w", err)
-		}
-	}
-
-	if err := page.Emulate(devices.Device{
-		AcceptLanguage: b.LanguageCode,
-		UserAgent:      ua,
-	}); err != nil {
+	profile, laneKey := b.laneProfile(ctx, browser)
+	if err := applyProfile(page, profile); err != nil {
 		closeOnErr()
-		return nil, fmt.Errorf("emulate page failed: %w", err)
-	}
-
-	if !b.UseStealth {
-		if err := (proto.EmulationSetDeviceMetricsOverride{
-			Width:             1920,
-			Height:            1080,
-			DeviceScaleFactor: 1,
-			Mobile:            false,
-			ScreenWidth:       &[]int{1920}[0],
-			ScreenHeight:      &[]int{1080}[0],
-		}).Call(page); err != nil {
-			closeOnErr()
-			return nil, fmt.Errorf("set device metrics failed: %w", err)
-		}
+		return nil, fmt.Errorf("apply profile %s (%s) failed: %w", profile.ID, laneKey, err)
 	}
 
 	page = page.Context(ctx)
@@ -464,6 +731,7 @@ func (b *Browser) Close() error {
 	}
 
 	state.browser = nil
+	state.laneProfiles = nil
 	if err := browser.Close(); err != nil && !isBrowserClosedError(err) {
 		return err
 	}

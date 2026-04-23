@@ -117,7 +117,6 @@ func searchBrowser(engineType string, query core.Query, browserProxyURL string, 
 		BrowserPath:          config.App.BrowserPath,
 		ProxyURL:             browserProxyURL,
 		Insecure:             config.Server.Insecure,
-		UseStealth:           config.App.IsStealth,
 	}
 
 	if config.Server.IsDebug {

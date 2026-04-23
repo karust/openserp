@@ -1,0 +1,243 @@
+{
+  "profiles": [
+    {
+      "id": "chrome-win-us",
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {
+          "brand": "Not_A Brand",
+          "version": "24"
+        },
+        {
+          "brand": "Chromium",
+          "version": "136"
+        },
+        {
+          "brand": "Google Chrome",
+          "version": "136"
+        }
+      ],
+      "uach_full_version_list": [
+        {
+          "brand": "Not_A Brand",
+          "version": "24.0.0.0"
+        },
+        {
+          "brand": "Chromium",
+          "version": "136.0.0.0"
+        },
+        {
+          "brand": "Google Chrome",
+          "version": "136.0.0.0"
+        }
+      ],
+      "platform": "Windows",
+      "platform_version": "15.0.0",
+      "architecture": "x86",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "en-US,en;q=0.9",
+      "navigator_langs": [
+        "en-US"
+      ],
+      "locale": "en-US",
+      "timezone": "America/New_York",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "id": "chrome-win-ru",
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {
+          "brand": "Not_A Brand",
+          "version": "24"
+        },
+        {
+          "brand": "Chromium",
+          "version": "136"
+        },
+        {
+          "brand": "Google Chrome",
+          "version": "136"
+        }
+      ],
+      "uach_full_version_list": [
+        {
+          "brand": "Not_A Brand",
+          "version": "24.0.0.0"
+        },
+        {
+          "brand": "Chromium",
+          "version": "136.0.0.0"
+        },
+        {
+          "brand": "Google Chrome",
+          "version": "136.0.0.0"
+        }
+      ],
+      "platform": "Windows",
+      "platform_version": "15.0.0",
+      "architecture": "x86",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+      "navigator_langs": [
+        "ru-RU"
+      ],
+      "locale": "ru-RU",
+      "timezone": "Europe/Moscow",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "id": "chrome-macos-us",
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {
+          "brand": "Not_A Brand",
+          "version": "24"
+        },
+        {
+          "brand": "Chromium",
+          "version": "136"
+        },
+        {
+          "brand": "Google Chrome",
+          "version": "136"
+        }
+      ],
+      "uach_full_version_list": [
+        {
+          "brand": "Not_A Brand",
+          "version": "24.0.0.0"
+        },
+        {
+          "brand": "Chromium",
+          "version": "136.0.0.0"
+        },
+        {
+          "brand": "Google Chrome",
+          "version": "136.0.0.0"
+        }
+      ],
+      "platform": "macOS",
+      "platform_version": "14.0.0",
+      "architecture": "x86",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "en-US,en;q=0.9",
+      "navigator_langs": [
+        "en-US"
+      ],
+      "locale": "en-US",
+      "timezone": "America/Los_Angeles",
+      "viewport": {
+        "width": 1680,
+        "height": 1050
+      }
+    },
+    {
+      "id": "chrome-linux-us",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {
+          "brand": "Not_A Brand",
+          "version": "24"
+        },
+        {
+          "brand": "Chromium",
+          "version": "136"
+        },
+        {
+          "brand": "Google Chrome",
+          "version": "136"
+        }
+      ],
+      "uach_full_version_list": [
+        {
+          "brand": "Not_A Brand",
+          "version": "24.0.0.0"
+        },
+        {
+          "brand": "Chromium",
+          "version": "136.0.0.0"
+        },
+        {
+          "brand": "Google Chrome",
+          "version": "136.0.0.0"
+        }
+      ],
+      "platform": "Linux",
+      "platform_version": "6.0.0",
+      "architecture": "x86",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "en-US,en;q=0.9",
+      "navigator_langs": [
+        "en-US"
+      ],
+      "locale": "en-US",
+      "timezone": "America/New_York",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "id": "chrome-linux-ru",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {
+          "brand": "Not_A Brand",
+          "version": "24"
+        },
+        {
+          "brand": "Chromium",
+          "version": "136"
+        },
+        {
+          "brand": "Google Chrome",
+          "version": "136"
+        }
+      ],
+      "uach_full_version_list": [
+        {
+          "brand": "Not_A Brand",
+          "version": "24.0.0.0"
+        },
+        {
+          "brand": "Chromium",
+          "version": "136.0.0.0"
+        },
+        {
+          "brand": "Google Chrome",
+          "version": "136.0.0.0"
+        }
+      ],
+      "platform": "Linux",
+      "platform_version": "6.0.0",
+      "architecture": "x86",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+      "navigator_langs": [
+        "ru-RU"
+      ],
+      "locale": "ru-RU",
+      "timezone": "Europe/Moscow",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      }
+    }
+  ],
+  "lane_profile_ids": {},
+  "default_region_by_engine": {
+    "yandex": "ru"
+  }
+}

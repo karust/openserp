@@ -98,6 +98,7 @@ func (bing *Bing) acceptCookies(ctx context.Context, page *rod.Page) error {
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.WithEngine(core.EnsureContext(ctx), bing.Name())
+	ctx = core.WithProfileRegion(ctx, query.LangCode)
 	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	scoped := *bing
 	scoped.logger = bing.logger.WithRequest(ctx)
@@ -274,6 +275,7 @@ type BingImageData struct {
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
 	ctx = core.WithEngine(core.EnsureContext(ctx), bing.Name())
+	ctx = core.WithProfileRegion(ctx, query.LangCode)
 	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	scoped := *bing
 	scoped.logger = bing.logger.WithRequest(ctx)

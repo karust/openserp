@@ -25,7 +25,6 @@ type Summary struct {
 type Report struct {
 	DetectorName  string               `json:"detector_name"`
 	URL           string               `json:"url"`
-	UseStealth    bool                 `json:"use_stealth"`
 	CapturedAtUTC string               `json:"captured_at_utc"`
 	Screenshot    string               `json:"screenshot_path"`
 	Detections    map[string]Detection `json:"detections"`

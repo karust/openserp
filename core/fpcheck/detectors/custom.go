@@ -36,7 +36,7 @@ func (c Custom) URL() string {
 
 func (c Custom) Extract(ctx context.Context, page *rod.Page) (map[string]fpcheck.Detection, string, error) {
 	err := waitFor(ctx, 15*time.Second, 200*time.Millisecond, func() (bool, error) {
-		hasBody, _, err := page.Has("body")
+		hasBody, _, err := page.Has("pre")
 		if err != nil {
 			return false, err
 		}

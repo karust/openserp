@@ -13,23 +13,16 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 )
 
-const (
-	ModeStealthOn  = "stealth-on"
-	ModeStealthOff = "stealth-off"
-)
-
 // RunOptions controls detector run behavior.
 type RunOptions struct {
-	UseStealth      bool
 	ArtifactDir     string
 	WaitBeforeClose time.Duration
 }
 
 // Run navigates the given browser to detector URL, extracts verdicts,
 // captures a screenshot artifact, and returns a normalized report.
-func Run(ctx context.Context, browser BrowserNavigator, detector Detector, useStealth bool, artifactDir string) (Report, error) {
+func Run(ctx context.Context, browser BrowserNavigator, detector Detector, artifactDir string) (Report, error) {
 	return RunWithOptions(ctx, browser, detector, RunOptions{
-		UseStealth:  useStealth,
 		ArtifactDir: artifactDir,
 	})
 }
@@ -41,7 +34,6 @@ func RunWithOptions(ctx context.Context, browser BrowserNavigator, detector Dete
 	report := Report{
 		DetectorName: detector.Name(),
 		URL:          detector.URL(),
-		UseStealth:   options.UseStealth,
 		Detections:   map[string]Detection{},
 	}
 
@@ -50,7 +42,7 @@ func RunWithOptions(ctx context.Context, browser BrowserNavigator, detector Dete
 		artifactDir = "testdata"
 	}
 
-	screenshotPath := filepath.Join(artifactDir, fmt.Sprintf("fpcheck_%s_%s.png", sanitizeFilePart(detector.Name()), modeLabel(options.UseStealth)))
+	screenshotPath := filepath.Join(artifactDir, fmt.Sprintf("fpcheck_%s.png", sanitizeFilePart(detector.Name())))
 	report.Screenshot = filepath.ToSlash(screenshotPath)
 
 	page, err := browser.Navigate(ctx, detector.URL())
@@ -150,13 +142,6 @@ func closePageWithTimeout(ctx context.Context, page *rod.Page, timeout time.Dura
 	if info != nil && info.BrowserContextID != "" {
 		_ = (proto.TargetDisposeBrowserContext{BrowserContextID: info.BrowserContextID}).Call(page.Browser().Context(closeCtx))
 	}
-}
-
-func modeLabel(useStealth bool) string {
-	if useStealth {
-		return ModeStealthOn
-	}
-	return ModeStealthOff
 }
 
 func sanitizeFilePart(value string) string {

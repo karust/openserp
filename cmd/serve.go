@@ -132,7 +132,6 @@ func buildFingerprintBrowserOptions() core.BrowserOpts {
 		Timeout:     time.Second * time.Duration(config.App.Timeout),
 		BrowserPath: config.App.BrowserPath,
 		Insecure:    config.Server.Insecure,
-		UseStealth:  config.App.IsStealth,
 	}
 	if config.Server.IsDebug {
 		opts.IsHeadless = false

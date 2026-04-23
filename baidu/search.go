@@ -74,6 +74,7 @@ func (baid *Baidu) isTimeout(page *rod.Page) bool {
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.WithEngine(core.EnsureContext(ctx), baid.Name())
+	ctx = core.WithProfileRegion(ctx, query.LangCode)
 	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	scoped := *baid
 	scoped.logger = baid.logger.WithRequest(ctx)
@@ -177,6 +178,7 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
 	ctx = core.WithEngine(core.EnsureContext(ctx), baid.Name())
+	ctx = core.WithProfileRegion(ctx, query.LangCode)
 	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	scoped := *baid
 	scoped.logger = baid.logger.WithRequest(ctx)

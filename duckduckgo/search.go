@@ -175,6 +175,7 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.WithEngine(core.EnsureContext(ctx), ddg.Name())
+	ctx = core.WithProfileRegion(ctx, query.LangCode)
 	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	scoped := *ddg
 	scoped.logger = ddg.logger.WithRequest(ctx)
@@ -298,6 +299,7 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
 	ctx = core.WithEngine(core.EnsureContext(ctx), ddg.Name())
+	ctx = core.WithProfileRegion(ctx, query.LangCode)
 	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	scoped := *ddg
 	scoped.logger = ddg.logger.WithRequest(ctx)

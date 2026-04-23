@@ -88,6 +88,13 @@ func classifyStatus(status string) bool {
 		return false
 	}
 
+	if strings.Contains(value, "🔴") {
+		return true
+	}
+	if strings.Contains(value, "🟢") || strings.Contains(value, "⚪") {
+		return false
+	}
+
 	notDetected := []string{"not detected", "not found", "clean", "clear", "pass", "passed", "ok", "safe", "green", "false", "no"}
 	for _, marker := range notDetected {
 		if strings.Contains(value, marker) {

@@ -128,6 +128,7 @@ func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.Searc
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.WithEngine(core.EnsureContext(ctx), yand.Name())
+	ctx = core.WithProfileRegion(ctx, query.LangCode)
 	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	scoped := *yand
 	scoped.logger = yand.logger.WithRequest(ctx)
@@ -227,6 +228,7 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
 	ctx = core.WithEngine(core.EnsureContext(ctx), yand.Name())
+	ctx = core.WithProfileRegion(ctx, query.LangCode)
 	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	scoped := *yand
 	scoped.logger = yand.logger.WithRequest(ctx)

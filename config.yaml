@@ -11,10 +11,10 @@ app:
   log_format: "text"
   timeout: 15 # Browser/search timeout in seconds
   browser_path: "" # Custom browser binary path (chrome/chromium/edge..)
+  profiles: "" # Optional JSON file path overriding built-in browser profiles
   head: false # Show browser UI (headful mode)
   leakless: false # Force browser process cleanup after request
   leave_head: false # Keep tabs open after request for debugging
-  stealth: false # Enable stealth browser plugin
 
 proxies:
   # Force a single proxy for all engines.

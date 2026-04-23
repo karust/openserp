@@ -428,7 +428,6 @@ func (s *Server) handleFingerprintCheck(c *fiber.Ctx) error {
 	reports := make([]fpcheck.Report, 0, len(req.detectors))
 	for idx, detector := range req.detectors {
 		runOpts := fpcheck.RunOptions{
-			UseStealth:  req.browserOpts.UseStealth,
 			ArtifactDir: artifactDir,
 		}
 		if req.waitMs > 0 && idx == len(req.detectors)-1 {
@@ -466,11 +465,6 @@ func (s *Server) parseFingerprintCheckRequest(c *fiber.Ctx) (fingerprintCheckReq
 		return fingerprintCheckRequest{}, fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
-	useStealth, err := parseOptionalBoolQuery(c.Query("stealth", ""), s.opts.FingerprintBrowserOpts.UseStealth)
-	if err != nil {
-		return fingerprintCheckRequest{}, fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("invalid stealth query value: %v", err))
-	}
-
 	headless, err := parseOptionalBoolQuery(c.Query("headless", ""), true)
 	if err != nil {
 		return fingerprintCheckRequest{}, fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("invalid headless query value: %v", err))
@@ -491,7 +485,6 @@ func (s *Server) parseFingerprintCheckRequest(c *fiber.Ctx) (fingerprintCheckReq
 
 	browserOpts := s.opts.FingerprintBrowserOpts
 	browserOpts.IsHeadless = headless
-	browserOpts.UseStealth = useStealth
 	browserOpts.Timeout = time.Duration(timeoutMs) * time.Millisecond
 	browserOpts.LeavePageOpen = false
 	browserOpts.UserAgent = strings.TrimSpace(c.Query("user_agent", browserOpts.UserAgent))
