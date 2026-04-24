@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/sirupsen/logrus"
 )
@@ -214,92 +213,79 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 }
 
 // SearchAllParallel applies retry/circuit protections per engine for mega search.
-func (rs *ResilientSearcher) SearchAllParallel(ctx context.Context, q Query, engines []SearchEngine) []MegaSearchResult {
-	ctx = EnsureContext(ctx)
-
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var allResults []MegaSearchResult
-
-	for _, engine := range engines {
-		if ctx.Err() != nil {
-			break
-		}
-		if !engine.IsInitialized() {
-			continue
-		}
-		engineCtx := WithEngine(ctx, engine.Name())
-		if !rs.cbManager.Get(engine.Name()).AllowRequest(engineCtx) {
-			WithRequest(engineCtx).Debug("Skipping engine in megasearch: circuit open")
-			continue
-		}
-
-		wg.Add(1)
-		go func(eng SearchEngine) {
-			defer wg.Done()
-
-			results, _, err := rs.searchWithProtection(ctx, eng, q, false)
-			if err != nil {
-				return
-			}
-
-			mu.Lock()
-			for _, r := range results {
-				allResults = append(allResults, MegaSearchResult{
-					SearchResult: r,
-					Engine:       eng.Name(),
-				})
-			}
-			mu.Unlock()
-		}(engine)
-	}
-
-	wg.Wait()
-	return allResults
+// Returns results, list of engines that responded, and list of engines that failed.
+func (rs *ResilientSearcher) SearchAllParallel(ctx context.Context, q Query, engines []SearchEngine) ([]MegaSearchResult, []string, []string) {
+	return rs.runParallel(ctx, q, engines, false)
 }
 
-func (rs *ResilientSearcher) SearchAllImageParallel(ctx context.Context, q Query, engines []SearchEngine) []MegaSearchResult {
+func (rs *ResilientSearcher) SearchAllImageParallel(ctx context.Context, q Query, engines []SearchEngine) ([]MegaSearchResult, []string, []string) {
+	return rs.runParallel(ctx, q, engines, true)
+}
+
+func (rs *ResilientSearcher) runParallel(ctx context.Context, q Query, engines []SearchEngine, isImage bool) ([]MegaSearchResult, []string, []string) {
 	ctx = EnsureContext(ctx)
 
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var allResults []MegaSearchResult
+	type engineResult struct {
+		name    string
+		results []MegaSearchResult
+		err     error
+	}
+
+	resultCh := make(chan engineResult, len(engines))
+	started := 0
 
 	for _, engine := range engines {
 		if ctx.Err() != nil {
 			break
 		}
 		if !engine.IsInitialized() {
+			resultCh <- engineResult{name: engine.Name(), err: fmt.Errorf("not initialized")}
+			started++
 			continue
 		}
 		engineCtx := WithEngine(ctx, engine.Name())
 		if !rs.cbManager.Get(engine.Name()).AllowRequest(engineCtx) {
-			WithRequest(engineCtx).Debug("Skipping engine in megaimage: circuit open")
+			WithRequest(engineCtx).Debug("Skipping engine in mega search: circuit open")
+			resultCh <- engineResult{name: engine.Name(), err: ErrCircuitOpen}
+			started++
 			continue
 		}
 
-		wg.Add(1)
+		started++
 		go func(eng SearchEngine) {
-			defer wg.Done()
-
-			results, _, err := rs.searchWithProtection(ctx, eng, q, true)
+			results, _, err := rs.searchWithProtection(ctx, eng, q, isImage)
 			if err != nil {
+				resultCh <- engineResult{name: eng.Name(), err: err}
 				return
 			}
-
-			mu.Lock()
-			for _, r := range results {
-				allResults = append(allResults, MegaSearchResult{
-					SearchResult: r,
-					Engine:       eng.Name(),
-				})
+			mega := make([]MegaSearchResult, len(results))
+			for i, r := range results {
+				mega[i] = MegaSearchResult{SearchResult: r, Engine: eng.Name()}
 			}
-			mu.Unlock()
+			resultCh <- engineResult{name: eng.Name(), results: mega}
 		}(engine)
 	}
 
-	wg.Wait()
-	return allResults
+	var allResults []MegaSearchResult
+	var responded, failed []string
+
+	for i := 0; i < started; i++ {
+		res := <-resultCh
+		if res.err != nil {
+			failed = append(failed, res.name)
+		} else {
+			responded = append(responded, res.name)
+			allResults = append(allResults, res.results...)
+		}
+	}
+
+	if responded == nil {
+		responded = []string{}
+	}
+	if failed == nil {
+		failed = []string{}
+	}
+	return allResults, responded, failed
 }
 
 func (rs *ResilientSearcher) GetCircuitBreakerStats() []map[string]interface{} {

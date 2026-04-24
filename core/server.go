@@ -178,6 +178,7 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 }
 
 func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isImage bool) error {
+	startedAt := time.Now()
 	requestCtx := WithEngine(c.UserContext(), engine.Name())
 	c.SetUserContext(requestCtx)
 
@@ -189,6 +190,8 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 
 	requestCtx = WithQueryHash(c.UserContext(), QueryHashFromQuery(q))
 	c.SetUserContext(requestCtx)
+
+	requestID := RequestIDFromContext(requestCtx)
 
 	action := "search"
 	if isImage {
@@ -208,68 +211,75 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		return err
 	}
 
+	engineNames := []string{engine.Name()}
+
+	if isImage {
+		var (
+			res        []SearchResult
+			usedEngine string
+			proxyMeta  ProxyExecutionMeta
+			searchErr  error
+		)
+		if s.opts.AllowEndpointFallback {
+			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchImageWithFallback(requestCtx, engine, q)
+		} else {
+			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchImagePrimary(requestCtx, engine, q)
+		}
+		s.applyProxyHeaders(c, proxyMeta)
+		if searchErr != nil {
+			WithRequest(requestCtx).WithFields(logrus.Fields{"action": action}).WithError(searchErr).Error("Search failed")
+			return fiber.NewError(fiber.StatusServiceUnavailable, classifySearchError(searchErr).Error())
+		}
+
+		env := NewImageEnvelope(q, requestID, startedAt, engineNames)
+		env.Meta.EnginesResponded = []string{usedEngine}
+		ectx := EnrichContext{Engine: usedEngine, Query: q}
+		for _, r := range res {
+			env.Results = append(env.Results, EnrichImageResult(r, ectx))
+		}
+		env.Finalize(startedAt, q)
+
+		cacheStatus := s.cacheEnvelopeIfEligible(engine.Name(), usedEngine, action, q, env)
+		if cacheStatus != "" {
+			c.Set("X-Cache", cacheStatus)
+		}
+		if usedEngine != "" && usedEngine != engine.Name() {
+			c.Set("X-Fallback-Engine", usedEngine)
+		}
+		WithRequest(requestCtx).WithFields(logrus.Fields{"action": action, "results_count": len(res)}).Info("Search completed")
+		return c.JSON(env)
+	}
+
 	var (
 		res        []SearchResult
 		usedEngine string
 		proxyMeta  ProxyExecutionMeta
 		searchErr  error
 	)
-
-	if isImage {
-		if s.opts.AllowEndpointFallback {
-			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchImageWithFallback(requestCtx, engine, q)
-		} else {
-			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchImagePrimary(requestCtx, engine, q)
-		}
+	if s.opts.AllowEndpointFallback {
+		res, usedEngine, proxyMeta, searchErr = s.resilient.SearchWithFallback(requestCtx, engine, q)
 	} else {
-		if s.opts.AllowEndpointFallback {
-			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchWithFallback(requestCtx, engine, q)
-		} else {
-			res, usedEngine, proxyMeta, searchErr = s.resilient.SearchPrimary(requestCtx, engine, q)
-		}
+		res, usedEngine, proxyMeta, searchErr = s.resilient.SearchPrimary(requestCtx, engine, q)
 	}
 	s.applyProxyHeaders(c, proxyMeta)
 
 	if searchErr != nil {
-		errToReturn := searchErr
-		switch {
-		case errors.Is(searchErr, ErrCaptcha):
-			errToReturn = fmt.Errorf("captcha found, please stop sending requests for a while: %w", searchErr)
-		case errors.Is(searchErr, ErrSearchTimeout):
-			errToReturn = fmt.Errorf("%s", searchErr)
-		case errors.Is(searchErr, ErrParser):
-			errToReturn = fmt.Errorf("%w", ErrParser)
-		case errors.Is(searchErr, ErrEngineInternal):
-			errToReturn = fmt.Errorf("%w", ErrEngineInternal)
-		case errors.Is(searchErr, ErrProxyUnavailable):
-			errToReturn = fmt.Errorf("%s", searchErr)
-		}
-		WithRequest(requestCtx).
-			WithFields(logrus.Fields{"action": action}).
-			WithError(searchErr).
-			Error("Search failed")
-		return fiber.NewError(fiber.StatusServiceUnavailable, errToReturn.Error())
+		WithRequest(requestCtx).WithFields(logrus.Fields{"action": action}).WithError(searchErr).Error("Search failed")
+		return fiber.NewError(fiber.StatusServiceUnavailable, classifySearchError(searchErr).Error())
 	}
 
-	cacheStatus := ""
-	// Avoid caching fallback-served responses so the requested engine can recover
-	// without the endpoint continuing to serve another engine until TTL expiry.
-	if s.cache != nil {
-		cacheStatus = "BYPASS"
-		switch {
-		case usedEngine != engine.Name():
-			s.cache.RecordBypass()
-		case len(res) == 0:
-			s.cache.RecordBypass()
-		default:
-			cacheKey := BuildCacheKey(engine.Name(), action, q)
-			if s.cacheJSON(cacheKey, res) {
-				cacheStatus = "MISS"
-			}
-		}
+	env := NewEnvelope(q, requestID, startedAt, engineNames)
+	env.Meta.EnginesResponded = []string{usedEngine}
+	ectx := EnrichContext{Engine: usedEngine, Query: q}
+	for _, r := range res {
+		env.Results = append(env.Results, EnrichResult(r, ectx))
+	}
+	env.Finalize(startedAt, q)
+
+	cacheStatus := s.cacheEnvelopeIfEligible(engine.Name(), usedEngine, action, q, env)
+	if cacheStatus != "" {
 		c.Set("X-Cache", cacheStatus)
 	}
-
 	if usedEngine != "" && usedEngine != engine.Name() {
 		c.Set("X-Fallback-Engine", usedEngine)
 	}
@@ -278,10 +288,55 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 	if usedEngine != "" {
 		completionCtx = WithEngine(completionCtx, usedEngine)
 	}
-	WithRequest(completionCtx).
-		WithFields(logrus.Fields{"action": action, "results_count": len(res)}).
-		Info("Search completed")
-	return c.JSON(res)
+	WithRequest(completionCtx).WithFields(logrus.Fields{"action": action, "results_count": len(res)}).Info("Search completed")
+	return c.JSON(env)
+}
+
+// classifySearchError maps internal sentinel errors to user-facing messages.
+func classifySearchError(err error) error {
+	switch {
+	case errors.Is(err, ErrCaptcha):
+		return fmt.Errorf("captcha found, please stop sending requests for a while: %w", err)
+	case errors.Is(err, ErrSearchTimeout):
+		return fmt.Errorf("%s", err)
+	case errors.Is(err, ErrParser):
+		return fmt.Errorf("%w", ErrParser)
+	case errors.Is(err, ErrEngineInternal):
+		return fmt.Errorf("%w", ErrEngineInternal)
+	case errors.Is(err, ErrProxyUnavailable):
+		return fmt.Errorf("%s", err)
+	}
+	return err
+}
+
+// cacheEnvelopeIfEligible stores the envelope JSON and returns the cache status header value.
+func (s *Server) cacheEnvelopeIfEligible(engineName, usedEngine, action string, q Query, payload interface{}) string {
+	if s.cache == nil {
+		return ""
+	}
+	// Don't cache fallback responses so the primary engine can recover.
+	if usedEngine != engineName {
+		s.cache.RecordBypass()
+		return "BYPASS"
+	}
+	// Detect empty results via reflection-free type switch.
+	switch v := payload.(type) {
+	case *Envelope:
+		if len(v.Results) == 0 {
+			s.cache.RecordBypass()
+			return "BYPASS"
+		}
+	case *ImageEnvelope:
+		if len(v.Results) == 0 {
+			s.cache.RecordBypass()
+			return "BYPASS"
+		}
+	}
+	cacheKey := BuildCacheKey(engineName, action, q)
+	if s.cacheJSON(cacheKey, payload) {
+		return "MISS"
+	}
+	return "BYPASS"
 }
 
 // HealthStatus is returned by /health and summarizes service state.
@@ -573,7 +628,8 @@ func (s *Server) handleMegaImage(c *fiber.Ctx) error {
 	return s.handleMegaEndpoint(c, "image", s.resilient.SearchAllImageParallel)
 }
 
-func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(context.Context, Query, []SearchEngine) []MegaSearchResult) error {
+func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(context.Context, Query, []SearchEngine) ([]MegaSearchResult, []string, []string)) error {
+	startedAt := time.Now()
 	requestCtx := WithEngine(c.UserContext(), "mega")
 	c.SetUserContext(requestCtx)
 
@@ -585,9 +641,11 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 	requestCtx = WithQueryHash(c.UserContext(), QueryHashFromQuery(q))
 	c.SetUserContext(requestCtx)
 
+	requestID := RequestIDFromContext(requestCtx)
+
 	enginesToUse := s.resolveEngines(c.Query("engines", ""))
 	if len(enginesToUse) == 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "No valid search engines specified")
+		return &APIError{HTTPStatus: 400, Reason: ReasonNoEngines, Message: "no valid search engines specified"}
 	}
 
 	engineNames := make([]string, len(enginesToUse))
@@ -618,19 +676,61 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 		return err
 	}
 
-	results := run(requestCtx, q, enginesToUse)
-	dedupedResults := s.deduplicateMegaResults(results)
+	rawResults, enginesResponded, enginesFailed := run(requestCtx, q, enginesToUse)
+
+	if action == "image" {
+		env := NewImageEnvelope(q, requestID, startedAt, engineNames)
+		env.Meta.EnginesResponded = enginesResponded
+		env.Meta.EnginesFailed = enginesFailed
+		for _, r := range rawResults {
+			ectx := EnrichContext{Engine: r.Engine, Query: q}
+			env.Results = append(env.Results, EnrichImageResult(r.SearchResult, ectx))
+		}
+		env.Finalize(startedAt, q)
+
+		if s.cache != nil {
+			c.Set("X-Cache", s.cacheMegaImageResults(action, enginesToUse, q, env))
+		}
+		WithRequest(requestCtx).WithFields(logrus.Fields{
+			"action": action, "engines_count": len(enginesToUse), "results_count": len(env.Results),
+		}).Info("Mega search completed")
+		return c.JSON(env)
+	}
+
+	// Web search: enrich all raw results, build clusters from full set, then dedup flat list.
+	allEnriched := make([]Result, 0, len(rawResults))
+	for _, r := range rawResults {
+		ectx := EnrichContext{Engine: r.Engine, Query: q}
+		allEnriched = append(allEnriched, EnrichResult(r.SearchResult, ectx))
+	}
+
+	clusters := BuildClusters(allEnriched, len(enginesToUse))
+
+	// Deduplicate the flat results list by normalized URL (keep best-ranked occurrence).
+	dedupedRaw := s.deduplicateMegaResults(rawResults)
+	env := NewEnvelope(q, requestID, startedAt, engineNames)
+	env.Meta.EnginesResponded = enginesResponded
+	env.Meta.EnginesFailed = enginesFailed
+	for _, r := range dedupedRaw {
+		ectx := EnrichContext{Engine: r.Engine, Query: q}
+		env.Results = append(env.Results, EnrichResult(r.SearchResult, ectx))
+	}
+	env.Finalize(startedAt, q)
+
+	if len(clusters) > 0 {
+		env.Clusters = &clusters
+	}
 
 	if s.cache != nil {
-		c.Set("X-Cache", s.cacheMegaResults(action, enginesToUse, q, dedupedResults))
+		c.Set("X-Cache", s.cacheMegaEnvelopeResults(action, enginesToUse, q, env))
 	}
 
 	WithRequest(requestCtx).WithFields(logrus.Fields{
 		"action":        action,
 		"engines_count": len(enginesToUse),
-		"results_count": len(dedupedResults),
+		"results_count": len(env.Results),
 	}).Info("Mega search completed")
-	return c.JSON(dedupedResults)
+	return c.JSON(env)
 }
 
 func (s *Server) handleListEngines(c *fiber.Ctx) error {
@@ -741,26 +841,42 @@ func (s *Server) cacheJSON(cacheKey string, payload interface{}) bool {
 	return true
 }
 
-func (s *Server) cacheMegaResults(action string, enginesToUse []SearchEngine, q Query, dedupedResults []MegaSearchResult) string {
-	cacheStatus := "BYPASS"
+func (s *Server) cacheMegaEnvelopeResults(action string, enginesToUse []SearchEngine, q Query, env *Envelope) string {
 	if s.cache == nil {
-		return cacheStatus
+		return ""
 	}
-	if len(dedupedResults) == 0 {
+	if len(env.Results) == 0 {
 		s.cache.RecordBypass()
-		return cacheStatus
+		return "BYPASS"
 	}
-
 	cacheEngines := s.megaCacheableEngines(enginesToUse)
 	if len(cacheEngines) == 0 {
 		s.cache.RecordBypass()
-		return cacheStatus
+		return "BYPASS"
 	}
-
-	if s.cacheJSON(s.buildMegaCacheKey(action, cacheEngines, q), dedupedResults) {
+	if s.cacheJSON(s.buildMegaCacheKey(action, cacheEngines, q), env) {
 		return "MISS"
 	}
-	return cacheStatus
+	return "BYPASS"
+}
+
+func (s *Server) cacheMegaImageResults(action string, enginesToUse []SearchEngine, q Query, env *ImageEnvelope) string {
+	if s.cache == nil {
+		return ""
+	}
+	if len(env.Results) == 0 {
+		s.cache.RecordBypass()
+		return "BYPASS"
+	}
+	cacheEngines := s.megaCacheableEngines(enginesToUse)
+	if len(cacheEngines) == 0 {
+		s.cache.RecordBypass()
+		return "BYPASS"
+	}
+	if s.cacheJSON(s.buildMegaCacheKey(action, cacheEngines, q), env) {
+		return "MISS"
+	}
+	return "BYPASS"
 }
 
 func (s *Server) buildMegaCacheKey(action string, engines []SearchEngine, q Query) string {

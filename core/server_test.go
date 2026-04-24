@@ -1489,3 +1489,156 @@ func TestServerOptions_DisableCORSMiddleware(t *testing.T) {
 		t.Fatalf("expected CORS headers to be absent when disabled, got allow-origin=%q", got)
 	}
 }
+
+func TestDedicatedEndpointReturnsV1Envelope(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7200, opts, engine)
+
+	resp := request(t, srv, "/google/search?text=golang")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var env Envelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Meta.Version != "1.0" {
+		t.Fatalf("expected meta.version=1.0, got %q", env.Meta.Version)
+	}
+	if env.Meta.RequestID == "" {
+		t.Fatal("expected non-empty meta.request_id")
+	}
+	if env.Query.Text != "golang" {
+		t.Fatalf("expected query.text=golang, got %q", env.Query.Text)
+	}
+	if len(env.Query.EnginesRequested) == 0 {
+		t.Fatal("expected engines_requested to be populated")
+	}
+	if len(env.Results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+	r := env.Results[0]
+	if r.ID == "" {
+		t.Fatal("expected result.id to be set")
+	}
+	if r.Domain == "" {
+		t.Fatal("expected result.domain to be set")
+	}
+	if r.Snippet == "" && r.Title == "" {
+		t.Fatal("expected result to have title or snippet")
+	}
+	if r.Position.Page < 1 {
+		t.Fatalf("expected position.page >= 1, got %d", r.Position.Page)
+	}
+	if env.Pagination.Page < 1 {
+		t.Fatalf("expected pagination.page >= 1, got %d", env.Pagination.Page)
+	}
+}
+
+func TestMegaSearchReturnsV1EnvelopeWithEnginesFailed(t *testing.T) {
+	good := &engineMock{name: "google", initialized: true}
+	bad := &engineMock{
+		name:        "bing",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return nil, errors.New("bing down")
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7201, opts, good, bad)
+
+	resp := request(t, srv, "/mega/search?text=golang&engines=google,bing")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 even with one engine failing, got %d", resp.StatusCode)
+	}
+
+	var env Envelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Meta.Version != "1.0" {
+		t.Fatalf("expected meta.version=1.0, got %q", env.Meta.Version)
+	}
+	if len(env.Meta.EnginesFailed) == 0 {
+		t.Fatal("expected engines_failed to contain bing")
+	}
+	found := false
+	for _, name := range env.Meta.EnginesFailed {
+		if name == "bing" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected bing in engines_failed, got %v", env.Meta.EnginesFailed)
+	}
+}
+
+func TestMegaSearchClustersGroupSameURL(t *testing.T) {
+	google := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return []SearchResult{{Rank: 1, URL: "https://go.dev/", Title: "Go"}}, nil
+		},
+	}
+	bing := &engineMock{
+		name:        "bing",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return []SearchResult{{Rank: 2, URL: "https://go.dev/", Title: "Go"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7202, opts, google, bing)
+
+	resp := request(t, srv, "/mega/search?text=golang&engines=google,bing")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var env Envelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Clusters == nil || len(*env.Clusters) == 0 {
+		t.Fatal("expected clusters to be populated")
+	}
+	c := (*env.Clusters)[0]
+	if c.EnginesCount < 2 {
+		t.Fatalf("expected cluster with 2 engines, got %d", c.EnginesCount)
+	}
+	if c.Score <= 0 {
+		t.Fatalf("expected positive cluster score, got %f", c.Score)
+	}
+}
+
+func TestResultIDIsStableAcrossRequests(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7203, opts, engine)
+
+	first := request(t, srv, "/google/search?text=golang")
+	second := request(t, srv, "/google/search?text=golang&limit=26") // different limit → bypasses cache
+
+	var e1, e2 Envelope
+	if err := json.NewDecoder(first.Body).Decode(&e1); err != nil {
+		t.Fatalf("decode first: %v", err)
+	}
+	if err := json.NewDecoder(second.Body).Decode(&e2); err != nil {
+		t.Fatalf("decode second: %v", err)
+	}
+	if len(e1.Results) == 0 || len(e2.Results) == 0 {
+		t.Skip("no results to compare IDs")
+	}
+	if e1.Results[0].ID != e2.Results[0].ID {
+		t.Fatalf("expected stable ID across requests, got %q vs %q", e1.Results[0].ID, e2.Results[0].ID)
+	}
+}
