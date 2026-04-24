@@ -192,9 +192,12 @@ func (q Query) IsEmpty() bool {
 	return false
 }
 
+// MaxQueryLimit is the maximum allowed value for the limit parameter.
+const MaxQueryLimit = 100
+
 // InitFromContext populates Query from HTTP query parameters and request
-// headers. It validates numeric/boolean inputs and returns an error for empty
-// search expressions.
+// headers. It validates numeric/boolean inputs and returns an *APIError for
+// invalid client input (400) or a plain error for internal failures.
 func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 	searchQuery.Text = reqCtx.Query("text")
 	searchQuery.LangCode = reqCtx.Query("lang")
@@ -202,38 +205,43 @@ func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 	searchQuery.Filetype = reqCtx.Query("file")
 	searchQuery.Site = reqCtx.Query("site")
 
-	limit, err := strconv.Atoi(reqCtx.Query("limit", "25"))
+	limitRaw := reqCtx.Query("limit", "25")
+	limit, err := strconv.Atoi(limitRaw)
 	if err != nil {
-		return err
+		return errInvalidLimit("limit must be an integer")
+	}
+	if limit < 1 || limit > MaxQueryLimit {
+		return errInvalidLimit(fmt.Sprintf("limit must be between 1 and %d", MaxQueryLimit))
 	}
 	searchQuery.Limit = limit
 
-	start, err := strconv.Atoi(reqCtx.Query("start", "0"))
+	startRaw := reqCtx.Query("start", "0")
+	start, err := strconv.Atoi(startRaw)
 	if err != nil {
-		return err
+		return errInvalidStart("start must be a non-negative integer")
 	}
 	if start < 0 {
-		return errors.New("start must be >= 0")
+		return errInvalidStart("start must be >= 0")
 	}
 	searchQuery.Start = start
 
 	searchQuery.Filter, err = strconv.ParseBool(reqCtx.Query("filter", "1"))
 	if err != nil {
-		return err
+		return errInvalidParam(fmt.Sprintf("filter: %v", err))
 	}
 
 	searchQuery.Answers, err = strconv.ParseBool(reqCtx.Query("answers", "0"))
 	if err != nil {
-		return err
+		return errInvalidParam(fmt.Sprintf("answers: %v", err))
 	}
 
 	searchQuery.ProxyOverride, err = NormalizeProxyRequestOverride(reqCtx.Get("X-Use-Proxy"))
 	if err != nil {
-		return err
+		return errInvalidParam(fmt.Sprintf("X-Use-Proxy: %v", err))
 	}
 
 	if searchQuery.IsEmpty() {
-		return errors.New("Query cannot be empty")
+		return errEmptyQuery()
 	}
 	return nil
 }

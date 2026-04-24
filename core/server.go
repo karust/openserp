@@ -183,7 +183,7 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 
 	q := Query{}
 	if err := q.InitFromContext(c); err != nil {
-		WithRequest(c.UserContext()).WithError(err).Error("Invalid query parameters")
+		WithRequest(c.UserContext()).WithError(err).Warn("Invalid query parameters")
 		return err
 	}
 
@@ -579,7 +579,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 
 	q := Query{}
 	if err := q.InitFromContext(c); err != nil {
-		WithRequest(c.UserContext()).WithError(err).Error("Invalid query parameters")
+		WithRequest(c.UserContext()).WithError(err).Warn("Invalid query parameters")
 		return err
 	}
 	requestCtx = WithQueryHash(c.UserContext(), QueryHashFromQuery(q))

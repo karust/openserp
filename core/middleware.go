@@ -14,6 +14,7 @@ type JSONErrorResponse struct {
 	Error   string `json:"error"`
 	Code    int    `json:"code"`
 	Message string `json:"message,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 type CORSConfig struct {
@@ -100,6 +101,8 @@ func RequestLoggerMiddleware() fiber.Handler {
 		if err != nil {
 			if e, ok := err.(*fiber.Error); ok {
 				status = e.Code
+			} else if apiErr, ok := err.(*APIError); ok {
+				status = apiErr.HTTPStatus
 			} else {
 				status = fiber.StatusInternalServerError
 			}
@@ -132,14 +135,21 @@ func RequestLoggerMiddleware() fiber.Handler {
 func JSONErrorMiddleware() fiber.ErrorHandler {
 	return func(c *fiber.Ctx, err error) error {
 		code := fiber.StatusInternalServerError
+		reason := ""
+
 		if e, ok := err.(*fiber.Error); ok {
 			code = e.Code
+		}
+		if apiErr, ok := err.(*APIError); ok {
+			code = apiErr.HTTPStatus
+			reason = apiErr.Reason
 		}
 
 		resp := JSONErrorResponse{
 			Error:   statusText(code),
 			Code:    code,
 			Message: err.Error(),
+			Reason:  reason,
 		}
 
 		c.Set("Content-Type", "application/json")

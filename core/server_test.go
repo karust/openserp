@@ -230,56 +230,77 @@ func TestInvalidQueryParametersReturnJSONError(t *testing.T) {
 		name    string
 		path    string
 		message string
+		reason  string
 	}{
 		{
 			name:    "invalid limit",
 			path:    "/google/search?text=golang&limit=abc",
-			message: "invalid syntax",
+			message: "limit must be an integer",
+			reason:  ReasonInvalidLimit,
 		},
 		{
 			name:    "negative start",
 			path:    "/google/search?text=golang&start=-1",
 			message: "start must be >= 0",
+			reason:  ReasonInvalidStart,
 		},
 		{
 			name:    "invalid filter flag",
 			path:    "/google/search?text=golang&filter=notabool",
 			message: "invalid syntax",
+			reason:  ReasonInvalidParam,
 		},
 		{
 			name:    "invalid answers flag on mega endpoint",
 			path:    "/mega/search?text=golang&answers=notabool",
 			message: "invalid syntax",
+			reason:  ReasonInvalidParam,
 		},
 		{
 			name:    "empty text query",
 			path:    "/google/search?text=",
-			message: "Query cannot be empty",
+			message: "query cannot be empty",
+			reason:  ReasonEmptyQuery,
+		},
+		{
+			name:    "limit too high",
+			path:    "/google/search?text=golang&limit=999",
+			message: "limit must be between 1 and 100",
+			reason:  ReasonInvalidLimit,
+		},
+		{
+			name:    "zero limit",
+			path:    "/google/search?text=golang&limit=0",
+			message: "limit must be between 1 and 100",
+			reason:  ReasonInvalidLimit,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resp := request(t, srv, tt.path)
-			if resp.StatusCode != http.StatusInternalServerError {
-				t.Fatalf("expected 500 for invalid query params, got %d", resp.StatusCode)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("expected 400 for invalid query params, got %d", resp.StatusCode)
 			}
 
 			var payload JSONErrorResponse
 			if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 				t.Fatalf("decode error response: %v", err)
 			}
-			if payload.Code != http.StatusInternalServerError {
-				t.Fatalf("expected code=500, got %d", payload.Code)
+			if payload.Code != http.StatusBadRequest {
+				t.Fatalf("expected code=400, got %d", payload.Code)
 			}
-			if payload.Error != "server_error" {
-				t.Fatalf("expected error=server_error, got %q", payload.Error)
+			if payload.Error != "bad_request" {
+				t.Fatalf("expected error=bad_request, got %q", payload.Error)
 			}
 			if payload.Message == "" {
 				t.Fatal("expected error message to be present")
 			}
-			if tt.message != "" && !strings.Contains(payload.Message, tt.message) {
+			if tt.message != "" && !strings.Contains(strings.ToLower(payload.Message), strings.ToLower(tt.message)) {
 				t.Fatalf("expected message to contain %q, got %q", tt.message, payload.Message)
+			}
+			if tt.reason != "" && payload.Reason != tt.reason {
+				t.Fatalf("expected reason=%q, got %q", tt.reason, payload.Reason)
 			}
 		})
 	}
