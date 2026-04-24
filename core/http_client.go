@@ -31,9 +31,13 @@ func NewRawHTTPClient(query Query) (*http.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	roundTripper := http.RoundTripper(transport)
+	if transport.Proxy != nil {
+		roundTripper = proxyErrorTransport{base: transport}
+	}
 
 	return &http.Client{
-		Transport: transport,
+		Transport: roundTripper,
 		Timeout:   rawHTTPTimeout,
 	}, nil
 }
@@ -83,4 +87,20 @@ func newRawTransport(query Query) (*http.Transport, error) {
 	}
 
 	return transport, nil
+}
+
+type proxyErrorTransport struct {
+	base http.RoundTripper
+}
+
+func (t proxyErrorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil {
+		return nil, classifyProxyNetworkError(err)
+	}
+	if resp != nil && resp.StatusCode == http.StatusProxyAuthRequired {
+		DrainAndCloseResponse(resp)
+		return nil, classifyProxyNetworkError(ErrProxyAuth)
+	}
+	return resp, nil
 }

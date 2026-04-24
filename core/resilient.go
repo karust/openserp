@@ -442,7 +442,11 @@ func (rs *ResilientSearcher) reportProxyAttempt(ctx context.Context, proxyURL st
 	}
 
 	if err != nil {
-		rs.proxyRegistry.ReportFailure(ctx, proxyURL)
+		// Only degrade proxy health for network-level errors. Captcha pages,
+		// parser drift, and engine errors do not indicate a faulty proxy.
+		if IsProxyNetworkError(err) {
+			rs.proxyRegistry.ReportFailure(ctx, proxyURL)
+		}
 		return
 	}
 

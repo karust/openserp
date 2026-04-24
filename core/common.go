@@ -1,9 +1,13 @@
 package core
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"net"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -24,6 +28,63 @@ var ErrParser = errors.New("parser failure")
 // ErrEngineInternal is returned when an engine recovered from an unexpected
 // panic and converted it into a typed error.
 var ErrEngineInternal = errors.New("engine internal error")
+
+// ErrProxyConnect is returned when the proxy cannot establish a network
+// connection. Proxy health is degraded on this error.
+var ErrProxyConnect = errors.New("proxy_connect")
+
+// ErrProxyAuth is returned when proxy credentials are rejected.
+// Proxy health is degraded on this error.
+var ErrProxyAuth = errors.New("proxy_auth")
+
+// ErrTimeout is returned when a network-level timeout occurs on the proxy path.
+// Proxy health is degraded on this error.
+var ErrTimeout = errors.New("timeout")
+
+// ErrEmptyResult signals a successful fetch that returned zero organic results.
+// It is not a failure; the proxy stays healthy and no credit is charged.
+var ErrEmptyResult = errors.New("empty_result")
+
+// IsProxyNetworkError reports whether err is a network-level error that
+// indicates a faulty proxy (connect failure, auth rejection, or timeout).
+// Parser drift, captcha pages, and engine errors must NOT degrade proxy health.
+func IsProxyNetworkError(err error) bool {
+	return errors.Is(err, ErrProxyConnect) ||
+		errors.Is(err, ErrProxyAuth) ||
+		errors.Is(err, ErrTimeout)
+}
+
+// classifyProxyNetworkError wraps common transport errors with proxy-health
+// sentinels while preserving the original error for callers.
+func classifyProxyNetworkError(err error) error {
+	if err == nil || IsProxyNetworkError(err) || errors.Is(err, context.Canceled) {
+		return err
+	}
+
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "407") || strings.Contains(msg, "proxy authentication") {
+		return fmt.Errorf("%w: %w", ErrProxyAuth, err)
+	}
+
+	var netErr net.Error
+	if (errors.As(err, &netErr) && netErr.Timeout()) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "deadline exceeded") {
+		return fmt.Errorf("%w: %w", ErrTimeout, err)
+	}
+
+	if strings.Contains(msg, "proxyconnect") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "network is unreachable") ||
+		strings.Contains(msg, "socks connect") {
+		return fmt.Errorf("%w: %w", ErrProxyConnect, err)
+	}
+
+	return err
+}
 
 // SearchResult represents one normalized result item returned by any engine.
 type SearchResult struct {

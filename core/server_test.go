@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -945,7 +946,7 @@ func TestResilientRawProxyPoolRotatesOnRetry(t *testing.T) {
 		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
 			attemptedProxies = append(attemptedProxies, q.ProxyURL)
 			if q.ProxyURL == "http://bad-proxy:8080" {
-				return nil, errors.New("proxy failed")
+				return nil, fmt.Errorf("%w: dial tcp bad-proxy:8080: connection refused", ErrProxyConnect)
 			}
 			return []SearchResult{{Rank: 1, URL: "https://example.com/success", Title: "ok"}}, nil
 		},

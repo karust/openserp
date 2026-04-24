@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +16,12 @@ import (
 	socks5 "github.com/armon/go-socks5"
 	xcontext "golang.org/x/net/context"
 )
+
+type timeoutTestError struct{}
+
+func (timeoutTestError) Error() string   { return "i/o timeout" }
+func (timeoutTestError) Timeout() bool   { return true }
+func (timeoutTestError) Temporary() bool { return true }
 
 func TestNormalizeProxyURL(t *testing.T) {
 	tests := []struct {
@@ -135,6 +142,8 @@ func TestProxyRegistryRoundRobinAndFailureRecovery(t *testing.T) {
 		t.Fatalf("new proxy registry: %v", err)
 	}
 
+	ctx := context.Background()
+
 	if got := registry.NextByTag("default"); got != "http://proxy1:8080" {
 		t.Fatalf("expected first proxy1, got %s", got)
 	}
@@ -142,26 +151,35 @@ func TestProxyRegistryRoundRobinAndFailureRecovery(t *testing.T) {
 		t.Fatalf("expected second proxy2, got %s", got)
 	}
 
-	registry.ReportFailure(context.Background(), "http://proxy1:8080")
-	registry.ReportFailure(context.Background(), "http://proxy1:8080")
+	registry.ReportFailure(ctx, "http://proxy1:8080")
+	registry.ReportFailure(ctx, "http://proxy1:8080")
 	if got := registry.NextByTag("default"); got != "http://proxy2:8080" {
 		t.Fatalf("expected proxy2 while proxy1 disabled, got %s", got)
 	}
 
-	registry.ReportFailure(context.Background(), "http://proxy2:8080")
-	registry.ReportFailure(context.Background(), "http://proxy2:8080")
-	if got := registry.NextByTag("default"); got != "http://proxy1:8080" {
-		t.Fatalf("expected tag pool reset to proxy1 after exhaustion, got %s", got)
+	// Exhaust pool; quarantine kicks in, no proxy served immediately.
+	registry.ReportFailure(ctx, "http://proxy2:8080")
+	registry.ReportFailure(ctx, "http://proxy2:8080")
+	if got := registry.NextByTag("default"); got != "" {
+		t.Fatalf("expected empty while pool is quarantined, got %s", got)
 	}
 
-	registry.ReportFailure(context.Background(), "http://proxy1:8080")
-	registry.ReportSuccess(context.Background(), "http://proxy1:8080")
-	stats := registry.BuildStats()
-	if stats.UnhealthyCount != 0 {
-		t.Fatalf("expected no unhealthy proxies after success recovery, got %d", stats.UnhealthyCount)
+	expireProxyTagQuarantine(t, registry, "default")
+
+	// After quarantine expiry, one probe proxy is re-enabled.
+	got := registry.NextByTag("default")
+	if got == "" {
+		t.Fatal("expected a probe proxy after quarantine expiry, got empty")
 	}
-	if stats.HealthyCount != 2 {
-		t.Fatalf("expected two healthy proxies, got %d", stats.HealthyCount)
+
+	// A success on the probe clears the quarantine and re-enables the pool.
+	registry.ReportSuccess(ctx, got)
+	stats := registry.BuildStats()
+	if stats.UnhealthyCount != 1 {
+		t.Fatalf("expected one still-disabled proxy after single probe recovery, got unhealthy_count=%d", stats.UnhealthyCount)
+	}
+	if stats.HealthyCount != 1 {
+		t.Fatalf("expected one healthy proxy after probe success, got %d", stats.HealthyCount)
 	}
 }
 
@@ -307,6 +325,55 @@ func TestNewRawHTTPClientSocks5hUsesProxyDNS(t *testing.T) {
 	}
 }
 
+func TestClassifyProxyNetworkError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want error
+	}{
+		{name: "timeout", err: timeoutTestError{}, want: ErrTimeout},
+		{name: "connect", err: errors.New("proxyconnect tcp: connection refused"), want: ErrProxyConnect},
+		{name: "auth", err: errors.New("Proxy Authentication Required 407"), want: ErrProxyAuth},
+		{name: "parser", err: ErrParser, want: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyProxyNetworkError(tt.err)
+			if tt.want == nil {
+				if got != tt.err {
+					t.Fatalf("expected unchanged error, got %v", got)
+				}
+				return
+			}
+			if !errors.Is(got, tt.want) {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+			if !errors.Is(got, tt.err) {
+				t.Fatalf("expected original error to be preserved, got %v", got)
+			}
+		})
+	}
+}
+
+func TestNewRawHTTPClientClassifiesProxyAuthFailure(t *testing.T) {
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusProxyAuthRequired)
+	}))
+	defer proxy.Close()
+
+	client, err := NewRawHTTPClient(Query{ProxyURL: proxy.URL})
+	if err != nil {
+		t.Fatalf("new raw http client: %v", err)
+	}
+
+	resp, err := client.Get("http://example.com/")
+	DrainAndCloseResponse(resp)
+	if !errors.Is(err, ErrProxyAuth) {
+		t.Fatalf("expected proxy auth error, got %v", err)
+	}
+}
+
 type staticResolver struct {
 	host string
 	ip   net.IP
@@ -317,6 +384,160 @@ func (r staticResolver) Resolve(ctx xcontext.Context, name string) (xcontext.Con
 		return ctx, r.ip, nil
 	}
 	return ctx, nil, net.UnknownNetworkError(name)
+}
+
+func expireProxyTagQuarantine(t *testing.T, registry *ProxyRegistry, tag string) {
+	t.Helper()
+
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	registry.tagQuarantine[normalizeTag(tag)] = time.Now().Add(-time.Second)
+}
+
+func proxyHealthyCount(stats ProxyStats) int {
+	count := 0
+	for _, entry := range stats.Entries {
+		if !entry.Disabled {
+			count++
+		}
+	}
+	return count
+}
+
+func TestReportFailureDoesNotDegradeProxyOnNonNetworkError(t *testing.T) {
+	registry, err := NewProxyRegistry([]ProxyEntryConfig{
+		{URL: "http://proxy1:8080", Tags: []string{"default"}},
+	}, 2)
+	if err != nil {
+		t.Fatalf("new proxy registry: %v", err)
+	}
+
+	rs := &ResilientSearcher{proxyRegistry: registry}
+	for _, err := range []error{ErrParser, ErrCaptcha} {
+		for range 50 {
+			rs.reportProxyAttempt(context.Background(), "http://proxy1:8080", err)
+		}
+	}
+
+	stats := registry.BuildStats()
+	if stats.UnhealthyCount != 0 {
+		t.Fatalf("non-network errors must not degrade proxy health: unhealthy_count=%d", stats.UnhealthyCount)
+	}
+}
+
+func TestReportFailureDegradeProxyOnNetworkError(t *testing.T) {
+	registry, err := NewProxyRegistry([]ProxyEntryConfig{
+		{URL: "http://proxy1:8080", Tags: []string{"default"}},
+	}, 2)
+	if err != nil {
+		t.Fatalf("new proxy registry: %v", err)
+	}
+
+	rs := &ResilientSearcher{proxyRegistry: registry}
+	rs.reportProxyAttempt(context.Background(), "http://proxy1:8080", ErrProxyConnect)
+	rs.reportProxyAttempt(context.Background(), "http://proxy1:8080", ErrProxyConnect)
+
+	stats := registry.BuildStats()
+	if stats.UnhealthyCount != 1 {
+		t.Fatalf("proxy network errors must degrade proxy: unhealthy_count=%d", stats.UnhealthyCount)
+	}
+}
+
+func TestPoolQuarantineAfterExhaustion(t *testing.T) {
+	registry, err := NewProxyRegistry([]ProxyEntryConfig{
+		{URL: "http://proxy1:8080", Tags: []string{"default"}},
+	}, 1)
+	if err != nil {
+		t.Fatalf("new proxy registry: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Exhaust the single proxy; this should set a quarantine.
+	registry.ReportFailure(ctx, "http://proxy1:8080")
+
+	// Verify quarantine is set and NextByTag returns empty.
+	got := registry.NextByTagWithContext(ctx, "default")
+	if got != "" {
+		t.Fatalf("expected empty result during quarantine, got %q", got)
+	}
+}
+
+func TestPoolQuarantineExpiresAndProbesSingleProxy(t *testing.T) {
+	registry, err := NewProxyRegistry([]ProxyEntryConfig{
+		{URL: "http://proxy1:8080", Tags: []string{"default"}},
+		{URL: "http://proxy2:8080", Tags: []string{"default"}},
+	}, 1)
+	if err != nil {
+		t.Fatalf("new proxy registry: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Exhaust both proxies.
+	registry.ReportFailure(ctx, "http://proxy1:8080")
+	registry.ReportFailure(ctx, "http://proxy2:8080")
+
+	expireProxyTagQuarantine(t, registry, "default")
+
+	// After expiry, exactly one proxy should be re-enabled as a probe.
+	got := registry.NextByTagWithContext(ctx, "default")
+	if got == "" {
+		t.Fatal("expected a proxy after quarantine expiry, got empty")
+	}
+
+	stats := registry.BuildStats()
+	if got := proxyHealthyCount(stats); got != 1 {
+		t.Fatalf("expected exactly 1 probe proxy re-enabled after quarantine, got %d healthy", got)
+	}
+}
+
+func TestPoolQuarantineRestartsAfterFailedProbe(t *testing.T) {
+	registry, err := NewProxyRegistry([]ProxyEntryConfig{
+		{URL: "http://proxy1:8080", Tags: []string{"default"}},
+	}, 1)
+	if err != nil {
+		t.Fatalf("new proxy registry: %v", err)
+	}
+
+	ctx := context.Background()
+	registry.ReportFailure(ctx, "http://proxy1:8080")
+	expireProxyTagQuarantine(t, registry, "default")
+
+	probe := registry.NextByTagWithContext(ctx, "default")
+	if probe == "" {
+		t.Fatal("expected probe proxy after quarantine expiry")
+	}
+
+	registry.ReportFailure(ctx, probe)
+	if got := registry.NextByTagWithContext(ctx, "default"); got != "" {
+		t.Fatalf("expected renewed quarantine after failed probe, got %q", got)
+	}
+}
+
+func TestReportSuccessClearsQuarantine(t *testing.T) {
+	registry, err := NewProxyRegistry([]ProxyEntryConfig{
+		{URL: "http://proxy1:8080", Tags: []string{"default"}},
+	}, 1)
+	if err != nil {
+		t.Fatalf("new proxy registry: %v", err)
+	}
+
+	ctx := context.Background()
+	registry.ReportFailure(ctx, "http://proxy1:8080")
+
+	// Confirm quarantine set.
+	if registry.NextByTagWithContext(ctx, "default") != "" {
+		t.Fatal("expected pool to be quarantined after exhaustion")
+	}
+
+	// Recovery: success clears quarantine.
+	registry.ReportSuccess(ctx, "http://proxy1:8080")
+
+	got := registry.NextByTagWithContext(ctx, "default")
+	if got == "" {
+		t.Fatal("expected proxy available after successful recovery")
+	}
 }
 
 func startSOCKS5TestServer(t *testing.T, host string, ip net.IP) string {

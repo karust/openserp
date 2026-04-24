@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -19,6 +20,9 @@ const (
 	ProxyModeTagPool             = "tag_pool"
 	DefaultProxyFailureThreshold = 3
 	ProxyOverrideDirect          = "direct"
+	// ProxyPoolQuarantineDuration is how long an exhausted tag pool stays quarantined
+	// before a single probe proxy is re-enabled for recovery testing.
+	ProxyPoolQuarantineDuration = 5 * time.Minute
 )
 
 var supportedProxySchemes = map[string]struct{}{
@@ -97,6 +101,7 @@ type ProxyRegistry struct {
 	order            []string
 	tagIndex         map[string][]string
 	nextByTag        map[string]int
+	tagQuarantine    map[string]time.Time // tag to earliest time pool may probe again
 	failureThreshold int
 }
 
@@ -347,6 +352,7 @@ func NewProxyRegistry(entries []ProxyEntryConfig, failureThreshold int) (*ProxyR
 		order:            order,
 		tagIndex:         tagIndex,
 		nextByTag:        make(map[string]int, len(tagIndex)),
+		tagQuarantine:    make(map[string]time.Time, len(tagIndex)),
 		failureThreshold: failureThreshold,
 	}, nil
 }
@@ -370,13 +376,30 @@ func (r *ProxyRegistry) NextByTagWithContext(ctx context.Context, tag string) st
 	}
 
 	if r.allDisabledLocked(urls) {
-		WithRequest(ctx).WithField("proxy_tag", tag).Warn(
-			fmt.Sprintf("Proxy tag pool exhausted for %q, re-enabling tagged proxies", tag),
-		)
-		for _, proxyURL := range urls {
-			state := r.states[proxyURL]
+		now := time.Now()
+		quarantineUntil := r.tagQuarantine[tag]
+		if quarantineUntil.IsZero() {
+			r.startTagQuarantineLocked(ctx, tag, now)
+			return ""
+		}
+		if now.Before(quarantineUntil) {
+			// Pool is still in quarantine; refuse to serve any proxy.
+			WithRequest(ctx).WithField("proxy_tag", tag).WithField("quarantine_until", quarantineUntil.Format(time.RFC3339)).
+				Warn("Proxy tag pool in quarantine, no proxy served")
+			return ""
+		}
+		delete(r.tagQuarantine, tag)
+
+		// Quarantine elapsed: re-enable one proxy as a recovery probe.
+		probe := r.leastFailedLocked(urls)
+		if probe != "" {
+			state := r.states[probe]
 			state.disabled = false
 			state.failures = 0
+			WithRequest(ctx).WithFields(logrus.Fields{
+				"proxy_tag": tag,
+				"proxy":     MaskProxyURL(probe),
+			}).Warn("Proxy tag pool quarantine elapsed, probing one proxy for recovery")
 		}
 	}
 
@@ -397,9 +420,18 @@ func (r *ProxyRegistry) NextByTagWithContext(ctx context.Context, tag string) st
 		return proxyURL
 	}
 
+	// All proxies are disabled and no probe could be selected.
+	r.startTagQuarantineLocked(ctx, tag, time.Now())
 	return ""
 }
 
+// ReportFailure increments the failure counter for proxyURL. The proxy is
+// disabled once the failure threshold is reached. If the owning tag pool
+// becomes fully exhausted, a quarantine timer is started so that
+// NextByTagWithContext will not immediately re-enable all proxies.
+//
+// Only proxy-network errors (ErrProxyConnect, ErrProxyAuth, ErrTimeout) should
+// degrade proxy health. Callers must not call this for captcha or parser errors.
 func (r *ProxyRegistry) ReportFailure(ctx context.Context, proxyURL string) {
 	proxyURL, err := NormalizeProxyURL(proxyURL)
 	if err != nil || proxyURL == "" {
@@ -421,6 +453,17 @@ func (r *ProxyRegistry) ReportFailure(ctx context.Context, proxyURL string) {
 			"failure_count": state.failures,
 			"proxy":         MaskProxyURL(proxyURL),
 		}).Warnf("Disabled proxy after %d failures: %s", state.failures, MaskProxyURL(proxyURL))
+
+		// If all proxies in every shared tag are now disabled, start quarantine.
+		now := time.Now()
+		for _, tag := range state.tags {
+			if r.allDisabledLocked(r.tagIndex[tag]) {
+				quarantineUntil := r.tagQuarantine[tag]
+				if quarantineUntil.IsZero() || !now.Before(quarantineUntil) {
+					r.startTagQuarantineLocked(ctx, tag, now)
+				}
+			}
+		}
 	}
 }
 
@@ -440,6 +483,11 @@ func (r *ProxyRegistry) ReportSuccess(_ context.Context, proxyURL string) {
 
 	state.failures = 0
 	state.disabled = false
+
+	// Clear quarantine for any tag this proxy belongs to; at least one proxy is healthy again.
+	for _, tag := range state.tags {
+		delete(r.tagQuarantine, tag)
+	}
 }
 
 func (r *ProxyRegistry) HasHealthyProxyForTag(tag string) bool {
@@ -510,6 +558,33 @@ func (r *ProxyRegistry) allDisabledLocked(urls []string) bool {
 		}
 	}
 	return true
+}
+
+func (r *ProxyRegistry) startTagQuarantineLocked(ctx context.Context, tag string, now time.Time) {
+	quarantineUntil := now.Add(ProxyPoolQuarantineDuration)
+	r.tagQuarantine[tag] = quarantineUntil
+	WithRequest(ctx).WithFields(logrus.Fields{
+		"proxy_tag":        tag,
+		"quarantine_until": quarantineUntil.Format(time.RFC3339),
+	}).Warnf("Proxy tag pool %q fully exhausted, quarantined for %s", tag, ProxyPoolQuarantineDuration)
+}
+
+// leastFailedLocked returns the URL of the disabled proxy with the lowest
+// failure count, which is the cheapest probe candidate. Must hold r.mu.
+func (r *ProxyRegistry) leastFailedLocked(urls []string) string {
+	best := ""
+	bestFailures := -1
+	for _, proxyURL := range urls {
+		state, ok := r.states[proxyURL]
+		if !ok {
+			continue
+		}
+		if bestFailures < 0 || state.failures < bestFailures {
+			best = proxyURL
+			bestFailures = state.failures
+		}
+	}
+	return best
 }
 
 func normalizeProxyRuntime(runtime string) string {
