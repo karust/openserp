@@ -50,6 +50,11 @@ type BrowserOpts struct {
 	Insecure bool
 	// UserAgent optionally overrides browser-reported user agent during emulation.
 	UserAgent string
+	// BlockResourceTypes are blocked during page navigation when non-empty.
+	// Typical tokens map to these types: image, font, css(stylesheet), js(script), media.
+	BlockResourceTypes []proto.NetworkResourceType
+	// BlockTrackers toggles static tracker-domain blocking.
+	BlockTrackers bool
 }
 
 // Check applies default option values when optional fields are unset.
@@ -61,6 +66,127 @@ func (o *BrowserOpts) Check() {
 	if o.WaitLoadTime == 0 {
 		o.WaitLoadTime = time.Second * 2
 	}
+}
+
+var alwaysBlockedTrackingDomains = []string{
+	"google-analytics.com",
+	"googletagmanager.com",
+	"doubleclick.net",
+	"connect.facebook.net",
+}
+
+var alwaysBlockedTrackingURLPatterns = buildTrackingDomainURLPatterns(alwaysBlockedTrackingDomains)
+
+var blockedResourceTypeTokenMap = map[string]proto.NetworkResourceType{
+	"image": proto.NetworkResourceTypeImage,
+	"font":  proto.NetworkResourceTypeFont,
+	"media": proto.NetworkResourceTypeMedia,
+	"css":   proto.NetworkResourceTypeStylesheet,
+	"js":    proto.NetworkResourceTypeScript,
+}
+
+// ParseBlockedResourceTypes parses a comma-separated config value into
+// NetworkResourceType values accepted by the request blocker.
+func ParseBlockedResourceTypes(raw string) ([]proto.NetworkResourceType, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+
+	parts := strings.Split(raw, ",")
+	seen := make(map[proto.NetworkResourceType]struct{}, len(parts))
+	out := make([]proto.NetworkResourceType, 0, len(parts))
+
+	for _, part := range parts {
+		token := strings.TrimSpace(strings.ToLower(part))
+		if token == "" {
+			continue
+		}
+
+		resourceType, ok := blockedResourceTypeTokenMap[token]
+		if !ok {
+			return nil, fmt.Errorf("unsupported resource type %q", token)
+		}
+
+		if _, exists := seen[resourceType]; exists {
+			continue
+		}
+		seen[resourceType] = struct{}{}
+		out = append(out, resourceType)
+	}
+
+	return out, nil
+}
+
+// MustParseBlockedResourceTypes is like ParseBlockedResourceTypes but panics on error.
+// Only call this after the value has already been validated by ParseBlockedResourceTypes.
+func MustParseBlockedResourceTypes(raw string) []proto.NetworkResourceType {
+	types, err := ParseBlockedResourceTypes(raw)
+	if err != nil {
+		panic(fmt.Sprintf("MustParseBlockedResourceTypes: %v", err))
+	}
+	return types
+}
+
+func buildTrackingDomainURLPatterns(domains []string) []string {
+	patterns := make([]string, 0, len(domains)*2)
+	for _, domain := range domains {
+		domain = strings.TrimSpace(strings.ToLower(domain))
+		if domain == "" {
+			continue
+		}
+		patterns = append(patterns, "*://"+domain+"/*", "*://*."+domain+"/*")
+	}
+	return patterns
+}
+
+func blockedResourceTypeSet(types []proto.NetworkResourceType) map[proto.NetworkResourceType]struct{} {
+	out := make(map[proto.NetworkResourceType]struct{}, len(types))
+	for _, t := range types {
+		if t != "" {
+			out[t] = struct{}{}
+		}
+	}
+	return out
+}
+
+func (b *Browser) configureRequestBlocking(ctx context.Context, page *rod.Page) error {
+	if !b.BlockTrackers && len(b.BlockResourceTypes) == 0 {
+		return nil
+	}
+
+	if b.BlockTrackers && len(alwaysBlockedTrackingURLPatterns) > 0 {
+		if err := (proto.NetworkEnable{}).Call(page); err != nil {
+			return fmt.Errorf("enable network domain for tracker blocking: %w", err)
+		}
+		if err := (proto.NetworkSetBlockedURLs{Urls: alwaysBlockedTrackingURLPatterns}).Call(page); err != nil {
+			return fmt.Errorf("set blocked tracking URLs: %w", err)
+		}
+	}
+
+	if len(b.BlockResourceTypes) == 0 {
+		return nil
+	}
+
+	blocked := blockedResourceTypeSet(b.BlockResourceTypes)
+	router := page.HijackRequests()
+	router.MustAdd("*", func(h *rod.Hijack) {
+		if _, ok := blocked[h.Request.Type()]; ok {
+			h.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+			return
+		}
+		h.ContinueRequest(&proto.FetchContinueRequest{})
+	})
+
+	go router.Run()
+
+	// Stop the router when the page context is done to avoid goroutine leak.
+	go func() {
+		<-ctx.Done()
+		router.MustStop()
+	}()
+
+	return nil
 }
 
 // Browser wraps a launched Chromium instance used by engine implementations.
@@ -677,6 +803,10 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	}
 
 	page = page.Context(ctx)
+	if err := b.configureRequestBlocking(ctx, page); err != nil {
+		closeOnErr()
+		return nil, fmt.Errorf("configure request blocking failed: %w", err)
+	}
 	timedPage := page.Timeout(b.Timeout)
 
 	if err := timedPage.Navigate(URL); err != nil {

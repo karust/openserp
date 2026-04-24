@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	version               = "0.6.6"
+	version               = "0.6.7"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -58,6 +58,8 @@ type AppConfig struct {
 	IsBrowserHead  bool   `mapstructure:"head"`
 	IsLeaveHead    bool   `mapstructure:"leave_head"`
 	IsLeakless     bool   `mapstructure:"leakless"`
+	BlockResources string `mapstructure:"block_resources"`
+	BlockTrackers  bool   `mapstructure:"block_trackers"`
 	DebugEndpoints bool   `mapstructure:"debug_endpoints"`
 	LogFormat      string `mapstructure:"log_format"`
 }
@@ -227,6 +229,13 @@ func initializeConfig(cmd *cobra.Command) error {
 	// 3. Command flags (highest priority). Bind the current command's flags to viper
 	bindFlags(cmd, v)
 
+	// Keep compatibility with historical typo in local configs. Runs after all
+	// sources are merged so CLI flags and env vars take precedence over the typo key.
+	if v.IsSet("app.block_resorces") && !v.IsSet("app.block_resources") {
+		v.Set("app.block_resources", v.Get("app.block_resorces"))
+		logrus.Warn(`config key "app.block_resorces" is deprecated, use "app.block_resources"`)
+	}
+
 	if err := validateRemovedConfigPaths(v); err != nil {
 		return err
 	}
@@ -239,6 +248,10 @@ func initializeConfig(cmd *cobra.Command) error {
 	err = v.Unmarshal(&config)
 	if err != nil {
 		return fmt.Errorf("cannot unmarshall config: %v", err)
+	}
+
+	if _, err := core.ParseBlockedResourceTypes(config.App.BlockResources); err != nil {
+		return fmt.Errorf("invalid app.block_resources: %w", err)
 	}
 
 	config.Proxies, err = core.NormalizeProxiesConfig(config.Proxies)
@@ -324,6 +337,8 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("app.head", false)
 	v.SetDefault("app.leave_head", false)
 	v.SetDefault("app.leakless", false)
+	v.SetDefault("app.block_resources", "")
+	v.SetDefault("app.block_trackers", false)
 	v.SetDefault("app.debug_endpoints", false)
 
 	v.SetDefault("proxies.entries", []interface{}{})

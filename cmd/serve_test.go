@@ -169,3 +169,42 @@ func TestResolveCaptchaSolverConfigEnabledWithKey(t *testing.T) {
 		t.Fatalf("expected configured API key, got %q", key)
 	}
 }
+
+func TestBuildFingerprintBrowserOptionsRespectsBlockConfig(t *testing.T) {
+	origBlockResources := config.App.BlockResources
+	origBlockTrackers := config.App.BlockTrackers
+	origHead := config.App.IsBrowserHead
+	origLeakless := config.App.IsLeakless
+	origTimeout := config.App.Timeout
+	origBrowserPath := config.App.BrowserPath
+	origInsecure := config.Server.Insecure
+	origDebug := config.Server.IsDebug
+	defer func() {
+		config.App.BlockResources = origBlockResources
+		config.App.BlockTrackers = origBlockTrackers
+		config.App.IsBrowserHead = origHead
+		config.App.IsLeakless = origLeakless
+		config.App.Timeout = origTimeout
+		config.App.BrowserPath = origBrowserPath
+		config.Server.Insecure = origInsecure
+		config.Server.IsDebug = origDebug
+	}()
+
+	config.App.BlockResources = "image,font,css,media"
+	config.App.BlockTrackers = true
+	config.App.IsBrowserHead = false
+	config.App.IsLeakless = false
+	config.App.Timeout = 15
+	config.App.BrowserPath = ""
+	config.Server.Insecure = false
+	config.Server.IsDebug = false
+
+	opts := buildFingerprintBrowserOptions()
+	if len(opts.BlockResourceTypes) != 4 {
+		t.Fatalf("expected 4 blocked resource types, got %d", len(opts.BlockResourceTypes))
+	}
+	if !opts.BlockTrackers {
+		t.Fatal("expected tracker blocking to be enabled")
+	}
+
+}
