@@ -188,6 +188,11 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		return err
 	}
 
+	format, err := resolveFormat(c)
+	if err != nil {
+		return err
+	}
+
 	requestCtx = WithQueryHash(c.UserContext(), QueryHashFromQuery(q))
 	c.SetUserContext(requestCtx)
 
@@ -239,15 +244,17 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		}
 		env.Finalize(startedAt, q)
 
-		cacheStatus := s.cacheEnvelopeIfEligible(engine.Name(), usedEngine, action, q, env)
-		if cacheStatus != "" {
-			c.Set("X-Cache", cacheStatus)
+		if format == "json" {
+			cacheStatus := s.cacheEnvelopeIfEligible(engine.Name(), usedEngine, action, q, env)
+			if cacheStatus != "" {
+				c.Set("X-Cache", cacheStatus)
+			}
 		}
 		if usedEngine != "" && usedEngine != engine.Name() {
 			c.Set("X-Fallback-Engine", usedEngine)
 		}
 		WithRequest(requestCtx).WithFields(logrus.Fields{"action": action, "results_count": len(res)}).Info("Search completed")
-		return c.JSON(env)
+		return sendImageEnvelope(c, format, env)
 	}
 
 	var (
@@ -276,9 +283,11 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 	}
 	env.Finalize(startedAt, q)
 
-	cacheStatus := s.cacheEnvelopeIfEligible(engine.Name(), usedEngine, action, q, env)
-	if cacheStatus != "" {
-		c.Set("X-Cache", cacheStatus)
+	if format == "json" {
+		cacheStatus := s.cacheEnvelopeIfEligible(engine.Name(), usedEngine, action, q, env)
+		if cacheStatus != "" {
+			c.Set("X-Cache", cacheStatus)
+		}
 	}
 	if usedEngine != "" && usedEngine != engine.Name() {
 		c.Set("X-Fallback-Engine", usedEngine)
@@ -289,7 +298,7 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		completionCtx = WithEngine(completionCtx, usedEngine)
 	}
 	WithRequest(completionCtx).WithFields(logrus.Fields{"action": action, "results_count": len(res)}).Info("Search completed")
-	return c.JSON(env)
+	return sendEnvelope(c, format, env)
 }
 
 // classifySearchError maps internal sentinel errors to user-facing messages.
@@ -638,6 +647,12 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 		WithRequest(c.UserContext()).WithError(err).Warn("Invalid query parameters")
 		return err
 	}
+
+	format, err := resolveFormat(c)
+	if err != nil {
+		return err
+	}
+
 	requestCtx = WithQueryHash(c.UserContext(), QueryHashFromQuery(q))
 	c.SetUserContext(requestCtx)
 
@@ -688,13 +703,13 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 		}
 		env.Finalize(startedAt, q)
 
-		if s.cache != nil {
+		if format == "json" && s.cache != nil {
 			c.Set("X-Cache", s.cacheMegaImageResults(action, enginesToUse, q, env))
 		}
 		WithRequest(requestCtx).WithFields(logrus.Fields{
 			"action": action, "engines_count": len(enginesToUse), "results_count": len(env.Results),
 		}).Info("Mega search completed")
-		return c.JSON(env)
+		return sendImageEnvelope(c, format, env)
 	}
 
 	// Web search: enrich all raw results, build clusters from full set, then dedup flat list.
@@ -721,7 +736,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 		env.Clusters = &clusters
 	}
 
-	if s.cache != nil {
+	if format == "json" && s.cache != nil {
 		c.Set("X-Cache", s.cacheMegaEnvelopeResults(action, enginesToUse, q, env))
 	}
 
@@ -730,7 +745,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 		"engines_count": len(enginesToUse),
 		"results_count": len(env.Results),
 	}).Info("Mega search completed")
-	return c.JSON(env)
+	return sendEnvelope(c, format, env)
 }
 
 func (s *Server) handleListEngines(c *fiber.Ctx) error {
@@ -984,6 +999,67 @@ func (s *Server) handleSwaggerUI(c *fiber.Ctx) error {
 </html>`, html.EscapeString(specPath))
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	return c.SendString(page)
+}
+
+// resolveFormat returns the output format from ?format= or Accept header.
+// Supported values: "json" (default), "markdown", "text", "ndjson".
+func resolveFormat(c *fiber.Ctx) (string, error) {
+	raw := strings.ToLower(strings.TrimSpace(c.Query("format", "")))
+	if raw == "" {
+		accept := strings.ToLower(c.Get("Accept"))
+		switch {
+		case strings.Contains(accept, "text/markdown"):
+			raw = "markdown"
+		case strings.Contains(accept, "text/plain"):
+			raw = "text"
+		case strings.Contains(accept, "application/x-ndjson"):
+			raw = "ndjson"
+		default:
+			raw = "json"
+		}
+	}
+	switch raw {
+	case "json", "markdown", "text", "ndjson":
+		return raw, nil
+	}
+	return "", &APIError{HTTPStatus: 400, Reason: ReasonUnknownFormat,
+		Message: fmt.Sprintf("unknown format %q: accepted values are json, markdown, text, ndjson", raw)}
+}
+
+// sendEnvelope serialises env according to the requested format and writes the
+// response. For non-JSON formats the envelope is NOT cached because format
+// variants would pollute the JSON cache.
+func sendEnvelope(c *fiber.Ctx, format string, env *Envelope) error {
+	switch format {
+	case "markdown":
+		c.Set("Content-Type", "text/markdown; charset=utf-8")
+		return c.Send(RenderMarkdown(env))
+	case "text":
+		c.Set("Content-Type", "text/plain; charset=utf-8")
+		return c.Send(RenderText(env))
+	case "ndjson":
+		c.Set("Content-Type", "application/x-ndjson; charset=utf-8")
+		return c.Send(RenderNDJSON(env))
+	default:
+		return c.JSON(env)
+	}
+}
+
+// sendImageEnvelope is sendEnvelope for ImageEnvelope.
+func sendImageEnvelope(c *fiber.Ctx, format string, env *ImageEnvelope) error {
+	switch format {
+	case "markdown":
+		c.Set("Content-Type", "text/markdown; charset=utf-8")
+		return c.Send(RenderMarkdownImage(env))
+	case "text":
+		c.Set("Content-Type", "text/plain; charset=utf-8")
+		return c.Send(RenderTextImage(env))
+	case "ndjson":
+		c.Set("Content-Type", "application/x-ndjson; charset=utf-8")
+		return c.Send(RenderNDJSONImage(env))
+	default:
+		return c.JSON(env)
+	}
 }
 
 // SetDraining controls readiness state exposed by /ready.

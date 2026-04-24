@@ -1619,6 +1619,47 @@ func TestMegaSearchClustersGroupSameURL(t *testing.T) {
 	}
 }
 
+func TestFormatParamReturnsCorrectContentType(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7204, opts, engine)
+
+	tests := []struct {
+		format       string
+		wantCT       string
+		wantContains string
+	}{
+		{"json", "application/json", `"version"`},
+		{"markdown", "text/markdown", "# Search results"},
+		{"text", "text/plain", "Search:"},
+		{"ndjson", "application/x-ndjson", `"id"`},
+	}
+	for i, tt := range tests {
+		t.Run(tt.format, func(t *testing.T) {
+			// Use a unique query per subtest to avoid cache cross-contamination.
+			resp := request(t, srv, fmt.Sprintf("/google/search?text=query%d&format=%s", i, tt.format))
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("expected 200, got %d", resp.StatusCode)
+			}
+			if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, tt.wantCT) {
+				t.Fatalf("expected Content-Type to contain %q, got %q", tt.wantCT, ct)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			if !strings.Contains(string(body), tt.wantContains) {
+				t.Fatalf("expected body to contain %q, got: %s", tt.wantContains, string(body)[:min(200, len(body))])
+			}
+		})
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func TestResultIDIsStableAcrossRequests(t *testing.T) {
 	engine := &engineMock{name: "google", initialized: true}
 	opts := DefaultServerOptions()
