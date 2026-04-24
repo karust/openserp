@@ -1,11 +1,12 @@
 openapi: 3.0.3
 info:
   title: OpenSERP API
-  version: 0.6.3
+  version: 1.0.0
   description: >
     OpenSERP provides dedicated and multi-engine search endpoints for Google, Yandex,
-    Baidu, Bing, and DuckDuckGo. Responses are normalized into a shared schema and
-    include runtime metadata via response headers.
+    Baidu, Bing, and DuckDuckGo. All responses are wrapped in a v1 envelope with
+    query echo, metadata, normalized results, and pagination. Invalid client input
+    returns 400 with a machine-readable `reason` code.
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
@@ -31,8 +32,9 @@ paths:
       operationId: searchWeb
       summary: Search web results from a specific engine
       description: >
-        Engine path values are `google`, `yandex`, `baidu`, `bing`, and `duck` (`duck` maps
-        to DuckDuckGo internally).
+        Engine path values are `google`, `yandex`, `baidu`, `bing`, and `duck`
+        (`duck` maps to DuckDuckGo internally). Use `?format=markdown|text|ndjson`
+        for alternative output formats.
       parameters:
         - $ref: "#/components/parameters/EnginePath"
         - $ref: "#/components/parameters/TextQuery"
@@ -44,11 +46,14 @@ paths:
         - $ref: "#/components/parameters/StartQuery"
         - $ref: "#/components/parameters/FilterQuery"
         - $ref: "#/components/parameters/AnswersQuery"
+        - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
       responses:
         "200":
-          description: Search results
+          description: Search results envelope
           headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
             X-Cache:
               $ref: "#/components/headers/XCache"
             X-Fallback-Engine:
@@ -62,17 +67,70 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/SearchResult"
+                $ref: "#/components/schemas/SearchEnvelope"
               examples:
                 default:
                   value:
-                    - rank: 1
-                      url: https://go.dev/doc/
-                      title: The Go Programming Language
-                      description: Official Go language documentation.
-                      ad: false
+                    query:
+                      text: golang
+                      lang: EN
+                      location: null
+                      device: desktop
+                      engines_requested: [google]
+                    meta:
+                      request_id: 01HXYZ...
+                      timestamp: "2026-04-24T12:00:00Z"
+                      took_ms: 842
+                      engines_responded: [google]
+                      engines_failed: []
+                      version: "1.0"
+                    results:
+                      - id: r_a1b2c3d4e5f6a1b2c3d4e5f6
+                        rank: 1
+                        type: organic
+                        title: The Go Programming Language
+                        url: https://go.dev/
+                        display_url: go.dev
+                        snippet: Go is an open source programming language...
+                        domain: go.dev
+                        favicon: https://go.dev/favicon.ico
+                        is_ad: false
+                        position:
+                          absolute: 1
+                          page: 1
+                          on_page: 1
+                        engine: google
+                        rich: null
+                        engine_meta:
+                          raw_rank: 1
+                        domain_info:
+                          tld: dev
+                          sld: go
+                          is_gov: false
+                          is_edu: false
+                          is_mil: false
+                          is_news: false
+                          is_forum: false
+                          is_marketplace: false
+                          is_social: false
+                        classification:
+                          content_type: webpage
+                          source_hint: ""
+                    pagination:
+                      page: 1
+                      has_more: true
+                      next_start: 25
+            text/markdown:
+              schema:
+                type: string
+            text/plain:
+              schema:
+                type: string
+            application/x-ndjson:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequestError"
         "503":
           $ref: "#/components/responses/ServiceUnavailableError"
         "404":
@@ -95,11 +153,14 @@ paths:
         - $ref: "#/components/parameters/StartQuery"
         - $ref: "#/components/parameters/FilterQuery"
         - $ref: "#/components/parameters/AnswersQuery"
+        - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
       responses:
         "200":
-          description: Image search results
+          description: Image search results envelope
           headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
             X-Cache:
               $ref: "#/components/headers/XCache"
             X-Fallback-Engine:
@@ -113,17 +174,9 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/SearchResult"
-              examples:
-                default:
-                  value:
-                    - rank: 1
-                      url: https://upload.wikimedia.org/example/golang.png
-                      title: Golang logo image
-                      description: Example image result
-                      ad: false
+                $ref: "#/components/schemas/ImageEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
         "503":
           $ref: "#/components/responses/ServiceUnavailableError"
         "404":
@@ -135,6 +188,11 @@ paths:
       tags: [Mega]
       operationId: megaSearch
       summary: Search across multiple engines in parallel
+      description: >
+        Results are deduplicated by normalized URL. The `clusters` field groups
+        results that appeared in multiple engines, scored by cross-engine agreement.
+        Partial failures are surfaced in `meta.engines_failed` rather than causing
+        a 503. Use `?format=markdown|text|ndjson` for alternative output formats.
       parameters:
         - $ref: "#/components/parameters/TextQuery"
         - $ref: "#/components/parameters/LangQuery"
@@ -146,11 +204,14 @@ paths:
         - $ref: "#/components/parameters/FilterQuery"
         - $ref: "#/components/parameters/AnswersQuery"
         - $ref: "#/components/parameters/EnginesQuery"
+        - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
       responses:
         "200":
-          description: Aggregated and de-duplicated results
+          description: Aggregated envelope with clusters
           headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
             X-Cache:
               $ref: "#/components/headers/XCache"
             X-Proxy-Mode:
@@ -162,24 +223,16 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/MegaSearchResult"
-              examples:
-                default:
-                  value:
-                    - rank: 1
-                      url: https://go.dev/doc/
-                      title: The Go Programming Language
-                      description: Official documentation.
-                      ad: false
-                      engine: google
-                    - rank: 2
-                      url: https://pkg.go.dev/
-                      title: Go Packages
-                      description: Go package documentation.
-                      ad: false
-                      engine: bing
+                $ref: "#/components/schemas/MegaSearchEnvelope"
+            text/markdown:
+              schema:
+                type: string
+            text/plain:
+              schema:
+                type: string
+            application/x-ndjson:
+              schema:
+                type: string
         "400":
           $ref: "#/components/responses/BadRequestError"
         "500":
@@ -200,11 +253,14 @@ paths:
         - $ref: "#/components/parameters/FilterQuery"
         - $ref: "#/components/parameters/AnswersQuery"
         - $ref: "#/components/parameters/EnginesQuery"
+        - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
       responses:
         "200":
-          description: Aggregated and de-duplicated image results
+          description: Aggregated image results envelope
           headers:
+            X-Request-ID:
+              $ref: "#/components/headers/XRequestID"
             X-Cache:
               $ref: "#/components/headers/XCache"
             X-Proxy-Mode:
@@ -216,18 +272,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/MegaSearchResult"
-              examples:
-                default:
-                  value:
-                    - rank: 1
-                      url: https://upload.wikimedia.org/example/gopher.png
-                      title: Go Gopher
-                      description: Example image
-                      ad: false
-                      engine: duckduckgo
+                $ref: "#/components/schemas/ImageEnvelope"
         "400":
           $ref: "#/components/responses/BadRequestError"
         "500":
@@ -244,19 +289,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MegaEnginesResponse"
-              examples:
-                default:
-                  value:
-                    total: 5
-                    engines:
-                      - name: google
-                        initialized: true
-                        circuit_state: closed
-                      - name: bing
-                        initialized: true
-                        circuit_state: closed
-        "404":
-          $ref: "#/components/responses/NotFoundError"
   /health:
     get:
       tags: [Health]
@@ -269,40 +301,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
-              examples:
-                healthy:
-                  value:
-                    status: healthy
-                    uptime: 1h2m3s
-                    engines:
-                      - name: google
-                        initialized: true
-                        status: ready
-                    system:
-                      goroutines: 32
-                      memory_mb: 128
-                      go_version: go1.24.6
         "503":
           description: Unhealthy service
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
-              examples:
-                unhealthy:
-                  value:
-                    status: unhealthy
-                    uptime: 12m10s
-                    engines:
-                      - name: google
-                        initialized: false
-                        status: not_initialized
-                    system:
-                      goroutines: 14
-                      memory_mb: 96
-                      go_version: go1.24.6
-        "404":
-          $ref: "#/components/responses/NotFoundError"
   /ready:
     get:
       tags: [Health]
@@ -310,27 +314,17 @@ paths:
       summary: Service readiness status
       responses:
         "200":
-          description: Instance is ready to receive traffic
+          description: Instance is ready
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadinessStatus"
-              examples:
-                ready:
-                  value:
-                    status: ready
         "503":
-          description: Instance is draining and should not receive new traffic
+          description: Instance is draining
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadinessStatus"
-              examples:
-                draining:
-                  value:
-                    status: draining
-        "404":
-          $ref: "#/components/responses/NotFoundError"
   /stats:
     get:
       tags: [Stats]
@@ -343,43 +337,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatsResponse"
-              examples:
-                default:
-                  value:
-                    cache:
-                      status: true
-                      entries: 10
-                      hits: 200
-                      misses: 15
-                      bypasses: 4
-                      evictions: 0
-                      ttl_seconds: 60
-                      max_size: 1000
-                    proxy:
-                      configured_count: 2
-                      healthy_count: 2
-                      unhealthy_count: 0
-                      tags:
-                        default:
-                          configured: 2
-                          healthy: 2
-                      entries:
-                        - proxy: http://proxy1:8080
-                          tags: [default]
-                          healthy: true
-                          failures: 0
-                          disabled: false
-                      engines:
-                        google:
-                          tag: default
-                          selected_proxy: pooled
-                    circuit_breakers:
-                      - engine: google
-                        state: closed
-                        failure_count: 0
-                        last_changed: 2026-04-15T08:00:00Z
-        "404":
-          $ref: "#/components/responses/NotFoundError"
   /stats/cache:
     get:
       tags: [Stats]
@@ -392,22 +349,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CacheStats"
-              examples:
-                enabled:
-                  value:
-                    status: true
-                    entries: 1
-                    hits: 1
-                    misses: 2
-                    bypasses: 1
-                    evictions: 0
-                    ttl_seconds: 60
-                    max_size: 1000
-                disabled:
-                  value:
-                    status: false
-        "404":
-          $ref: "#/components/responses/NotFoundError"
   /stats/proxy:
     get:
       tags: [Stats]
@@ -415,35 +356,11 @@ paths:
       summary: Proxy pool and per-engine proxy policy statistics
       responses:
         "200":
-          description: Proxy stats payload
+          description: Proxy stats
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProxyStats"
-              examples:
-                default:
-                  value:
-                    configured_count: 1
-                    healthy_count: 1
-                    unhealthy_count: 0
-                    tags:
-                      us:
-                        configured: 1
-                        healthy: 1
-                    entries:
-                      - proxy: http://proxy-us:8080
-                        tags: [us]
-                        healthy: true
-                        failures: 0
-                        disabled: false
-                    engines:
-                      google:
-                        tag: us
-                        selected_proxy: pooled
-                      yandex:
-                        selected_proxy: direct
-        "404":
-          $ref: "#/components/responses/NotFoundError"
   /stats/cb:
     get:
       tags: [Stats]
@@ -451,22 +368,11 @@ paths:
       summary: Circuit breaker state per engine
       responses:
         "200":
-          description: Circuit breaker stats payload
+          description: Circuit breaker stats
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/CircuitBreakerStatsResponse"
-              examples:
-                default:
-                  value:
-                    circuit_breakers:
-                      - engine: google
-                        state: open
-                        failure_count: 5
-                        last_changed: 2026-04-15T08:00:00Z
-                        retry_in: 43
-        "404":
-          $ref: "#/components/responses/NotFoundError"
   /openapi.yaml:
     get:
       tags: [Docs]
@@ -479,8 +385,6 @@ paths:
             application/yaml:
               schema:
                 type: string
-        "404":
-          $ref: "#/components/responses/NotFoundError"
   /docs:
     get:
       tags: [Docs]
@@ -493,8 +397,6 @@ paths:
             text/html:
               schema:
                 type: string
-        "404":
-          $ref: "#/components/responses/NotFoundError"
 components:
   parameters:
     EnginePath:
@@ -551,9 +453,11 @@ components:
       name: limit
       in: query
       required: false
-      description: Maximum results to return.
+      description: Maximum results to return (1–100).
       schema:
         type: integer
+        minimum: 1
+        maximum: 100
         default: 25
       example: 10
     StartQuery:
@@ -574,7 +478,6 @@ components:
       schema:
         type: boolean
         default: true
-      example: true
     AnswersQuery:
       name: answers
       in: query
@@ -583,7 +486,6 @@ components:
       schema:
         type: boolean
         default: false
-      example: false
     EnginesQuery:
       name: engines
       in: query
@@ -593,13 +495,27 @@ components:
       schema:
         type: string
       example: google,bing,duckduckgo
+    FormatQuery:
+      name: format
+      in: query
+      required: false
+      description: >
+        Output format. `json` (default) returns the full envelope. `markdown` returns a
+        Markdown document suitable for Slack/email. `text` returns a minimal plain-text
+        block optimised for LLM context windows. `ndjson` returns one result object per
+        line with no envelope. The `Accept` header is also checked
+        (`text/markdown`, `text/plain`, `application/x-ndjson`).
+      schema:
+        type: string
+        enum: [json, markdown, text, ndjson]
+        default: json
     UseProxyHeader:
       name: X-Use-Proxy
       in: header
       required: false
       description: >
-        Request-scoped proxy override. Use `direct` to disable proxy for the request or
-        pass a proxy tag name (for example `us`) to force a tagged proxy pool.
+        Request-scoped proxy override. Use `direct` to disable proxy or a tag name to
+        force a specific proxy pool.
       schema:
         type: string
       examples:
@@ -608,10 +524,17 @@ components:
         tag:
           value: us
   headers:
+    XRequestID:
+      description: >
+        UUID v7 request identifier. Matches `meta.request_id` in the response body and
+        appears in server logs for correlation.
+      schema:
+        type: string
     XCache:
       description: Cache status when cache is enabled (`HIT`, `MISS`, `BYPASS`).
       schema:
         type: string
+        enum: [HIT, MISS, BYPASS]
     XFallbackEngine:
       description: Engine name used when dedicated endpoint fallback served the response.
       schema:
@@ -626,7 +549,7 @@ components:
       schema:
         type: string
     XProxyUsed:
-      description: Effective proxy target used (`direct`, masked proxy, `pooled`, `multiple`, `mixed`).
+      description: Effective proxy target used (`direct`, masked URL, `pooled`, `multiple`, `mixed`).
       schema:
         type: string
   responses:
@@ -637,11 +560,18 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
           examples:
-            invalidEngines:
+            invalidLimit:
               value:
                 error: bad_request
                 code: 400
-                message: No valid search engines specified
+                message: "INVALID_LIMIT: limit must be between 1 and 100"
+                reason: INVALID_LIMIT
+            emptyQuery:
+              value:
+                error: bad_request
+                code: 400
+                message: "EMPTY_QUERY: query cannot be empty"
+                reason: EMPTY_QUERY
     ServiceUnavailableError:
       description: Search failed and no result could be produced
       content:
@@ -660,66 +590,386 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
-          examples:
-            notFound:
-              value:
-                error: not_found
-                code: 404
-                message: Cannot GET /unknown
     InternalServerError:
-      description: Internal error while parsing/handling request
+      description: Internal error while handling request
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
-          examples:
-            parseError:
-              value:
-                error: server_error
-                code: 500
-                message: invalid syntax
   schemas:
-    SearchResult:
+    # ── v1 envelope ──────────────────────────────────────────────────
+    QueryEcho:
       type: object
-      required: [rank, url, title, description, ad]
+      required: [text, location, device, engines_requested]
       properties:
+        text:
+          type: string
+          example: golang
+        lang:
+          type: string
+          example: EN
+        location:
+          type: string
+          nullable: true
+        device:
+          type: string
+          example: desktop
+        engines_requested:
+          type: array
+          items:
+            type: string
+          example: [google]
+    ResponseMeta:
+      type: object
+      required: [request_id, timestamp, took_ms, engines_responded, engines_failed, version]
+      properties:
+        request_id:
+          type: string
+          example: 01HXYZ...
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-04-24T12:00:00Z"
+        took_ms:
+          type: integer
+          example: 842
+        engines_responded:
+          type: array
+          items:
+            type: string
+          example: [google, bing]
+        engines_failed:
+          type: array
+          items:
+            type: string
+          example: []
+        version:
+          type: string
+          example: "1.0"
+    Pagination:
+      type: object
+      required: [page, has_more, next_start]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          example: 1
+        has_more:
+          type: boolean
+          example: true
+        next_start:
+          type: integer
+          example: 25
+    # ── Result ───────────────────────────────────────────────────────
+    Position:
+      type: object
+      required: [absolute, page, on_page]
+      properties:
+        absolute:
+          type: integer
+          description: 1-based rank counting from the first result of the first page.
+          example: 1
+        page:
+          type: integer
+          example: 1
+        on_page:
+          type: integer
+          example: 1
+    DomainInfo:
+      type: object
+      required: [tld, sld, is_gov, is_edu, is_mil, is_news, is_forum, is_marketplace, is_social]
+      properties:
+        tld:
+          type: string
+          example: org
+        sld:
+          type: string
+          example: wikipedia
+        is_gov:
+          type: boolean
+        is_edu:
+          type: boolean
+        is_mil:
+          type: boolean
+        is_news:
+          type: boolean
+        is_forum:
+          type: boolean
+        is_marketplace:
+          type: boolean
+        is_social:
+          type: boolean
+    Classification:
+      type: object
+      required: [content_type, source_hint]
+      properties:
+        content_type:
+          type: string
+          enum: [article, document, video, forum_thread, webpage]
+          example: article
+        source_hint:
+          type: string
+          example: encyclopedia
+    ResultType:
+      type: string
+      description: >
+        SERP block type. New values require a minor version bump (`meta.version: "1.1"`).
+        In v1.0, engines emit `organic`, `ad`, or `answer_box`; other enum values are
+        reserved for future parser upgrades.
+      enum:
+        - organic
+        - ad
+        - featured_snippet
+        - knowledge_panel
+        - people_also_ask
+        - video
+        - image
+        - news
+        - shopping
+        - local
+        - answer_box
+    Result:
+      type: object
+      required:
+        - id
+        - rank
+        - type
+        - title
+        - url
+        - display_url
+        - snippet
+        - domain
+        - favicon
+        - is_ad
+        - position
+        - engine
+        - rich
+        - engine_meta
+      properties:
+        id:
+          type: string
+          description: >
+            Stable identifier: `r_` + hex(first 12 bytes of SHA-256(engine|normalized_url)).
+            Normalized URL: lowercase scheme+host, trailing slash stripped, utm_*/fbclid/gclid
+            tracking params removed. Same URL → same ID across requests.
+          example: r_a1b2c3d4e5f6a1b2c3d4e5f6
         rank:
           type: integer
           example: 1
-        url:
-          type: string
-          example: https://go.dev/doc/
+        type:
+          $ref: "#/components/schemas/ResultType"
         title:
           type: string
           example: The Go Programming Language
-        description:
+        url:
           type: string
-          example: Official Go language documentation.
-        ad:
+          example: https://go.dev/
+        display_url:
+          type: string
+          description: Breadcrumb form of the URL (e.g. `go.dev › doc › install`).
+          example: go.dev
+        snippet:
+          type: string
+          example: Go is an open source programming language...
+        domain:
+          type: string
+          description: Registrable domain with leading `www.` stripped.
+          example: go.dev
+        favicon:
+          type: string
+          description: Constructed as `https://{domain}/favicon.ico`. Not probed.
+          example: https://go.dev/favicon.ico
+        is_ad:
           type: boolean
           example: false
-    MegaSearchResult:
+        position:
+          $ref: "#/components/schemas/Position"
+        engine:
+          type: string
+          example: google
+        rich:
+          type: object
+          nullable: true
+          description: Reserved for future structured SERP data (stars, price, sitelinks).
+        engine_meta:
+          type: object
+          additionalProperties: true
+          description: Engine-specific data. Always contains `raw_rank`.
+          example:
+            raw_rank: 1
+        domain_info:
+          $ref: "#/components/schemas/DomainInfo"
+        classification:
+          $ref: "#/components/schemas/Classification"
+    # ── Image result ─────────────────────────────────────────────────
+    ImageData:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          example: https://example.com/gopher.png
+        thumbnail:
+          type: string
+          example: https://example.com/gopher-thumb.png
+        width:
+          type: integer
+          example: 1200
+        height:
+          type: integer
+          example: 800
+    ImageSource:
+      type: object
+      required: [page_url, domain]
+      properties:
+        page_url:
+          type: string
+          example: https://example.com/article-about-gophers
+        domain:
+          type: string
+          example: example.com
+    ImageResult:
+      type: object
+      required: [id, rank, type, title, image, source, engine, engine_meta]
+      properties:
+        id:
+          type: string
+          description: Stable identifier prefixed with `i_`.
+          example: i_a1b2c3d4e5f6a1b2c3d4e5f6
+        rank:
+          type: integer
+          example: 1
+        type:
+          type: string
+          enum: [image]
+        title:
+          type: string
+        image:
+          $ref: "#/components/schemas/ImageData"
+        source:
+          $ref: "#/components/schemas/ImageSource"
+        engine:
+          type: string
+        engine_meta:
+          type: object
+          additionalProperties: true
+    # ── Clusters (mega only) ──────────────────────────────────────────
+    ClusterOccurrence:
+      type: object
+      required: [engine, rank, result_id]
+      properties:
+        engine:
+          type: string
+          example: google
+        rank:
+          type: integer
+          example: 1
+        result_id:
+          type: string
+          example: r_a1b2c3d4e5f6a1b2c3d4e5f6
+    Cluster:
+      type: object
+      required: [id, canonical_url, domain, title, occurrences, engines_count, best_rank, score]
+      properties:
+        id:
+          type: string
+          description: >
+            Stable identifier: `c_` + hex(first 12 bytes of SHA-256(normalized_url)).
+          example: c_a1b2c3d4e5f6a1b2c3d4e5f6
+        canonical_url:
+          type: string
+          example: https://go.dev/
+        domain:
+          type: string
+          example: go.dev
+        title:
+          type: string
+          example: The Go Programming Language
+        occurrences:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClusterOccurrence"
+        engines_count:
+          type: integer
+          description: Number of engines this URL appeared in.
+          example: 3
+        best_rank:
+          type: integer
+          description: Lowest (best) rank seen across all engines.
+          example: 1
+        score:
+          type: number
+          format: float
+          description: >
+            Cross-engine agreement score: sum(1/rank for each occurrence) / engines_queried,
+            capped at 1.0. Higher is better.
+          example: 0.92
+    # ── Envelopes ─────────────────────────────────────────────────────
+    SearchEnvelope:
+      type: object
+      required: [query, meta, results, pagination]
+      properties:
+        query:
+          $ref: "#/components/schemas/QueryEcho"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/Result"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+    MegaSearchEnvelope:
       allOf:
-        - $ref: "#/components/schemas/SearchResult"
+        - $ref: "#/components/schemas/SearchEnvelope"
         - type: object
-          required: [engine]
           properties:
-            engine:
-              type: string
-              example: google
+            clusters:
+              type: array
+              nullable: true
+              items:
+                $ref: "#/components/schemas/Cluster"
+              description: >
+                Cross-engine clusters, sorted by score descending. Only present on
+                /mega/search responses. Absent (not null) on single-engine endpoints.
+    ImageEnvelope:
+      type: object
+      required: [query, meta, results, pagination]
+      properties:
+        query:
+          $ref: "#/components/schemas/QueryEcho"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImageResult"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+    # ── Error ─────────────────────────────────────────────────────────
     ErrorResponse:
       type: object
       required: [error, code]
       properties:
         error:
           type: string
-          example: service_unavailable
+          description: Stable machine-readable error class.
+          enum: [bad_request, not_found, rate_limited, service_unavailable, server_error, client_error, error]
+          example: bad_request
         code:
           type: integer
-          example: 503
+          example: 400
         message:
           type: string
-          example: all search engines failed
+          example: "INVALID_LIMIT: limit must be between 1 and 100"
+        reason:
+          type: string
+          description: >
+            Stable client-actionable reason code. Present on 400 errors.
+            Known values: INVALID_LIMIT, INVALID_START, INVALID_PARAM, EMPTY_QUERY,
+            NO_ENGINES, UNKNOWN_FORMAT.
+          example: INVALID_LIMIT
+    # ── Health / Stats ────────────────────────────────────────────────
     EngineHealth:
       type: object
       required: [name, initialized, status]
@@ -733,7 +983,6 @@ components:
         status:
           type: string
           enum: [ready, not_initialized, circuit_open]
-          example: ready
     HealthStatus:
       type: object
       required: [status, uptime, engines, system]
@@ -751,13 +1000,6 @@ components:
         system:
           type: object
           additionalProperties: true
-          properties:
-            goroutines:
-              type: integer
-            memory_mb:
-              type: integer
-            go_version:
-              type: string
     ReadinessStatus:
       type: object
       required: [status]
@@ -811,7 +1053,6 @@ components:
       properties:
         proxy:
           type: string
-          example: http://proxy-us:8080
         tags:
           type: array
           items:
@@ -830,7 +1071,6 @@ components:
           type: string
         selected_proxy:
           type: string
-          example: direct
     ProxyStats:
       type: object
       required: [configured_count, healthy_count, unhealthy_count, tags, entries]
@@ -859,7 +1099,6 @@ components:
       properties:
         engine:
           type: string
-          example: google
         state:
           type: string
           enum: [closed, open, half-open]
@@ -897,7 +1136,6 @@ components:
       properties:
         name:
           type: string
-          example: google
         initialized:
           type: boolean
         circuit_state:
