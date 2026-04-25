@@ -287,10 +287,19 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 				continue
 			}
 			res := core.SearchResult{
-				Rank:        (searchPage * 30) + (i + 1),
-				URL:         img.URL[0].Original,
-				Title:       img.Title,
-				Description: fmt.Sprintf("%v,%v,%vx%x,copyright:%v", img.PictureDate, img.Type, img.Height, img.Width, img.IsCopyright),
+				Rank:  (searchPage * 30) + (i + 1),
+				URL:   img.URL[0].Original,
+				Title: img.Title,
+				Description: fmt.Sprintf(
+					"Source Page: %s, thumb_url:%s, %dx%d, date:%v, type:%v, copyright:%v",
+					img.URL[0].SourcePage,
+					img.ThumbURL,
+					img.Width,
+					img.Height,
+					img.PictureDate,
+					img.Type,
+					img.IsCopyright,
+				),
 				Ad: func() bool {
 					if img.AdType != "0" {
 						return true

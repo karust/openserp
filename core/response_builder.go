@@ -1,13 +1,22 @@
 package core
 
 import (
-	"crypto/sha256"
+	"crypto/md5"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 )
+
+const responseIDBytes = 8
+
+var imageDimensionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)height:\s*(\d+),\s*width:\s*(\d+)`),
+	regexp.MustCompile(`(?i)\b(\d+)x(\d+)\b`),
+}
 
 // EnrichContext carries request-scoped values needed to enrich a raw result.
 type EnrichContext struct {
@@ -38,12 +47,8 @@ func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 	if limit <= 0 {
 		limit = 25
 	}
-	onPage := raw.Rank
-	if onPage < 0 {
-		onPage = 0
-	}
-	absolute := ctx.Query.Start + onPage
 	page := ctx.Query.Start/limit + 1
+	absolute, onPage := computeResultPosition(raw.Rank, ctx.Query.Start)
 
 	result := Result{
 		ID:         buildResultID(ctx.Engine, normalizedURL),
@@ -62,10 +67,6 @@ func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 			OnPage:   onPage,
 		},
 		Engine: ctx.Engine,
-		Rich:   nil,
-		EngineMeta: map[string]any{
-			"raw_rank": raw.Rank,
-		},
 	}
 
 	result.DomainInfo = EnrichDomainInfo(domain)
@@ -77,12 +78,15 @@ func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 // EnrichImageResult converts a raw engine result into the v1 ImageResult shape.
 func EnrichImageResult(raw SearchResult, ctx EnrichContext) ImageResult {
 	imageURL := normalizeURL(raw.URL)
-	// raw.Description may hold the page URL for image results in some engines.
-	pageURL := raw.Description
+	meta := parseImageDescription(raw.Description)
+
+	pageURL := meta.PageURL
 	if pageURL == "" {
 		pageURL = imageURL
 	}
+	pageURL = normalizeURL(pageURL)
 	sourceDomain := extractDomain(pageURL)
+	imageWidth, imageHeight := meta.Width, meta.Height
 
 	return ImageResult{
 		ID:    buildImageID(ctx.Engine, imageURL),
@@ -90,27 +94,42 @@ func EnrichImageResult(raw SearchResult, ctx EnrichContext) ImageResult {
 		Type:  ResultTypeImage,
 		Title: raw.Title,
 		Image: ImageData{
-			URL: imageURL,
+			URL:       imageURL,
+			Thumbnail: meta.ThumbnailURL,
+			Width:     imageWidth,
+			Height:    imageHeight,
 		},
 		Source: ImageSource{
 			PageURL: pageURL,
 			Domain:  sourceDomain,
 		},
-		Engine:     ctx.Engine,
-		EngineMeta: map[string]any{"raw_rank": raw.Rank},
+		Engine: ctx.Engine,
 	}
 }
 
-// buildResultID returns a stable "r_<hex>" ID for web results.
+// buildResultID returns a stable "s_<hex>" ID for web results.
 func buildResultID(engine, normalizedURL string) string {
-	h := sha256.Sum256([]byte(engine + "|" + normalizedURL))
-	return "r_" + hex.EncodeToString(h[:12])
+	return "s_" + shortMD5(engine+"|"+normalizedURL)
 }
 
 // buildImageID returns a stable "i_<hex>" ID for image results.
 func buildImageID(engine, imageURL string) string {
-	h := sha256.Sum256([]byte(engine + "|" + imageURL))
-	return "i_" + hex.EncodeToString(h[:12])
+	return "i_" + shortMD5(engine+"|"+imageURL)
+}
+
+func shortMD5(value string) string {
+	h := md5.Sum([]byte(value))
+	return hex.EncodeToString(h[:responseIDBytes])
+}
+
+func computeResultPosition(rank, start int) (absolute, onPage int) {
+	if rank <= 0 {
+		return 0, 0
+	}
+	if start > 0 && rank > start {
+		return rank, rank - start
+	}
+	return start + rank, rank
 }
 
 // normalizeURL lowercases scheme+host, strips trailing slash, and removes
@@ -233,6 +252,70 @@ func buildDisplayURL(rawURL, domain string) string {
 // decodeBase64String decodes standard (not URL-safe) base64.
 func decodeBase64String(s string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(s)
+}
+
+type imageDescriptionMeta struct {
+	PageURL      string
+	ThumbnailURL string
+	Width        int
+	Height       int
+}
+
+func parseImageDescription(desc string) imageDescriptionMeta {
+	meta := imageDescriptionMeta{}
+	trimmed := strings.TrimSpace(desc)
+	if trimmed == "" {
+		return meta
+	}
+
+	lower := strings.ToLower(trimmed)
+	if idx := strings.Index(lower, "source page:"); idx >= 0 {
+		meta.PageURL = strings.TrimSpace(trimmed[idx+len("source page:"):])
+		if comma := strings.Index(meta.PageURL, ","); comma >= 0 {
+			meta.PageURL = strings.TrimSpace(meta.PageURL[:comma])
+		}
+	} else if strings.HasPrefix(lower, "source:") {
+		meta.PageURL = strings.TrimSpace(trimmed[len("source:"):])
+	}
+
+	if idx := strings.Index(lower, "thumb_url:"); idx >= 0 {
+		meta.ThumbnailURL = strings.TrimSpace(trimmed[idx+len("thumb_url:"):])
+		if comma := strings.Index(meta.ThumbnailURL, ","); comma >= 0 {
+			meta.ThumbnailURL = strings.TrimSpace(meta.ThumbnailURL[:comma])
+		}
+	}
+
+	for _, pattern := range imageDimensionPatterns {
+		match := pattern.FindStringSubmatch(trimmed)
+		if len(match) != 3 {
+			continue
+		}
+		first, firstErr := strconv.Atoi(match[1])
+		second, secondErr := strconv.Atoi(match[2])
+		if firstErr != nil || secondErr != nil {
+			continue
+		}
+		if strings.Contains(strings.ToLower(match[0]), "height") {
+			meta.Height = first
+			meta.Width = second
+		} else {
+			meta.Width = first
+			meta.Height = second
+		}
+		break
+	}
+
+	if !isHTTPURL(meta.PageURL) {
+		meta.PageURL = ""
+	}
+	if !isHTTPURL(meta.ThumbnailURL) {
+		meta.ThumbnailURL = ""
+	}
+	return meta
+}
+
+func isHTTPURL(value string) bool {
+	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://")
 }
 
 // NormalizeURLForClustering returns a URL suitable for cross-engine grouping

@@ -10,10 +10,7 @@ import (
 func RenderMarkdown(env *Envelope) []byte {
 	var b strings.Builder
 
-	enginesStr := strings.Join(env.Meta.EnginesResponded, ", ")
-	if enginesStr == "" {
-		enginesStr = strings.Join(env.Query.EnginesRequested, ", ")
-	}
+	enginesStr := strings.Join(env.Query.EnginesRequested, ", ")
 	fmt.Fprintf(&b, "# Search results for %q\n\n", env.Query.Text)
 	fmt.Fprintf(&b, "**Query:** %s · **Engines:** %s · **Took:** %dms\n\n",
 		env.Query.Text, enginesStr, env.Meta.TookMs)
@@ -42,10 +39,7 @@ func RenderMarkdown(env *Envelope) []byte {
 func RenderMarkdownImage(env *ImageEnvelope) []byte {
 	var b strings.Builder
 
-	enginesStr := strings.Join(env.Meta.EnginesResponded, ", ")
-	if enginesStr == "" {
-		enginesStr = strings.Join(env.Query.EnginesRequested, ", ")
-	}
+	enginesStr := strings.Join(env.Query.EnginesRequested, ", ")
 	fmt.Fprintf(&b, "# Image results for %q\n\n", env.Query.Text)
 	fmt.Fprintf(&b, "**Query:** %s · **Engines:** %s · **Took:** %dms\n\n",
 		env.Query.Text, enginesStr, env.Meta.TookMs)

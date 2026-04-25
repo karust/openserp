@@ -74,18 +74,15 @@ paths:
                     query:
                       text: golang
                       lang: EN
-                      location: null
-                      device: desktop
                       engines_requested: [google]
                     meta:
                       request_id: 01HXYZ...
-                      timestamp: "2026-04-24T12:00:00Z"
+                      requested_at: "2026-04-24T12:00:00Z"
                       took_ms: 842
-                      engines_responded: [google]
                       engines_failed: []
                       version: "1.0"
                     results:
-                      - id: r_a1b2c3d4e5f6a1b2c3d4e5f6
+                      - id: s_a1b2c3d4e5f6a1b2
                         rank: 1
                         type: organic
                         title: The Go Programming Language
@@ -100,9 +97,6 @@ paths:
                           page: 1
                           on_page: 1
                         engine: google
-                        rich: null
-                        engine_meta:
-                          raw_rank: 1
                         domain_info:
                           tld: dev
                           sld: go
@@ -600,7 +594,7 @@ components:
     # ── v1 envelope ──────────────────────────────────────────────────
     QueryEcho:
       type: object
-      required: [text, location, device, engines_requested]
+      required: [text, engines_requested]
       properties:
         text:
           type: string
@@ -608,12 +602,6 @@ components:
         lang:
           type: string
           example: EN
-        location:
-          type: string
-          nullable: true
-        device:
-          type: string
-          example: desktop
         engines_requested:
           type: array
           items:
@@ -621,23 +609,18 @@ components:
           example: [google]
     ResponseMeta:
       type: object
-      required: [request_id, timestamp, took_ms, engines_responded, engines_failed, version]
+      required: [request_id, requested_at, took_ms, engines_failed, version]
       properties:
         request_id:
           type: string
           example: 01HXYZ...
-        timestamp:
+        requested_at:
           type: string
           format: date-time
           example: "2026-04-24T12:00:00Z"
         took_ms:
           type: integer
           example: 842
-        engines_responded:
-          type: array
-          items:
-            type: string
-          example: [google, bing]
         engines_failed:
           type: array
           items:
@@ -743,16 +726,14 @@ components:
         - is_ad
         - position
         - engine
-        - rich
-        - engine_meta
       properties:
         id:
           type: string
           description: >
-            Stable identifier: `r_` + hex(first 12 bytes of SHA-256(engine|normalized_url)).
+            Stable identifier: `s_` + hex(first 8 bytes of MD5(engine|normalized_url)).
             Normalized URL: lowercase scheme+host, trailing slash stripped, utm_*/fbclid/gclid
             tracking params removed. Same URL → same ID across requests.
-          example: r_a1b2c3d4e5f6a1b2c3d4e5f6
+          example: s_a1b2c3d4e5f6a1b2
         rank:
           type: integer
           example: 1
@@ -787,16 +768,6 @@ components:
         engine:
           type: string
           example: google
-        rich:
-          type: object
-          nullable: true
-          description: Reserved for future structured SERP data (stars, price, sitelinks).
-        engine_meta:
-          type: object
-          additionalProperties: true
-          description: Engine-specific data. Always contains `raw_rank`.
-          example:
-            raw_rank: 1
         domain_info:
           $ref: "#/components/schemas/DomainInfo"
         classification:
@@ -830,12 +801,12 @@ components:
           example: example.com
     ImageResult:
       type: object
-      required: [id, rank, type, title, image, source, engine, engine_meta]
+      required: [id, rank, type, title, image, source, engine]
       properties:
         id:
           type: string
           description: Stable identifier prefixed with `i_`.
-          example: i_a1b2c3d4e5f6a1b2c3d4e5f6
+          example: i_a1b2c3d4e5f6a1b2
         rank:
           type: integer
           example: 1
@@ -850,9 +821,6 @@ components:
           $ref: "#/components/schemas/ImageSource"
         engine:
           type: string
-        engine_meta:
-          type: object
-          additionalProperties: true
     # ── Clusters (mega only) ──────────────────────────────────────────
     ClusterOccurrence:
       type: object
@@ -866,7 +834,7 @@ components:
           example: 1
         result_id:
           type: string
-          example: r_a1b2c3d4e5f6a1b2c3d4e5f6
+          example: s_a1b2c3d4e5f6a1b2
     Cluster:
       type: object
       required: [id, canonical_url, domain, title, occurrences, engines_count, best_rank, score]
@@ -874,8 +842,8 @@ components:
         id:
           type: string
           description: >
-            Stable identifier: `c_` + hex(first 12 bytes of SHA-256(normalized_url)).
-          example: c_a1b2c3d4e5f6a1b2c3d4e5f6
+            Stable identifier: `c_` + hex(first 8 bytes of MD5(normalized_url)).
+          example: c_a1b2c3d4e5f6a1b2
         canonical_url:
           type: string
           example: https://go.dev/

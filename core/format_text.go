@@ -12,7 +12,7 @@ func RenderText(env *Envelope) []byte {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Search: %s\n", env.Query.Text)
-	enginesStr := strings.Join(env.Meta.EnginesResponded, ", ")
+	enginesStr := strings.Join(env.Query.EnginesRequested, ", ")
 	if enginesStr != "" {
 		fmt.Fprintf(&b, "Engines: %s\n", enginesStr)
 	}

@@ -6,19 +6,16 @@ import "time"
 type QueryEcho struct {
 	Text             string   `json:"text"`
 	Lang             string   `json:"lang,omitempty"`
-	Location         *string  `json:"location"`
-	Device           string   `json:"device"`
 	EnginesRequested []string `json:"engines_requested"`
 }
 
 // ResponseMeta carries request-level metadata for observability and debugging.
 type ResponseMeta struct {
-	RequestID       string   `json:"request_id"`
-	Timestamp       string   `json:"timestamp"`
-	TookMs          int64    `json:"took_ms"`
-	EnginesResponded []string `json:"engines_responded"`
-	EnginesFailed    []string `json:"engines_failed"`
-	Version         string   `json:"version"`
+	RequestID     string   `json:"request_id"`
+	RequestedAt   string   `json:"requested_at"`
+	TookMs        int64    `json:"took_ms"`
+	EnginesFailed []string `json:"engines_failed"`
+	Version       string   `json:"version"`
 }
 
 // Pagination carries cursor information for client-side loop termination.
@@ -60,10 +57,10 @@ type ClusterOccurrence struct {
 
 // ImageEnvelope is the top-level v1 response wrapper for image search endpoints.
 type ImageEnvelope struct {
-	Query      QueryEcho    `json:"query"`
-	Meta       ResponseMeta `json:"meta"`
+	Query      QueryEcho     `json:"query"`
+	Meta       ResponseMeta  `json:"meta"`
 	Results    []ImageResult `json:"results"`
-	Pagination Pagination   `json:"pagination"`
+	Pagination Pagination    `json:"pagination"`
 }
 
 const apiVersion = "1.0"
@@ -75,16 +72,13 @@ func NewEnvelope(q Query, requestID string, startedAt time.Time, engines []strin
 		Query: QueryEcho{
 			Text:             q.Text,
 			Lang:             q.LangCode,
-			Location:         nil,
-			Device:           "desktop",
 			EnginesRequested: engines,
 		},
 		Meta: ResponseMeta{
-			RequestID:        requestID,
-			Timestamp:        startedAt.UTC().Format(time.RFC3339),
-			EnginesResponded: []string{},
-			EnginesFailed:    []string{},
-			Version:          apiVersion,
+			RequestID:     requestID,
+			RequestedAt:   startedAt.UTC().Format(time.RFC3339),
+			EnginesFailed: []string{},
+			Version:       apiVersion,
 		},
 		Results:    []Result{},
 		Pagination: Pagination{},
@@ -97,16 +91,13 @@ func NewImageEnvelope(q Query, requestID string, startedAt time.Time, engines []
 		Query: QueryEcho{
 			Text:             q.Text,
 			Lang:             q.LangCode,
-			Location:         nil,
-			Device:           "desktop",
 			EnginesRequested: engines,
 		},
 		Meta: ResponseMeta{
-			RequestID:        requestID,
-			Timestamp:        startedAt.UTC().Format(time.RFC3339),
-			EnginesResponded: []string{},
-			EnginesFailed:    []string{},
-			Version:          apiVersion,
+			RequestID:     requestID,
+			RequestedAt:   startedAt.UTC().Format(time.RFC3339),
+			EnginesFailed: []string{},
+			Version:       apiVersion,
 		},
 		Results:    []ImageResult{},
 		Pagination: Pagination{},

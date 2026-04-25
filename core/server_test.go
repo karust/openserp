@@ -645,6 +645,13 @@ func TestDedicatedEndpointFallbackBypassesCache(t *testing.T) {
 	if got := first.Header.Get("X-Fallback-Engine"); got != "yandex" {
 		t.Fatalf("expected fallback engine header, got %q", got)
 	}
+	var env Envelope
+	if err := json.NewDecoder(first.Body).Decode(&env); err != nil {
+		t.Fatalf("decode fallback envelope: %v", err)
+	}
+	if len(env.Meta.EnginesFailed) != 1 || env.Meta.EnginesFailed[0] != "google" {
+		t.Fatalf("expected primary engine in engines_failed, got %v", env.Meta.EnginesFailed)
+	}
 
 	second := request(t, srv, "/google/search?text=golang")
 	if second.StatusCode != http.StatusOK {
@@ -1650,6 +1657,172 @@ func TestFormatParamReturnsCorrectContentType(t *testing.T) {
 				t.Fatalf("expected body to contain %q, got: %s", tt.wantContains, string(body)[:min(200, len(body))])
 			}
 		})
+	}
+}
+
+func TestFormatParamBypassesJSONCache(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7205, opts, engine)
+
+	first := request(t, srv, "/google/search?text=cache-format&format=json")
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("expected first request 200, got %d", first.StatusCode)
+	}
+
+	second := request(t, srv, "/google/search?text=cache-format&format=markdown")
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("expected second request 200, got %d", second.StatusCode)
+	}
+	if ct := second.Header.Get("Content-Type"); !strings.Contains(ct, "text/markdown") {
+		t.Fatalf("expected markdown content type, got %q", ct)
+	}
+	body, _ := io.ReadAll(second.Body)
+	if !strings.Contains(string(body), "# Search results") {
+		t.Fatalf("expected markdown body, got %q", string(body))
+	}
+
+	engine.mu.Lock()
+	searchCalls := engine.searchCalls
+	engine.mu.Unlock()
+	if searchCalls != 2 {
+		t.Fatalf("expected markdown request to bypass JSON cache, got %d search calls", searchCalls)
+	}
+}
+
+func TestCachedEnvelopeRefreshesRequestID(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7206, opts, engine)
+
+	first := requestWithHeader(t, srv, "/google/search?text=cache-id", "X-Request-ID", "req-first")
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("expected first request 200, got %d", first.StatusCode)
+	}
+	second := requestWithHeader(t, srv, "/google/search?text=cache-id", "X-Request-ID", "req-second")
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("expected second request 200, got %d", second.StatusCode)
+	}
+	if got := second.Header.Get("X-Cache"); got != "HIT" {
+		t.Fatalf("expected cache hit, got %q", got)
+	}
+
+	var env Envelope
+	if err := json.NewDecoder(second.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Meta.RequestID != "req-second" {
+		t.Fatalf("expected refreshed meta.request_id, got %q", env.Meta.RequestID)
+	}
+	if got := second.Header.Get("X-Request-ID"); got != env.Meta.RequestID {
+		t.Fatalf("expected header/body request IDs to match, header=%q body=%q", got, env.Meta.RequestID)
+	}
+}
+
+func TestPaginatedPositionUsesAbsoluteRank(t *testing.T) {
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return []SearchResult{{Rank: 11, URL: "https://example.com/page", Title: "Page"}}, nil
+		},
+	}
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7207, opts, engine)
+
+	resp := request(t, srv, "/google/search?text=page&start=10&limit=10")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var env Envelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if len(env.Results) != 1 {
+		t.Fatalf("expected one result, got %d", len(env.Results))
+	}
+	pos := env.Results[0].Position
+	if pos.Absolute != 11 || pos.OnPage != 1 || pos.Page != 2 {
+		t.Fatalf("unexpected position: %+v", pos)
+	}
+}
+
+func TestImageEnvelopeEnrichesMetadataFromDescription(t *testing.T) {
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		imageFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return []SearchResult{{
+				Rank:        1,
+				URL:         "https://cdn.example.com/image.jpg",
+				Title:       "Image",
+				Description: "Height:800, Width:1200, Source Page: https://example.com/article",
+			}}, nil
+		},
+	}
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7208, opts, engine)
+
+	resp := request(t, srv, "/google/image?text=image")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var env ImageEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if len(env.Results) != 1 {
+		t.Fatalf("expected one image result, got %d", len(env.Results))
+	}
+	got := env.Results[0]
+	if got.Image.Width != 1200 || got.Image.Height != 800 {
+		t.Fatalf("expected image dimensions 1200x800, got %dx%d", got.Image.Width, got.Image.Height)
+	}
+	if got.Source.PageURL != "https://example.com/article" || got.Source.Domain != "example.com" {
+		t.Fatalf("unexpected source: %+v", got.Source)
+	}
+}
+
+func TestMegaSearchDeduplicatesByNormalizedURLDeterministically(t *testing.T) {
+	google := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return []SearchResult{{Rank: 2, URL: "https://example.com/page?utm_source=test", Title: "Google"}}, nil
+		},
+	}
+	bing := &engineMock{
+		name:        "bing",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return []SearchResult{{Rank: 1, URL: "https://example.com/page", Title: "Bing"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7209, opts, google, bing)
+
+	resp := request(t, srv, "/mega/search?text=dedupe&engines=google,bing")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var env Envelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if len(env.Results) != 1 {
+		t.Fatalf("expected one deduped result, got %d", len(env.Results))
+	}
+	if env.Results[0].Engine != "bing" || env.Results[0].Rank != 1 {
+		t.Fatalf("expected best-ranked bing result, got engine=%q rank=%d", env.Results[0].Engine, env.Results[0].Rank)
 	}
 }
 

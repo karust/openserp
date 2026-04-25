@@ -1,7 +1,7 @@
 package core
 
 import (
-	"crypto/sha256"
+	"crypto/md5"
 	"encoding/hex"
 	"sort"
 )
@@ -17,12 +17,12 @@ func BuildClusters(results []Result, enginesQueried int) []Cluster {
 	}
 
 	type clusterAccum struct {
-		occurrences []ClusterOccurrence
-		scoreSum    float64
-		bestRank    int
-		title       string
+		occurrences  []ClusterOccurrence
+		scoreSum     float64
+		bestRank     int
+		title        string
 		canonicalURL string
-		domain      string
+		domain       string
 	}
 
 	// Group by result ID (which is derived from normalized URL + engine).
@@ -95,8 +95,8 @@ func BuildClusters(results []Result, enginesQueried int) []Cluster {
 }
 
 func buildClusterID(normalizedURL string) string {
-	h := sha256.Sum256([]byte(normalizedURL))
-	return "c_" + hex.EncodeToString(h[:12])
+	h := md5.Sum([]byte(normalizedURL))
+	return "c_" + hex.EncodeToString(h[:responseIDBytes])
 }
 
 func roundScore(s float64) float64 {

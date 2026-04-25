@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	version               = "0.6.7"
+	version               = "0.7.0"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )

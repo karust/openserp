@@ -4,17 +4,17 @@ package core
 type ResultType string
 
 const (
-	ResultTypeOrganic        ResultType = "organic"
-	ResultTypeAd             ResultType = "ad"
+	ResultTypeOrganic         ResultType = "organic"
+	ResultTypeAd              ResultType = "ad"
 	ResultTypeFeaturedSnippet ResultType = "featured_snippet"
-	ResultTypeKnowledgePanel ResultType = "knowledge_panel"
-	ResultTypePeopleAlsoAsk  ResultType = "people_also_ask"
-	ResultTypeVideo          ResultType = "video"
-	ResultTypeImage          ResultType = "image"
-	ResultTypeNews           ResultType = "news"
-	ResultTypeShopping       ResultType = "shopping"
-	ResultTypeLocal          ResultType = "local"
-	ResultTypeAnswerBox      ResultType = "answer_box"
+	ResultTypeKnowledgePanel  ResultType = "knowledge_panel"
+	ResultTypePeopleAlsoAsk   ResultType = "people_also_ask"
+	ResultTypeVideo           ResultType = "video"
+	ResultTypeImage           ResultType = "image"
+	ResultTypeNews            ResultType = "news"
+	ResultTypeShopping        ResultType = "shopping"
+	ResultTypeLocal           ResultType = "local"
+	ResultTypeAnswerBox       ResultType = "answer_box"
 )
 
 // Position describes where a result sits in the overall result stream.
@@ -25,21 +25,6 @@ type Position struct {
 	Page int `json:"page"`
 	// OnPage is the 1-based rank within this page.
 	OnPage int `json:"on_page"`
-}
-
-// RichData is a placeholder for future structured SERP features such as star
-// ratings, prices, or sitelinks. It is null in v1.0.
-type RichData struct {
-	Stars    *float64          `json:"stars,omitempty"`
-	Reviews  *int              `json:"reviews,omitempty"`
-	Price    *string           `json:"price,omitempty"`
-	Sitelinks []RichSitelink   `json:"sitelinks,omitempty"`
-}
-
-// RichSitelink is one navigational sub-link shown below a result.
-type RichSitelink struct {
-	Title string `json:"title"`
-	URL   string `json:"url"`
 }
 
 // DomainInfo carries TLD-derived category signals for a result domain.
@@ -63,21 +48,19 @@ type Classification struct {
 
 // Result is the v1 normalized result returned in every search response.
 type Result struct {
-	ID           string         `json:"id"`
-	Rank         int            `json:"rank"`
-	Type         ResultType     `json:"type"`
-	Title        string         `json:"title"`
-	URL          string         `json:"url"`
-	DisplayURL   string         `json:"display_url"`
-	Snippet      string         `json:"snippet"`
-	Domain       string         `json:"domain"`
-	Favicon      string         `json:"favicon"`
-	IsAd         bool           `json:"is_ad"`
-	Position     Position       `json:"position"`
-	Engine       string         `json:"engine"`
-	Rich         *RichData      `json:"rich"`
-	EngineMeta   map[string]any `json:"engine_meta"`
-	DomainInfo   *DomainInfo    `json:"domain_info,omitempty"`
+	ID             string          `json:"id"`
+	Rank           int             `json:"rank"`
+	Type           ResultType      `json:"type"`
+	Title          string          `json:"title"`
+	URL            string          `json:"url"`
+	DisplayURL     string          `json:"display_url"`
+	Snippet        string          `json:"snippet"`
+	Domain         string          `json:"domain"`
+	Favicon        string          `json:"favicon"`
+	IsAd           bool            `json:"is_ad"`
+	Position       Position        `json:"position"`
+	Engine         string          `json:"engine"`
+	DomainInfo     *DomainInfo     `json:"domain_info,omitempty"`
 	Classification *Classification `json:"classification,omitempty"`
 }
 
@@ -97,12 +80,11 @@ type ImageSource struct {
 
 // ImageResult is the v1 shape for image search results.
 type ImageResult struct {
-	ID         string         `json:"id"`
-	Rank       int            `json:"rank"`
-	Type       ResultType     `json:"type"`
-	Title      string         `json:"title"`
-	Image      ImageData      `json:"image"`
-	Source     ImageSource    `json:"source"`
-	Engine     string         `json:"engine"`
-	EngineMeta map[string]any `json:"engine_meta"`
+	ID     string      `json:"id"`
+	Rank   int         `json:"rank"`
+	Type   ResultType  `json:"type"`
+	Title  string      `json:"title"`
+	Image  ImageData   `json:"image"`
+	Source ImageSource `json:"source"`
+	Engine string      `json:"engine"`
 }

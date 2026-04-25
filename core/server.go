@@ -206,14 +206,17 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		WithField("action", action).
 		Debugf("Starting %s request for query: %s", action, q.Text)
 
-	if hit, err := s.tryServeCacheHit(
-		c,
-		cacheHitCandidate{
-			key:        BuildCacheKey(engine.Name(), action, q),
-			logMessage: fmt.Sprintf("Cache hit for %s %s: %s", engine.Name(), action, q.Text),
-		},
-	); hit || err != nil {
-		return err
+	if format == "json" {
+		if hit, err := s.tryServeCacheHit(
+			c,
+			startedAt,
+			cacheHitCandidate{
+				key:        BuildCacheKey(engine.Name(), action, q),
+				logMessage: fmt.Sprintf("Cache hit for %s %s: %s", engine.Name(), action, q.Text),
+			},
+		); hit || err != nil {
+			return err
+		}
 	}
 
 	engineNames := []string{engine.Name()}
@@ -237,7 +240,9 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		}
 
 		env := NewImageEnvelope(q, requestID, startedAt, engineNames)
-		env.Meta.EnginesResponded = []string{usedEngine}
+		if usedEngine != "" && usedEngine != engine.Name() {
+			env.Meta.EnginesFailed = []string{engine.Name()}
+		}
 		ectx := EnrichContext{Engine: usedEngine, Query: q}
 		for _, r := range res {
 			env.Results = append(env.Results, EnrichImageResult(r, ectx))
@@ -276,7 +281,9 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 	}
 
 	env := NewEnvelope(q, requestID, startedAt, engineNames)
-	env.Meta.EnginesResponded = []string{usedEngine}
+	if usedEngine != "" && usedEngine != engine.Name() {
+		env.Meta.EnginesFailed = []string{engine.Name()}
+	}
 	ectx := EnrichContext{Engine: usedEngine, Query: q}
 	for _, r := range res {
 		env.Results = append(env.Results, EnrichResult(r, ectx))
@@ -687,15 +694,16 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 			logMessage: fmt.Sprintf("Cache hit for mega %s partial set: engines=%s query=%s", action, engineNamesJoined, q.Text),
 		})
 	}
-	if hit, err := s.tryServeCacheHit(c, cacheHitCandidates...); hit || err != nil {
-		return err
+	if format == "json" {
+		if hit, err := s.tryServeCacheHit(c, startedAt, cacheHitCandidates...); hit || err != nil {
+			return err
+		}
 	}
 
-	rawResults, enginesResponded, enginesFailed := run(requestCtx, q, enginesToUse)
+	rawResults, _, enginesFailed := run(requestCtx, q, enginesToUse)
 
 	if action == "image" {
 		env := NewImageEnvelope(q, requestID, startedAt, engineNames)
-		env.Meta.EnginesResponded = enginesResponded
 		env.Meta.EnginesFailed = enginesFailed
 		for _, r := range rawResults {
 			ectx := EnrichContext{Engine: r.Engine, Query: q}
@@ -724,7 +732,6 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 	// Deduplicate the flat results list by normalized URL (keep best-ranked occurrence).
 	dedupedRaw := s.deduplicateMegaResults(rawResults)
 	env := NewEnvelope(q, requestID, startedAt, engineNames)
-	env.Meta.EnginesResponded = enginesResponded
 	env.Meta.EnginesFailed = enginesFailed
 	for _, r := range dedupedRaw {
 		ectx := EnrichContext{Engine: r.Engine, Query: q}
@@ -800,25 +807,52 @@ func (s *Server) resolveEngines(enginesParam string) []SearchEngine {
 
 func (s *Server) deduplicateMegaResults(results []MegaSearchResult) []MegaSearchResult {
 	urlMap := make(map[string]MegaSearchResult)
+	order := []string{}
 
 	for _, result := range results {
 		if result.URL == "" {
 			continue
 		}
-		if _, exists := urlMap[result.URL]; !exists {
-			urlMap[result.URL] = result
+		key := NormalizeURLForClustering(result.URL)
+		if key == "" {
+			continue
+		}
+		existing, exists := urlMap[key]
+		if !exists {
+			urlMap[key] = result
+			order = append(order, key)
+			continue
+		}
+		if betterMegaResult(result, existing) {
+			urlMap[key] = result
 		}
 	}
 
-	var deduped []MegaSearchResult
-	for _, result := range urlMap {
-		deduped = append(deduped, result)
+	deduped := make([]MegaSearchResult, 0, len(urlMap))
+	for _, key := range order {
+		deduped = append(deduped, urlMap[key])
 	}
 
 	sort.Slice(deduped, func(i, j int) bool {
-		return deduped[i].Rank < deduped[j].Rank
+		if deduped[i].Rank != deduped[j].Rank {
+			return deduped[i].Rank < deduped[j].Rank
+		}
+		if deduped[i].Engine != deduped[j].Engine {
+			return deduped[i].Engine < deduped[j].Engine
+		}
+		return NormalizeURLForClustering(deduped[i].URL) < NormalizeURLForClustering(deduped[j].URL)
 	})
 	return deduped
+}
+
+func betterMegaResult(candidate, current MegaSearchResult) bool {
+	if candidate.Rank > 0 && (current.Rank <= 0 || candidate.Rank < current.Rank) {
+		return true
+	}
+	if candidate.Rank == current.Rank && candidate.Engine < current.Engine {
+		return true
+	}
+	return false
 }
 
 type cacheHitCandidate struct {
@@ -826,7 +860,7 @@ type cacheHitCandidate struct {
 	logMessage string
 }
 
-func (s *Server) tryServeCacheHit(c *fiber.Ctx, candidates ...cacheHitCandidate) (bool, error) {
+func (s *Server) tryServeCacheHit(c *fiber.Ctx, startedAt time.Time, candidates ...cacheHitCandidate) (bool, error) {
 	if s.cache == nil {
 		return false, nil
 	}
@@ -835,12 +869,34 @@ func (s *Server) tryServeCacheHit(c *fiber.Ctx, candidates ...cacheHitCandidate)
 		if !ok {
 			continue
 		}
+		cached = refreshCachedMeta(cached, RequestIDFromContext(c.UserContext()), startedAt)
 		c.Set("Content-Type", "application/json")
 		c.Set("X-Cache", "HIT")
 		WithRequest(c.UserContext()).Debug(candidate.logMessage)
 		return true, c.Send(cached)
 	}
 	return false, nil
+}
+
+func refreshCachedMeta(data []byte, requestID string, startedAt time.Time) []byte {
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return data
+	}
+	meta, ok := payload["meta"].(map[string]any)
+	if !ok {
+		return data
+	}
+	meta["request_id"] = requestID
+	meta["requested_at"] = startedAt.UTC().Format(time.RFC3339)
+	delete(meta, "timestamp")
+	meta["took_ms"] = time.Since(startedAt).Milliseconds()
+
+	refreshed, err := json.Marshal(payload)
+	if err != nil {
+		return data
+	}
+	return refreshed
 }
 
 func (s *Server) cacheJSON(cacheKey string, payload interface{}) bool {

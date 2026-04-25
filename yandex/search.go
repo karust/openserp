@@ -311,7 +311,7 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 				Rank:        img.Rank + 1,
 				URL:         img.OrigURL,
 				Title:       img.Title,
-				Description: fmt.Sprintf("%dx%d, freshness:%s, thumb_url:%s", img.Height, img.Width, img.Freshness, img.ThumbURL),
+				Description: fmt.Sprintf("%dx%d, freshness:%s, thumb_url:%s", img.Width, img.Height, img.Freshness, img.ThumbURL),
 			}
 
 			searchResults = append(searchResults, res)

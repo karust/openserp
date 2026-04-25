@@ -1,7 +1,37 @@
 package core
 
 import (
+	_ "embed"
+	"os"
 	"strings"
+	"sync"
+
+	"golang.org/x/net/publicsuffix"
+	"gopkg.in/yaml.v3"
+)
+
+//go:embed enrichment_domains.yaml
+var defaultEnrichmentDomainsYAML []byte
+
+type enrichmentDomainsFile struct {
+	DomainSourceHints  map[string]string `yaml:"domain_source_hints"`
+	NewsDomains        []string          `yaml:"news_domains"`
+	ForumDomains       []string          `yaml:"forum_domains"`
+	MarketplaceDomains []string          `yaml:"marketplace_domains"`
+	SocialDomains      []string          `yaml:"social_domains"`
+}
+
+type enrichmentDomainsConfig struct {
+	DomainSourceHints  map[string]string
+	NewsDomains        map[string]bool
+	ForumDomains       map[string]bool
+	MarketplaceDomains map[string]bool
+	SocialDomains      map[string]bool
+}
+
+var (
+	enrichmentDomainsOnce sync.Once
+	enrichmentDomains     enrichmentDomainsConfig
 )
 
 // EnrichDomainInfo derives TLD/category signals from a bare hostname.
@@ -10,7 +40,9 @@ func EnrichDomainInfo(domain string) *DomainInfo {
 		return nil
 	}
 
+	domain = normalizeDomain(domain)
 	tld, sld := splitDomain(domain)
+	cfg := loadEnrichmentDomains()
 
 	info := &DomainInfo{
 		TLD:           tld,
@@ -18,16 +50,16 @@ func EnrichDomainInfo(domain string) *DomainInfo {
 		IsGov:         isGovTLD(domain, tld),
 		IsEdu:         isEduTLD(domain, tld),
 		IsMil:         isMilTLD(tld),
-		IsNews:        newsDomains[domain],
-		IsForum:       forumDomains[domain],
-		IsMarketplace: marketplaceDomains[domain],
-		IsSocial:      socialDomains[domain],
+		IsNews:        cfg.NewsDomains[domain],
+		IsForum:       cfg.ForumDomains[domain],
+		IsMarketplace: cfg.MarketplaceDomains[domain],
+		IsSocial:      cfg.SocialDomains[domain],
 	}
 	return info
 }
 
 // ClassifyURL returns a rough content-type and source hint derived from the
-// URL path alone — no network calls.
+// URL path alone; no network calls.
 func ClassifyURL(rawURL, domain string) *Classification {
 	if rawURL == "" && domain == "" {
 		return nil
@@ -42,46 +74,42 @@ func ClassifyURL(rawURL, domain string) *Classification {
 	}
 }
 
-// splitDomain returns (tld, sld) for a bare hostname.
-// Uses a simple heuristic: last label is TLD, second-to-last is SLD.
-// For compound TLDs like co.uk the full suffix is returned as TLD.
+// splitDomain returns (public suffix, registrable domain label).
 func splitDomain(domain string) (tld, sld string) {
-	parts := strings.Split(domain, ".")
-	if len(parts) < 2 {
-		return domain, ""
+	domain = normalizeDomain(domain)
+	if domain == "" {
+		return "", ""
 	}
-	// Known compound TLDs.
-	compoundTLDs := map[string]bool{
-		"co.uk": true, "co.jp": true, "co.in": true, "co.nz": true,
-		"co.za": true, "com.au": true, "com.br": true, "com.mx": true,
-		"gov.uk": true, "ac.uk": true, "edu.au": true, "gov.au": true,
-		"or.jp": true, "ne.jp": true,
-	}
-	if len(parts) >= 3 {
-		compound := parts[len(parts)-2] + "." + parts[len(parts)-1]
-		if compoundTLDs[compound] {
-			return compound, parts[len(parts)-3]
+
+	suffix, icann := publicsuffix.PublicSuffix(domain)
+	if suffix == "" || !icann {
+		parts := strings.Split(domain, ".")
+		if len(parts) < 2 {
+			return domain, ""
 		}
+		return parts[len(parts)-1], parts[len(parts)-2]
 	}
-	return parts[len(parts)-1], parts[len(parts)-2]
+
+	registrable, err := publicsuffix.EffectiveTLDPlusOne(domain)
+	if err != nil {
+		parts := strings.Split(domain, ".")
+		if len(parts) < 2 {
+			return suffix, ""
+		}
+		return suffix, parts[len(parts)-2]
+	}
+
+	sld = strings.TrimSuffix(registrable, "."+suffix)
+	return suffix, sld
 }
 
 func isGovTLD(domain, tld string) bool {
-	if tld == "gov" || tld == "gov.uk" || tld == "gov.au" {
-		return true
-	}
-	return strings.HasSuffix(domain, ".gov") ||
-		strings.HasSuffix(domain, ".gov.uk") ||
-		strings.HasSuffix(domain, ".gov.au")
+	return tld == "gov" || strings.HasSuffix(tld, ".gov") || strings.HasSuffix(domain, ".gov")
 }
 
 func isEduTLD(domain, tld string) bool {
-	if tld == "edu" || tld == "ac.uk" || tld == "edu.au" {
-		return true
-	}
-	return strings.HasSuffix(domain, ".edu") ||
-		strings.HasSuffix(domain, ".ac.uk") ||
-		strings.HasSuffix(domain, ".edu.au")
+	return tld == "edu" || strings.HasSuffix(tld, ".edu") || tld == "ac.uk" ||
+		strings.HasSuffix(domain, ".edu") || strings.HasSuffix(domain, ".ac.uk")
 }
 
 func isMilTLD(tld string) bool {
@@ -111,81 +139,65 @@ func classifyContentType(rawURL string) string {
 }
 
 func classifySourceHint(domain string) string {
-	if hint, ok := domainSourceHints[domain]; ok {
+	cfg := loadEnrichmentDomains()
+	if hint, ok := cfg.DomainSourceHints[normalizeDomain(domain)]; ok {
 		return hint
 	}
 	return ""
 }
 
-// domainSourceHints maps known domains to a descriptive source hint.
-var domainSourceHints = map[string]string{
-	"wikipedia.org":      "encyclopedia",
-	"en.wikipedia.org":   "encyclopedia",
-	"github.com":         "code_repository",
-	"gitlab.com":         "code_repository",
-	"stackoverflow.com":  "qa_forum",
-	"stackexchange.com":  "qa_forum",
-	"reddit.com":         "social_forum",
-	"nytimes.com":        "news",
-	"bbc.com":            "news",
-	"bbc.co.uk":          "news",
-	"reuters.com":        "news",
-	"theguardian.com":    "news",
-	"washingtonpost.com": "news",
-	"forbes.com":         "news",
-	"techcrunch.com":     "news",
-	"medium.com":         "blog_platform",
-	"scholar.google.com": "academic",
-	"arxiv.org":          "academic",
-	"pubmed.ncbi.nlm.nih.gov": "academic",
-	"amazon.com":         "marketplace",
-	"ebay.com":           "marketplace",
-	"etsy.com":           "marketplace",
-	"docs.google.com":    "document",
-	"youtube.com":        "video_platform",
-	"vimeo.com":          "video_platform",
-	"twitter.com":        "social_media",
-	"x.com":              "social_media",
-	"facebook.com":       "social_media",
-	"linkedin.com":       "professional_network",
-	"instagram.com":      "social_media",
+func loadEnrichmentDomains() enrichmentDomainsConfig {
+	enrichmentDomainsOnce.Do(func() {
+		enrichmentDomains = parseEnrichmentDomains(defaultEnrichmentDomainsYAML)
+		if path := strings.TrimSpace(os.Getenv("OPENSERP_ENRICHMENT_DOMAINS_FILE")); path != "" {
+			if data, err := os.ReadFile(path); err == nil {
+				enrichmentDomains = parseEnrichmentDomains(data)
+			}
+		}
+	})
+	return enrichmentDomains
 }
 
-// newsDomains is the set of known news publisher domains.
-var newsDomains = map[string]bool{
-	"nytimes.com": true, "bbc.com": true, "bbc.co.uk": true,
-	"reuters.com": true, "apnews.com": true, "theguardian.com": true,
-	"washingtonpost.com": true, "forbes.com": true, "techcrunch.com": true,
-	"wired.com": true, "bloomberg.com": true, "cnn.com": true,
-	"nbcnews.com": true, "cbsnews.com": true, "abcnews.go.com": true,
-	"foxnews.com": true, "theverge.com": true, "engadget.com": true,
-	"arstechnica.com": true, "zdnet.com": true, "venturebeat.com": true,
-	"axios.com": true, "politico.com": true, "theatlantic.com": true,
-	"economist.com": true, "ft.com": true, "wsj.com": true,
-	"usatoday.com": true, "latimes.com": true, "nypost.com": true,
+func parseEnrichmentDomains(data []byte) enrichmentDomainsConfig {
+	cfg := enrichmentDomainsConfig{
+		DomainSourceHints:  map[string]string{},
+		NewsDomains:        map[string]bool{},
+		ForumDomains:       map[string]bool{},
+		MarketplaceDomains: map[string]bool{},
+		SocialDomains:      map[string]bool{},
+	}
+
+	var file enrichmentDomainsFile
+	if err := yaml.Unmarshal(data, &file); err != nil {
+		return cfg
+	}
+
+	for domain, hint := range file.DomainSourceHints {
+		domain = normalizeDomain(domain)
+		hint = strings.TrimSpace(hint)
+		if domain != "" && hint != "" {
+			cfg.DomainSourceHints[domain] = hint
+		}
+	}
+	fillDomainSet(cfg.NewsDomains, file.NewsDomains)
+	fillDomainSet(cfg.ForumDomains, file.ForumDomains)
+	fillDomainSet(cfg.MarketplaceDomains, file.MarketplaceDomains)
+	fillDomainSet(cfg.SocialDomains, file.SocialDomains)
+
+	return cfg
 }
 
-// forumDomains is the set of known community/forum domains.
-var forumDomains = map[string]bool{
-	"reddit.com": true, "news.ycombinator.com": true,
-	"stackoverflow.com": true, "stackexchange.com": true,
-	"superuser.com": true, "serverfault.com": true,
-	"quora.com": true, "discourse.org": true,
-	"boards.4chan.org": true, "hackernews.com": true,
+func fillDomainSet(dst map[string]bool, domains []string) {
+	for _, domain := range domains {
+		domain = normalizeDomain(domain)
+		if domain != "" {
+			dst[domain] = true
+		}
+	}
 }
 
-// marketplaceDomains is the set of known e-commerce/marketplace domains.
-var marketplaceDomains = map[string]bool{
-	"amazon.com": true, "amazon.co.uk": true, "amazon.de": true,
-	"ebay.com": true, "etsy.com": true, "walmart.com": true,
-	"target.com": true, "bestbuy.com": true, "newegg.com": true,
-	"aliexpress.com": true, "alibaba.com": true, "shopify.com": true,
-}
-
-// socialDomains is the set of known social media platform domains.
-var socialDomains = map[string]bool{
-	"twitter.com": true, "x.com": true, "facebook.com": true,
-	"instagram.com": true, "tiktok.com": true, "snapchat.com": true,
-	"pinterest.com": true, "tumblr.com": true, "linkedin.com": true,
-	"youtube.com": true, "twitch.tv": true, "discord.com": true,
+func normalizeDomain(domain string) string {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	domain = strings.TrimPrefix(domain, "www.")
+	return strings.TrimSuffix(domain, ".")
 }

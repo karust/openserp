@@ -1,0 +1,103 @@
+domain_source_hints:
+  wikipedia.org: encyclopedia
+  en.wikipedia.org: encyclopedia
+  github.com: code_repository
+  gitlab.com: code_repository
+  stackoverflow.com: qa_forum
+  stackexchange.com: qa_forum
+  reddit.com: social_forum
+  nytimes.com: news
+  bbc.com: news
+  bbc.co.uk: news
+  reuters.com: news
+  theguardian.com: news
+  washingtonpost.com: news
+  forbes.com: news
+  techcrunch.com: news
+  medium.com: blog_platform
+  scholar.google.com: academic
+  arxiv.org: academic
+  pubmed.ncbi.nlm.nih.gov: academic
+  amazon.com: marketplace
+  ebay.com: marketplace
+  etsy.com: marketplace
+  docs.google.com: document
+  youtube.com: video_platform
+  vimeo.com: video_platform
+  twitter.com: social_media
+  x.com: social_media
+  facebook.com: social_media
+  linkedin.com: professional_network
+  instagram.com: social_media
+
+news_domains:
+  - nytimes.com
+  - bbc.com
+  - bbc.co.uk
+  - reuters.com
+  - apnews.com
+  - theguardian.com
+  - washingtonpost.com
+  - forbes.com
+  - techcrunch.com
+  - wired.com
+  - bloomberg.com
+  - cnn.com
+  - nbcnews.com
+  - cbsnews.com
+  - abcnews.go.com
+  - foxnews.com
+  - theverge.com
+  - engadget.com
+  - arstechnica.com
+  - zdnet.com
+  - venturebeat.com
+  - axios.com
+  - politico.com
+  - theatlantic.com
+  - economist.com
+  - ft.com
+  - wsj.com
+  - usatoday.com
+  - latimes.com
+  - nypost.com
+
+forum_domains:
+  - reddit.com
+  - news.ycombinator.com
+  - stackoverflow.com
+  - stackexchange.com
+  - superuser.com
+  - serverfault.com
+  - quora.com
+  - discourse.org
+  - boards.4chan.org
+  - hackernews.com
+
+marketplace_domains:
+  - amazon.com
+  - amazon.co.uk
+  - amazon.de
+  - ebay.com
+  - etsy.com
+  - walmart.com
+  - target.com
+  - bestbuy.com
+  - newegg.com
+  - aliexpress.com
+  - alibaba.com
+  - shopify.com
+
+social_domains:
+  - twitter.com
+  - x.com
+  - facebook.com
+  - instagram.com
+  - tiktok.com
+  - snapchat.com
+  - pinterest.com
+  - tumblr.com
+  - linkedin.com
+  - youtube.com
+  - twitch.tv
+  - discord.com

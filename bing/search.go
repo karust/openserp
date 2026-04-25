@@ -382,12 +382,14 @@ func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.Sea
 		// Extract information from the parsed data
 		srchRes.Title = imgData.T
 		srchRes.URL = imgData.IMGURL
-		srchRes.Description = imgData.Desc
-
-		// Add dimensions to description if available
-		if imgData.W > 0 && imgData.H > 0 {
-			srchRes.Description += fmt.Sprintf(" (%dx%d)", imgData.W, imgData.H)
-		}
+		srchRes.Description = fmt.Sprintf(
+			"%s Source Page: %s, thumb_url:%s, %dx%d",
+			imgData.Desc,
+			imgData.PURL,
+			imgData.TURL,
+			imgData.W,
+			imgData.H,
+		)
 
 		// Get the page URL
 		if imgData.MURL != "" {
