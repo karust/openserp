@@ -50,8 +50,8 @@ Create a new folder (example: `myengine/`) with:
 
 Your engine type must implement:
 
-- `Search(core.Query) ([]core.SearchResult, error)`
-- `SearchImage(core.Query) ([]core.SearchResult, error)`
+- `Search(context.Context, core.Query) ([]core.SearchResult, error)`
+- `SearchImage(context.Context, core.Query) ([]core.SearchResult, error)`
 - `IsInitialized() bool`
 - `Name() string`
 - `GetRateLimiter() *rate.Limiter`
@@ -60,14 +60,14 @@ Use the existing engines (for example `google/`) as the reference pattern.
 
 ### 3) Register the engine in server wiring
 
-Update [`cmd/serve.go`](cmd/serve.go):
+Update [`cmd/serve.go`](../cmd/serve.go):
 
 - Add engine spec in `browserEngineSpecs()`
 - Add raw-mode handling if raw support exists
 
 ### 4) Add config block
 
-Update [`config.yaml`](config.yaml) with your engine section:
+Update [`config.yaml`](../config.yaml) with your engine section:
 
 - `rate_requests`
 - `rate_burst`
@@ -115,6 +115,6 @@ For each PR:
 
 If you change API behavior, update:
 
-- [`docs/openapi.yaml`](docs/openapi.yaml)
-- [`README.md`](README.md)
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) when flow/design changes
+- [`openapi.yaml`](openapi.yaml)
+- [`../README.md`](../README.md)
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) when flow/design changes

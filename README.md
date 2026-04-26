@@ -8,7 +8,7 @@
 [![Docker Pulls](https://img.shields.io/docker/v/karust/openserp)](https://hub.docker.com/repository/docker/karust/openserp)
 [![CI](https://github.com/karust/openserp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/karust/openserp/actions/workflows/ci.yml)
 
-**OpenSERP** is an API and CLI for accessing search engine results from **Google, Yandex, Baidu, Bing, and DuckDuckGo**.  
+**OpenSERP** is an API and CLI for accessing search engine results from **Google, Yandex, Baidu, Bing, and DuckDuckGo**.
 A developer-friendly alternative to paid SERP API services!
 
 **Official website:** [openserp.org](https://openserp.org)
@@ -23,10 +23,11 @@ A developer-friendly alternative to paid SERP API services!
 - 🎯 **Advanced filters** - language, date range, file type, and site queries
 - 🌍 **Configurable** - proxy, cache, and resilient mode support
 - 🐳 **Docker-ready** - local and container deployment
+- 📝 **Data Formats** - JSON, Markdown, Text, NdJSON response format types are supported
 
 ## Quick Start⚡️
 
-### Docker (Recommended)
+### Docker
 
 ```bash
 # Run the API server via prebuilt image
@@ -36,7 +37,7 @@ docker run -p 127.0.0.1:7000:7000 -it karust/openserp serve -a 0.0.0.0 -p 7000
 docker compose up --build
 ```
 
-### From source
+### From Source
 
 ```bash
 git clone https://github.com/karust/openserp.git
@@ -45,164 +46,180 @@ go build -o openserp .
 ./openserp serve
 ```
 
-## 🌐 Megasearch & Megaimage
+## API Docs
 
-Search all engines at once:
+- Swagger UI: `http://127.0.0.1:7000/docs`
+- OpenAPI YAML: `http://127.0.0.1:7000/openapi.yaml`
 
-```bash
-curl "http://127.0.0.1:7000/mega/search?text=golang&limit=10"
-```
+## Search Endpoints
 
-Search only selected engines:
+Available engine names: `google`, `yandex`, `baidu`, `bing`, `duckduckgo`.
 
-```bash
-curl "http://127.0.0.1:7000/mega/search?text=golang&engines=duckduckgo,bing&limit=15"
-```
-
-Advanced filtering:
+Dedicated engine endpoints:
 
 ```bash
-curl "http://127.0.0.1:7000/mega/search?text=Donald+Trump&engines=duckduckgo,bing&limit=20&date=20251005..20251005&lang=EN"
-```
-
-API response example:
-
-```json
-[
-  {
-    "rank": 1,
-    "url": "https://en.wikipedia.org/wiki/Golden_Retriever",
-    "title": "Golden Retriever - Wikipedia",
-    "description": "The Golden Retriever is a Scottish breed of retriever dog of medium size. It is characterised by a gentle and affectionate nature and a striking golden coat.",
-    "ad": false,
-    "engine": "duckduckgo"
-  },
-  {
-    "rank": 2,
-    "url": "https://www.bing.com/ck/a?!&&p=6f15ac4589858d0a104cd6f55cc8",
-    "title": "Golden Retriever Dog Forums",
-    "description": "Oct 20, 2024 · Back in the 1970s, Golden Retrievers routinely lived until 16 and 17 years old, they are now...",
-    "ad": false,
-    "engine": "bing"
-  },
-  {
-    "rank": 3,
-    "url": "http://www.baidu.com/link?url==2544q3ugc68j0scVxdpWCSX-gl2AmuCy1l7uRR3loIfS1",
-    "title": "golden retrievers是什么意思",
-    "description": "2025年9月21日golden retrievers 读音:美英 golden retrievers基本解释 金毛猎犬 分词解释 golden金(黄)色的...",
-    "ad": false,
-    "engine": "baidu"
-  }
-]
+curl "http://127.0.0.1:7000/google/search?text=golang&limit=10"
 ```
 
 Image search:
 
 ```bash
-curl "http://127.0.0.1:7000/mega/image?text=golang logo&limit=20"
+curl "http://127.0.0.1:7000/bing/image?text=golang+logo&limit=10"
 ```
 
-List available engines:
+Megasearch:
+
+```bash
+# Search all configured engines
+curl "http://127.0.0.1:7000/mega/search?text=golang&limit=10"
+
+# Search selected engines
+curl "http://127.0.0.1:7000/mega/search?text=golang&engines=duckduckgo,bing&limit=15"
+
+# Advanced filtering
+curl "http://127.0.0.1:7000/mega/search?text=golang&engines=google,bing&limit=20&date=20250101..20251231&lang=EN"
+
+# Image megasearch
+curl "http://127.0.0.1:7000/mega/image?text=golang+logo&limit=20"
+```
+
+List engines:
 
 ```bash
 curl "http://127.0.0.1:7000/mega/engines"
 ```
 
-**Available engines:** `google`, `yandex`, `baidu`, `bing`, `duckduckgo`
+## 🔍 Query Parameters
 
-## 🔍 Individual Engine APIs
+Common parameters:
 
-Common query parameters:
-
-| Parameter | Description          | Example                           |
-| --------- | -------------------- | --------------------------------- |
-| `text`    | Search query         | `golang programming`              |
-| `lang`    | Language code        | `EN`, `DE`, `RU`, `ES`            |
-| `date`    | Date range           | `20230101..20231231`              |
-| `file`    | File extension       | `PDF`, `DOC`, `XLS`               |
-| `site`    | Site-specific search | `github.com`, `stackoverflow.com` |
-| `limit`   | Number of results    | `10`, `25`, `50`                  |
+| Parameter | Description                | Example                              |
+| --------- | -------------------------- | ------------------------------------ |
+| `text`    | Search query               | `golang programming`                 |
+| `lang`    | Language code              | `EN`, `DE`, `RU`, `ES`               |
+| `date`    | Date range                 | `20250101..20251231`                 |
+| `file`    | File extension             | `pdf`, `doc`, `xls`                  |
+| `site`    | Site-specific search       | `github.com`                         |
+| `limit`   | Number of results, max 100 | `10`, `25`, `50`                     |
+| `start`   | Pagination offset          | `0`, `10`, `20`                      |
+| `format`  | Output format              | `json`, `markdown`, `text`, `ndjson` |
 
 Engine-specific parameters:
 
-| Parameter | Supported engines                   | Notes                                                              |
-| --------- | ----------------------------------- | ------------------------------------------------------------------ |
-| `start`   | `google`, `bing`, `yandex`, `baidu` | Web search pagination offset.                                      |
-| `filter`  | `google`                            | Duplicate filter (`true` hides similar, `false` includes similar). |
-| `answers` | `google`                            | Include Google answer boxes in output with negative ranks.         |
+| Parameter | Supported engines | Notes                                                                  |
+| --------- | ----------------- | ---------------------------------------------------------------------- |
+| `filter`  | `google`          | Duplicate filter: `true` hides similar results, `false` includes them. |
+| `answers` | `google`          | Include Google answer boxes in output.                                 |
 
-Examples:
-
-```bash
-curl "http://127.0.0.1:7000/duck/search?text=golang&limit=7"
-curl "http://127.0.0.1:7000/google/search?text=golang&lang=EN&limit=10"
-curl "http://127.0.0.1:7000/bing/search?text=golang&limit=10&start=20"
-curl "http://127.0.0.1:7000/yandex/search?text=golang&limit=10&start=10"
-curl "http://127.0.0.1:7000/bing/image?text=golang&limit=20"
-```
-
-## Response Examples
-
-Interactive docs (OpenAPI + Swagger UI) are available at:
-
-- `http://127.0.0.1:7000/docs`
-- `http://127.0.0.1:7000/openapi.yaml`
-
-### Web Search Response (`/<engine>/search`)
+## Search Response Example
 
 ```json
-[
-  {
-    "rank": 1,
-    "url": "https://go.dev/doc/",
-    "title": "Documentation - The Go Programming Language",
-    "description": "Official Go documentation, tutorials, references, and release notes.",
-    "ad": false
+{
+  "query": {
+    "text": "golang",
+    "engines_requested": ["google"]
   },
-  {
-    "rank": 2,
-    "url": "https://pkg.go.dev/",
-    "title": "pkg.go.dev",
-    "description": "Go package discovery and API documentation.",
-    "ad": false
+  "meta": {
+    "request_id": "019dc6c1-da45-706e-a57c-d671fa2862ee",
+    "requested_at": "2026-04-25T22:27:52Z",
+    "took_ms": 6410,
+    "engines_failed": [],
+    "version": "1.0"
+  },
+  "results": [
+    {
+      "id": "s_78341aa47c336101",
+      "rank": 1,
+      "type": "organic",
+      "title": "Documentation - The Go Programming Language",
+      "url": "https://go.dev/doc/",
+      "display_url": "go.dev > doc",
+      "snippet": "Official Go documentation, tutorials, references, and release notes.",
+      "domain": "go.dev",
+      "favicon": "https://go.dev/favicon.ico",
+      "is_ad": false,
+      "position": {
+        "absolute": 1,
+        "page": 1,
+        "on_page": 1
+      },
+      "engine": "google",
+      "domain_info": {
+        "tld": "dev",
+        "sld": "go",
+        "is_gov": false,
+        "is_edu": false,
+        "is_social": false
+      },
+      "classification": {
+        "content_type": "webpage"
+      }
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "has_more": true,
+    "next_start": 25
   }
-]
+}
 ```
 
-### Image Search Response (`/<engine>/image`)
+## Mega Response Notes
+
+`/mega/search` returns the same envelope plus `clusters`. Results are deduplicated by normalized URL; clusters keep the per-engine occurrences:
 
 ```json
-[
-  {
-    "rank": 1,
-    "url": "https://golang.org/lib/godoc/images/go-logo-blue.svg",
-    "title": "Go Gopher Logo",
-    "description": "Source: https://go.dev/brand/",
-    "ad": false
-  },
-  {
-    "rank": 2,
-    "url": "https://example.com/images/go-mascot.png",
-    "title": "Go mascot",
-    "description": "Height:800, Width:1200, Source Page: https://example.com/post",
-    "ad": false
-  }
-]
+{
+  "id": "c_a1b2c3d4e5f6a1b2",
+  "canonical_url": "https://go.dev/",
+  "domain": "go.dev",
+  "title": "The Go Programming Language",
+  "occurrences": [
+    { "engine": "google", "rank": 1, "result_id": "s_78341aa47c336101" },
+    { "engine": "bing", "rank": 2, "result_id": "s_20f9f15f0c3d9f6d" }
+  ],
+  "engines_count": 2,
+  "best_rank": 1,
+  "score": 0.75
+}
 ```
 
-### Error Responses
+## Image Response Example
 
-`400 Bad Request` (invalid/missing query):
+```json
+{
+  "id": "i_a1b2c3d4e5f6a1b2",
+  "rank": 1,
+  "type": "image",
+  "title": "Go Gopher Logo",
+  "image": {
+    "url": "https://example.com/images/go-logo.png",
+    "thumbnail": "https://example.com/images/go-logo-thumb.png",
+    "width": 1200,
+    "height": 800
+  },
+  "source": {
+    "page_url": "https://go.dev/brand/",
+    "domain": "go.dev"
+  },
+  "engine": "bing"
+}
+```
+
+## Error Responses
+
+`400 Bad Request`:
 
 ```json
 {
   "error": "bad_request",
   "code": 400,
-  "message": "Query cannot be empty"
+  "message": "EMPTY_QUERY: query cannot be empty: provide text, site, or file parameter",
+  "reason": "EMPTY_QUERY"
 }
 ```
 
-`503 Service Unavailable` (engine unavailable, captcha, timeout, or proxy path failure):
+`503 Service Unavailable`:
 
 ```json
 {
@@ -211,16 +228,6 @@ Interactive docs (OpenAPI + Swagger UI) are available at:
   "message": "captcha found, please stop sending requests for a while: captcha detected"
 }
 ```
-
-### Response Headers
-
-| Header              | Values/Examples                 | Meaning                                                       |
-| ------------------- | ------------------------------- | ------------------------------------------------------------- |
-| `X-Cache`           | `HIT`, `MISS`, `BYPASS`         | Cache result for this response.                               |
-| `X-Fallback-Engine` | `google`, `bing`, `duckduckgo`  | Present when dedicated endpoint used fallback engine.         |
-| `X-Proxy-Mode`      | `off`, `single`, `pool`         | Proxy policy mode applied by resilient search.                |
-| `X-Proxy-Tag`       | `residential`, `datacenter`, `` | Selected proxy pool tag. Empty when proxy mode is off/direct. |
-| `X-Proxy-Used`      | `direct`, `socks5://host:port`  | Actual upstream route used to execute request.                |
 
 ## 🌍 Proxy Support
 
@@ -233,20 +240,18 @@ Simple global proxy:
 ./openserp search bing "query" --proxy http://user:pass@127.0.0.1:8080
 ```
 
-Advanced proxy configuration is available in [config.yaml](./config.yaml).
-You can enable tagged proxy pools and per-request override via `X-Use-Proxy: <tag>` or `X-Use-Proxy: direct`.
+Advanced proxy configuration is available in [config.yaml](./config.yaml). You can enable tagged proxy pools and per-request override via `X-Use-Proxy: <tag>` or `X-Use-Proxy: direct`.
 
 ## Health & Stats
 
 ```bash
 curl -i "http://127.0.0.1:7000/health"
+curl "http://127.0.0.1:7000/ready"
 curl "http://127.0.0.1:7000/stats"
 curl "http://127.0.0.1:7000/stats/cache"
 curl "http://127.0.0.1:7000/stats/proxy"
 curl "http://127.0.0.1:7000/stats/cb"
 ```
-
-Useful response headers in server mode: `X-Cache`, `X-Fallback-Engine`,`X-Proxy-Mode`, `X-Proxy-Tag`, `X-Proxy-Used`
 
 ## License
 
@@ -254,14 +259,6 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE).
 
 ## 🤝 Contributing
 
-Contributions are welcome. See [CONTRIBUTE](./docs/CONTRIBUTING.md). Please feel free to submit your improvements!
+Contributions are welcome. See [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md).
 
-## 👾 Issues & Support
-
-If you encounter issues or have questions:
-
-- Open an issue on GitHub
-- Check existing issues for similar reports
-- Review the documentation and example config
-
-###### _"OpenSerp" is the name of this open-source project. Use of the name in a way that implies affiliation, endorsement, or official status is not permitted._
+###### _"OpenSERP" is the name of this open-source project. Use of the name in a way that implies affiliation, endorsement, or official status is not permitted._

@@ -1,265 +1,253 @@
 # OpenSERP Architecture
 
-## 1. Overview
+## Overview
 
-OpenSERP is a Go API + CLI for search results extraction from Google, Yandex, Baidu, Bing, and DuckDuckGo.
+OpenSERP is a Go API + CLI for search result extraction from Google, Yandex, Baidu, Bing, and DuckDuckGo.
 
-It supports two execution modes:
+Execution modes:
 
-- Browser mode (default): headless Chromium via `go-rod`, with engine-specific DOM parsing.
-- Raw HTTP mode: direct requests + HTML parsing (`goquery`) for engines that implement raw parsing.
+- **Browser mode**: default path, headless Chromium via `go-rod`, supported by all engines.
+- **Raw HTTP mode**: direct HTTP + `goquery`, currently supported by Google, Yandex, and Baidu.
 
-Browser mode is the primary path and supports all engines. Raw mode currently supports Google, Yandex, and Baidu only.
+Browser mode is the primary compatibility path.
 
-## 2. Directory Structure
+## Project Layout
 
 ```text
 openserp/
-├── main.go                        # Entry point, executes cmd.RootCmd
-├── AGENTS.md                      # Contributor + agent project guidance
-├── README.md                      # User-facing quickstart and API overview
-├── config.yaml                    # Runtime configuration (loaded by Viper)
+├── main.go
+├── README.md
+├── config.yaml
 ├── docs/
-│   ├── ARCHITECTURE.md            # This architecture reference
-│   ├── openapi.yaml               # OpenAPI 3.0 specification
-│   └── embed.go                   # Embeds openapi.yaml for /openapi.yaml endpoint
+│   ├── ARCHITECTURE.md
+│   ├── CONTRIBUTING.md
+│   ├── openapi.yaml
+│   └── embed.go
 ├── cmd/
-│   ├── root.go                    # Cobra root command + Viper config binding/defaults
-│   ├── serve.go                   # HTTP server bootstrap, engine wiring, browser pooling
-│   ├── search.go                  # CLI one-shot search command
-│   └── proxy_policy.go            # Proxy policy mapping from config to runtime
+│   ├── root.go
+│   ├── serve.go
+│   ├── search.go
+│   └── proxy_policy.go
 ├── core/
-│   ├── common.go                  # Shared domain types: Query, SearchResult, SearchEngine
-│   ├── server.go                  # Fiber routes, request handlers, cache/proxy headers
-│   ├── middleware.go              # CORS, request logging, JSON error envelope
-│   ├── browser.go                 # Chromium navigation lifecycle and page orchestration
-│   ├── http_client.go             # Raw HTTP client (uTLS fingerprinting)
-│   ├── resilient.go               # Retry + CB + rate limiting + proxy orchestration
-│   ├── retry.go                   # Backoff retry runner and retry conditions
-│   ├── circuit_breaker.go         # Per-engine circuit breaker state machine
-│   ├── cache.go                   # In-memory TTL cache for API responses
-│   ├── proxy.go                   # Proxy normalization, pools, health/rotation, stats
-│   ├── logger.go                  # Logging setup helpers
-│   └── captcha.go                 # Captcha-related helpers/errors
-├── google/                        # Google engine implementation
-│   ├── url.go                     # URL builders
-│   ├── search.go                  # Browser mode parser
-│   └── search_raw.go              # Raw HTTP parser
-├── yandex/                        # Yandex engine implementation
-│   ├── url.go
-│   ├── search.go
-│   └── search_raw.go
-├── baidu/                         # Baidu engine implementation
-│   ├── url.go
-│   ├── search.go
-│   └── search_raw.go
-├── bing/                          # Bing engine implementation (browser-only)
-│   ├── url.go
-│   └── search.go
-├── duckduckgo/                    # DuckDuckGo engine implementation (browser-only)
-│   ├── url.go
-│   └── search.go
-├── testutil/                      # Integration gating and shared test fixtures/helpers
-└── .github/workflows/ci.yml       # CI checks (test/vet/build/lint/openapi lint)
+│   ├── common.go
+│   ├── server.go
+│   ├── response.go
+│   ├── result.go
+│   ├── response_builder.go
+│   ├── clusters.go
+│   ├── format_markdown.go
+│   ├── format_text.go
+│   ├── enrichment_domain.go
+│   ├── enrichment_domains.yaml
+│   ├── middleware.go
+│   ├── browser.go
+│   ├── http_client.go
+│   ├── resilient.go
+│   ├── retry.go
+│   ├── circuit_breaker.go
+│   ├── cache.go
+│   ├── proxy.go
+│   ├── logger.go
+│   └── captcha.go
+├── google/
+├── yandex/
+├── baidu/
+├── bing/
+├── duckduckgo/
+└── testutil/
 ```
 
-## 3. Key Interfaces and Types
+## Core Interfaces
 
 ### `core.SearchEngine`
 
-Contract for all engines:
+All engines implement:
 
-- `Search(Query) ([]SearchResult, error)` for web results
-- `SearchImage(Query) ([]SearchResult, error)` for image results
-- `IsInitialized() bool` for health readiness
-- `Name() string` for endpoint and stats identity
-- `GetRateLimiter() *rate.Limiter` for per-engine throttling
+- `Search(context.Context, Query) ([]SearchResult, error)`
+- `SearchImage(context.Context, Query) ([]SearchResult, error)`
+- `IsInitialized() bool`
+- `Name() string`
+- `GetRateLimiter() *rate.Limiter`
 
 ### `core.Query`
 
-Parsed from query parameters and request headers:
+Parsed from query parameters (`text`, `lang`, `date`, `file`, `site`, `limit`, `start`, `filter`, `answers`) and the `X-Use-Proxy` request header. At least one of `text`, `site`, or `file` must be non-empty.
 
-- `Text` (`text`)
-- `LangCode` (`lang`)
-- `DateInterval` (`date`, format `YYYYMMDD..YYYYMMDD`)
-- `Filetype` (`file`)
-- `Site` (`site`)
-- `Limit` (`limit`, default `25`)
-- `Start` (`start`, default `0`)
-- `Filter` (`filter`, default `true`)
-- `Answers` (`answers`, default `false`)
-- `ProxyOverride` (`X-Use-Proxy` header: `<tag>` or `direct`)
-- Internal runtime fields: `ProxyURL`, `Insecure`
+### Internal `core.SearchResult`
 
-Validation summary:
+Engine parsers return the older internal shape:
 
-- `start` must be `>= 0`
-- At least one of `text`, `site`, or `file` must be non-empty
-- Invalid query parsing is returned as JSON error response
+- `Rank`
+- `URL`
+- `Title`
+- `Description`
+- `Ad`
 
-### `core.SearchResult`
+HTTP handlers convert this into the public v1 response through `core/response_builder.go`.
 
-Single SERP item shape:
-
-- `rank` (int)
-- `url` (string)
-- `title` (string)
-- `description` (string)
-- `ad` (bool)
-
-Mega endpoints return `core.MegaSearchResult`, which extends `SearchResult` with:
-
-- `engine` (string)
-
-## 4. Request Flow
+## HTTP Request Flow
 
 ```text
 HTTP request
-  -> Fiber router
+  -> Fiber middleware
+     -> RequestContextMiddleware
+     -> CORS
+     -> RequestLoggerMiddleware
   -> handleDedicatedEndpoint / handleMegaEndpoint
   -> Query.InitFromContext
-  -> ResilientSearcher.SearchPrimary/SearchWithFallback (or mega parallel search)
-     -> CircuitBreaker.AllowRequest
-     -> RateLimiter.Wait
-     -> Proxy policy resolution and proxy selection
-     -> RetryableSearch (backoff/retry loop)
-     -> Engine.Search / Engine.SearchImage
-        Browser path: Browser.Navigate(url) -> DOM parse -> []SearchResult
-        Raw path:     raw HTTP request -> goquery parse -> []SearchResult
-  -> De-duplication (mega endpoints)
-  -> Cache.Set (if enabled and cacheable)
-  -> JSON response + X-Cache/X-Proxy-*/X-Fallback-Engine headers
+  -> resolveFormat
+  -> cache lookup for JSON responses only
+  -> ResilientSearcher
+     -> circuit breaker
+     -> rate limiter
+     -> proxy policy resolution
+     -> retry loop
+     -> engine.Search / engine.SearchImage
+        -> browser path: Browser.Navigate -> DOM parse -> []SearchResult
+        -> raw path: HTTP client -> goquery parse -> []SearchResult
+  -> response enrichment
+     -> stable IDs
+     -> normalized URL/display URL
+     -> pagination position
+     -> domain_info/classification
+     -> image metadata extraction
+  -> mega-only normalized URL dedupe + clusters
+  -> cache write for eligible JSON responses
+  -> output serializer: JSON, Markdown, text, or NDJSON
 ```
 
-## 5. Browser vs Raw Mode
+## Public API Response
 
-### Browser Mode (default)
+JSON endpoints return a v1 envelope.
 
-- Enabled when `server.raw_requests: false`
-- Uses Chromium + `go-rod` navigation and page parsing
-- Supported engines: Google, Yandex, Baidu, Bing, DuckDuckGo
-- Best compatibility, but heavier resource usage
+Top-level fields:
 
-### Raw HTTP Mode
+- `query`: request echo, including `engines_requested`
+- `meta`: `request_id`, `requested_at`, `took_ms`, `engines_failed`, `version`
+- `results`: normalized web or image results
+- `pagination`: `page`, `has_more`, `next_start`
+- `clusters`: only on `/mega/search`
 
-- Enabled when `server.raw_requests: true`
-- Uses direct HTTP + HTML parsing without launching a browser
-- Supported engines: Google, Yandex, Baidu
-- Faster/lighter, but less reliable for anti-bot protected pages and missing image support
+Stable ID prefixes:
 
-Mode switch options:
+- `s_`: web search result
+- `i_`: image result
+- `c_`: mega search URL cluster
 
-- Config: `server.raw_requests`
-- CLI flag: `--raw`
+`meta.engines_failed` is the only engine status list in the body. Clients can derive responded engines as:
 
-## 6. Resilience Stack
+```text
+query.engines_requested - meta.engines_failed
+```
 
-The effective request protection sequence is:
+Dedicated endpoint fallback is represented by:
 
-1. Rate limiter (`engine.GetRateLimiter().Wait`)
-2. Retry with exponential backoff (`core/retry.go`)
-3. Circuit breaker per engine (`core/circuit_breaker.go`)
-4. Proxy selection/rotation + health tracking (`core/proxy.go`)
-5. Response cache (API-level TTL cache in `core/cache.go`)
+- `X-Fallback-Engine`
+- `results[].engine`
+- `meta.engines_failed` containing the primary engine
+
+## Mega Search
+
+`/mega/search` and `/mega/image` run selected engines in parallel.
+
+`/mega/search` behavior:
+
+- Uses `engines` query parameter if provided; otherwise uses all configured engines.
+- Skips duplicate engine names.
+- Allows partial success; failed engines are listed in `meta.engines_failed`.
+- Deduplicates flat results by normalized URL.
+- Builds `clusters` from all enriched results before flat dedupe.
+- Sorts clusters by score descending, then best rank ascending.
+
+Cluster score:
+
+```text
+sum(1 / rank for each occurrence) / engines_queried
+```
+
+The score is capped at `1.0` and rounded to two decimals.
+
+## Response Formatting
+
+`resolveFormat` supports:
+
+- `json` (default)
+- `markdown`
+- `text`
+- `ndjson`
+
+The format can be selected with `?format=` or by `Accept` header:
+
+- `text/markdown`
+- `text/plain`
+- `application/x-ndjson`
+
+Only JSON responses use the response cache. Cached JSON refreshes request-scoped metadata before sending:
+
+- `meta.request_id`
+- `meta.requested_at`
+- `meta.took_ms`
+
+## Domain Enrichment
+
+`core/enrichment_domain.go` derives:
+
+- `domain_info`: public suffix, SLD, and category booleans
+- `classification`: content type and known source hint
+
+Public suffix parsing uses `golang.org/x/net/publicsuffix`.
+
+Mutable domain category data lives in:
+
+```text
+core/enrichment_domains.yaml
+```
+
+It can be replaced at runtime:
+
+```bash
+OPENSERP_ENRICHMENT_DOMAINS_FILE=/path/to/enrichment_domains.yaml ./openserp serve
+```
+
+## Resilience Stack
+
+Request protection sequence:
+
+1. Engine rate limiter
+2. Retry with backoff
+3. Circuit breaker
+4. Proxy policy and proxy health
+5. Response cache
 
 Important behaviors:
 
 - `ErrCaptcha` is non-retryable.
-- `ErrProxyUnavailable` does not record circuit-breaker failure.
-- Dedicated endpoints are engine-pure by default (`allow_endpoint_fallback: false`).
+- Proxy health is degraded only for proxy/network failures, not parser or captcha errors.
+- Dedicated endpoints are engine-pure by default.
+- Dedicated fallback is opt-in via `resilience.allow_endpoint_fallback`.
 - Fallback responses are not cached on dedicated endpoints.
 
-## 7. Config Reference
+## Proxy Model
 
-Defaults below are the shipped defaults in `config.yaml` (if present). If the config file is missing, fallback defaults from `cmd/root.go` are applied.
+Proxy policy can come from:
 
-### `server`
+- global config
+- per-engine config
+- per-request `X-Use-Proxy`
 
-| Key                   | Default   | Description                        |
-| --------------------- | --------- | ---------------------------------- |
-| `server.host`         | `0.0.0.0` | API bind host                      |
-| `server.port`         | `7000`    | API bind port                      |
-| `server.debug`        | `false`   | Debug mode, forces headful browser |
-| `server.verbose`      | `true`    | Info-level request logs            |
-| `server.raw_requests` | `false`   | `true` = raw HTTP mode             |
-| `server.insecure`     | `true`    | Allow insecure TLS connections     |
+Supported request override values:
 
-### `app`
+- `X-Use-Proxy: direct`
+- `X-Use-Proxy: <tag>`
 
-| Key                | Default | Description                    |
-| ------------------ | ------- | ------------------------------ |
-| `app.timeout`      | `15`    | Request timeout in seconds     |
-| `app.browser_path` | `""`    | Custom browser binary path     |
-| `app.profiles`     | `""`    | Override browser profiles JSON |
-| `app.head`         | `false` | Headful browser UI             |
-| `app.leakless`     | `false` | Force browser process cleanup  |
-| `app.leave_head`   | `false` | Keep browser tabs open         |
+Response headers:
 
-### `proxies`
+- `X-Proxy-Mode`: `off` or `tag_pool`
+- `X-Proxy-Tag`
+- `X-Proxy-Used`
 
-| Key                                | Default | Description                               |
-| ---------------------------------- | ------- | ----------------------------------------- |
-| `proxies.global`                   | unset   | Force single proxy for all engines        |
-| `proxies.entries[]`                | empty   | Tagged proxy pool entries (`url`, `tags`) |
-| `proxies.health.failure_threshold` | `3`     | Disable proxy after N failures            |
+## Config Reference
 
-Per-engine optional proxy tag:
+Config priority: `CLI flags > OPENSERP_* env vars > config.yaml > defaults` (via Viper).
 
-- `google.proxy`
-- `yandex.proxy`
-- `baidu.proxy`
-- `bing.proxy`
-- `duckduckgo.proxy`
-
-### `cache`
-
-| Key                 | Default | Description                           |
-| ------------------- | ------- | ------------------------------------- |
-| `cache.ttl_seconds` | `60`    | Response cache TTL (0 disables cache) |
-| `cache.max_size`    | `1000`  | Max cached entries                    |
-
-### `resilience`
-
-| Key                                  | Default | Description                                            |
-| ------------------------------------ | ------- | ------------------------------------------------------ |
-| `resilience.max_retries`             | `2`     | Retry attempts per request                             |
-| `resilience.allow_endpoint_fallback` | `false` | Allow dedicated endpoints to fallback to other engines |
-
-### `circuit_breaker`
-
-| Key                                | Default | Description                          |
-| ---------------------------------- | ------- | ------------------------------------ |
-| `circuit_breaker.failures`         | `5`     | Failures before opening circuit      |
-| `circuit_breaker.recovery_seconds` | `60`    | Open -> half-open wait time          |
-| `circuit_breaker.successes`        | `2`     | Half-open successes to close circuit |
-
-### `cors`
-
-| Key                  | Default                                                      | Description                       |
-| -------------------- | ------------------------------------------------------------ | --------------------------------- |
-| `cors.enabled`       | `true`                                                       | Enable CORS middleware            |
-| `cors.allow_origins` | `"*"`                                                        | Allowed origins                   |
-| `cors.allow_methods` | `"GET, POST, OPTIONS"`                                       | Allowed methods                   |
-| `cors.allow_headers` | `"Origin, Content-Type, Accept, Authorization, X-Use-Proxy"` | Allowed headers                   |
-| `cors.max_age`       | `86400`                                                      | Preflight cache max age (seconds) |
-
-### `2captcha`
-
-| Key               | Default | Description                 |
-| ----------------- | ------- | --------------------------- |
-| `2captcha.apikey` | unset   | Optional captcha solver key |
-
-### Engine rate-limit defaults
-
-For each engine (`google`, `yandex`, `baidu`, `bing`, `duckduckgo`):
-
-| Key                         | Default         | Description                   |
-| --------------------------- | --------------- | ----------------------------- |
-| `<engine>.rate_requests`    | `4`             | Average requests per minute   |
-| `<engine>.rate_burst`       | `2`             | Burst capacity                |
-| `<engine>.rate_seconds`     | `60` (implicit) | Rate window seconds           |
-| `<engine>.selector_timeout` | `5` (implicit)  | Selector wait timeout seconds |
-
-Google-only additional toggle:
-
-- `google.captcha` (default: `true`)
+See [config.yaml](../config.yaml) for all available sections and defaults.
