@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,29 @@ import (
 	"github.com/karust/openserp/core"
 	"github.com/sirupsen/logrus"
 )
+
+var bingDateOperatorRE = regexp.MustCompile(`(?i)\b(after|before):(\d{4}-\d{2}-\d{2})\b`)
+
+// defaultBingCountryByLanguage maps a language subtag to the country Bing
+// pairs with it for the "mkt" parameter when the caller did not specify one.
+// Languages outside this map fall back to "US" rather than echoing the
+// language code, since Bing rejects unknown markets like "ja-JA".
+var defaultBingCountryByLanguage = map[string]string{
+	"en": "US",
+	"de": "DE",
+	"ru": "RU",
+	"fr": "FR",
+	"es": "ES",
+	"it": "IT",
+	"pt": "BR",
+	"zh": "CN",
+	"ja": "JP",
+	"ko": "KR",
+	"nl": "NL",
+	"pl": "PL",
+	"tr": "TR",
+	"ar": "SA",
+}
 
 // BuildURL builds a Bing web search URL from Query fields.
 // It returns an error when query text or date parameters are invalid.
@@ -25,7 +49,13 @@ func BuildURL(q core.Query) (string, error) {
 
 	// Set search query text with operators
 	if q.Text != "" || q.Site != "" || q.Filetype != "" {
-		text := q.Text
+		text, textDateInterval, err := normalizeBingQueryText(q.Text)
+		if err != nil {
+			return "", err
+		}
+		if q.DateInterval == "" {
+			q.DateInterval = textDateInterval
+		}
 		if q.Site != "" {
 			text += " site:" + q.Site
 		}
@@ -41,8 +71,10 @@ func BuildURL(q core.Query) (string, error) {
 		return "", errors.New("empty query built")
 	}
 
-	if q.LangCode != "" {
-		params.Add("setlang", strings.ToLower(q.LangCode))
+	if locale, ok := bingLocale(q.LangCode); ok {
+		params.Add("mkt", locale.market)
+		params.Add("setlang", locale.language)
+		params.Add("cc", locale.country)
 	}
 
 	// Set result offset (pagination) - Bing uses "first" parameter.
@@ -57,32 +89,12 @@ func BuildURL(q core.Query) (string, error) {
 		params.Add("count", strconv.Itoa(q.Limit))
 	}
 
-	// Set search date range - Bing supports date filtering via query text
 	if q.DateInterval != "" {
-		intervals := strings.Split(q.DateInterval, "..")
-		if len(intervals) != 2 {
-			return "", errors.New("incorrect date interval provided, expected format: YYYYMMDD..YYYYMMDD")
-		}
-
-		// Convert YYYYMMDD to YYYY-MM-DD format for Bing
-		startDate, err := time.Parse("20060102", intervals[0])
+		filter, err := buildBingDateFilter(q.DateInterval)
 		if err != nil {
-			return "", errors.New("invalid start date format, expected YYYYMMDD")
+			return "", err
 		}
-
-		endDate, err := time.Parse("20060102", intervals[1])
-		if err != nil {
-			return "", errors.New("invalid end date format, expected YYYYMMDD")
-		}
-
-		// Add date range to the search query text (Bing supports this format)
-		dateRange := fmt.Sprintf(" after:%s before:%s",
-			startDate.Format("2006-01-02"),
-			endDate.Format("2006-01-02"))
-
-		// Update the query text to include date range
-		currentQuery := params.Get("q")
-		params.Set("q", currentQuery+dateRange)
+		params.Add("filters", filter)
 	}
 
 	// Bing-specific parameters for consistent results
@@ -93,6 +105,101 @@ func BuildURL(q core.Query) (string, error) {
 
 	base.RawQuery = params.Encode()
 	return base.String(), nil
+}
+
+type bingLocaleParams struct {
+	language string
+	country  string
+	market   string
+}
+
+// bingLocale resolves a Bing market triplet (language, country, mkt) from a
+// caller-supplied language code. It returns ok=false when the input is empty
+// so callers can omit Bing's locale parameters entirely instead of forcing a
+// default market that biases results toward en-US.
+func bingLocale(langCode string) (bingLocaleParams, bool) {
+	parsed := core.ParseLocale(langCode)
+	if parsed.Language == "" {
+		return bingLocaleParams{}, false
+	}
+
+	country := parsed.Country
+	if country == "" {
+		country = defaultBingCountry(parsed.Language)
+	}
+	return bingLocaleParams{
+		language: parsed.Language,
+		country:  country,
+		market:   parsed.Language + "-" + country,
+	}, true
+}
+
+func defaultBingCountry(language string) string {
+	if country, ok := defaultBingCountryByLanguage[language]; ok {
+		return country
+	}
+	return "US"
+}
+
+func normalizeBingQueryText(text string) (string, string, error) {
+	matches := bingDateOperatorRE.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return text, "", nil
+	}
+
+	var after, before string
+	for _, match := range matches {
+		if len(match) != 3 {
+			continue
+		}
+		switch strings.ToLower(match[1]) {
+		case "after":
+			after = strings.ReplaceAll(match[2], "-", "")
+		case "before":
+			before = strings.ReplaceAll(match[2], "-", "")
+		}
+	}
+
+	cleaned := bingDateOperatorRE.ReplaceAllString(text, "")
+	cleaned = strings.Join(strings.Fields(cleaned), " ")
+
+	if after == "" && before == "" {
+		return cleaned, "", nil
+	}
+	if after == "" || before == "" {
+		return cleaned, "", nil
+	}
+	if _, err := buildBingDateFilter(after + ".." + before); err != nil {
+		return "", "", err
+	}
+	return cleaned, after + ".." + before, nil
+}
+
+func buildBingDateFilter(dateInterval string) (string, error) {
+	intervals := strings.Split(dateInterval, "..")
+	if len(intervals) != 2 {
+		return "", errors.New("incorrect date interval provided, expected format: YYYYMMDD..YYYYMMDD")
+	}
+
+	startDate, err := time.Parse("20060102", intervals[0])
+	if err != nil {
+		return "", errors.New("invalid start date format, expected YYYYMMDD")
+	}
+
+	endDate, err := time.Parse("20060102", intervals[1])
+	if err != nil {
+		return "", errors.New("invalid end date format, expected YYYYMMDD")
+	}
+
+	if startDate.After(endDate) {
+		return "", errors.New("start date must not be after end date")
+	}
+
+	const secondsPerDay = int64(24 * 60 * 60)
+	startDay := startDate.Unix() / secondsPerDay
+	endDay := endDate.Unix() / secondsPerDay
+
+	return fmt.Sprintf(`ex1:"ez5_%d_%d"`, startDay, endDay), nil
 }
 
 // BuildImageURL builds a Bing image search URL from Query fields.
@@ -118,9 +225,10 @@ func BuildImageURL(q core.Query) (string, error) {
 		return "", errors.New("empty query built")
 	}
 
-	// Add common parameters
-	if q.LangCode != "" {
-		params.Add("setlang", strings.ToLower(q.LangCode))
+	if locale, ok := bingLocale(q.LangCode); ok {
+		params.Add("mkt", locale.market)
+		params.Add("setlang", locale.language)
+		params.Add("cc", locale.country)
 	}
 
 	// Image-specific parameters

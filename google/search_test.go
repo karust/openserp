@@ -49,8 +49,11 @@ func TestBuildSearchURL(t *testing.T) {
 				if got := params.Get("filter"); got != "0" {
 					t.Fatalf("unexpected filter value: %q", got)
 				}
-				if got := params.Get("hl"); got != "RU" {
+				if got := params.Get("hl"); got != "ru" {
 					t.Fatalf("unexpected hl value: %q", got)
+				}
+				if got := params.Get("gl"); got != "ru" {
+					t.Fatalf("unexpected gl value: %q", got)
 				}
 				if got := params.Get("lr"); got != "lang_ru" {
 					t.Fatalf("unexpected lr value: %q", got)
@@ -60,6 +63,29 @@ func TestBuildSearchURL(t *testing.T) {
 				}
 				if got := params.Get("nfpr"); got != "1" {
 					t.Fatalf("unexpected nfpr value: %q", got)
+				}
+			},
+		},
+		{
+			name: "german language sets matching google locale params",
+			query: core.Query{
+				Text:     "megadeth tickets",
+				Filter:   true,
+				LangCode: "DE",
+			},
+			check: func(t *testing.T, params url.Values, host string) {
+				t.Helper()
+				if host != "www.google.de" {
+					t.Fatalf("unexpected host: %s", host)
+				}
+				if got := params.Get("hl"); got != "de" {
+					t.Fatalf("unexpected hl value: %q", got)
+				}
+				if got := params.Get("gl"); got != "de" {
+					t.Fatalf("unexpected gl value: %q", got)
+				}
+				if got := params.Get("lr"); got != "lang_de" {
+					t.Fatalf("unexpected lr value: %q", got)
 				}
 			},
 		},
@@ -167,8 +193,11 @@ func TestBuildImageSearchURL(t *testing.T) {
 				if got := params.Get("tbs"); got != "cdr:1,cd_min:20240301,cd_max:20240315" {
 					t.Fatalf("unexpected tbs value: %q", got)
 				}
-				if got := params.Get("hl"); got != "EN" {
+				if got := params.Get("hl"); got != "en" {
 					t.Fatalf("unexpected hl value: %q", got)
+				}
+				if got := params.Get("gl"); got != "us" {
+					t.Fatalf("unexpected gl value: %q", got)
 				}
 				if got := params.Get("lr"); got != "lang_en" {
 					t.Fatalf("unexpected lr value: %q", got)

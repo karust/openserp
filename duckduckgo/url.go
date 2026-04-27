@@ -12,6 +12,69 @@ import (
 
 const baseURL = "https://duckduckgo.com"
 
+// ddgKLByLocale maps lowercase BCP47 codes ("en", "en-gb", "zh-tw") to
+// DuckDuckGo's "kl" parameter, which uses an inverted region-language form
+// (e.g. "uk-en"). Lookup is locale-first, then language-only as a fallback.
+var ddgKLByLocale = map[string]string{
+	"en":    "us-en",
+	"en-us": "us-en",
+	"en-gb": "uk-en",
+	"en-au": "au-en",
+	"en-ca": "ca-en",
+	"de":    "de-de",
+	"de-at": "at-de",
+	"de-ch": "ch-de",
+	"fr":    "fr-fr",
+	"fr-ca": "ca-fr",
+	"fr-be": "be-fr",
+	"fr-ch": "ch-fr",
+	"es":    "es-es",
+	"es-mx": "mx-es",
+	"es-ar": "ar-es",
+	"it":    "it-it",
+	"nl":    "nl-nl",
+	"nl-be": "be-nl",
+	"pt":    "pt-pt",
+	"pt-br": "br-pt",
+	"ru":    "ru-ru",
+	"pl":    "pl-pl",
+	"cs":    "cz-cs",
+	"sk":    "sk-sk",
+	"hu":    "hu-hu",
+	"ro":    "ro-ro",
+	"da":    "dk-da",
+	"sv":    "se-sv",
+	"no":    "no-no",
+	"fi":    "fi-fi",
+	"tr":    "tr-tr",
+	"el":    "gr-el",
+	"he":    "il-he",
+	"ar":    "xa-ar",
+	"zh":    "cn-zh",
+	"zh-cn": "cn-zh",
+	"zh-tw": "tw-zh",
+	"ja":    "jp-ja",
+	"ko":    "kr-ko",
+}
+
+// duckDuckGoKL resolves a DuckDuckGo "kl" value for the supplied language code.
+// Returns "" when the input has no known mapping so callers can omit the
+// parameter rather than send an unrecognized region.
+func duckDuckGoKL(langCode string) string {
+	locale := core.ParseLocale(langCode)
+	if locale.Language == "" {
+		return ""
+	}
+
+	if locale.Country != "" {
+		key := locale.Language + "-" + strings.ToLower(locale.Country)
+		if kl, ok := ddgKLByLocale[key]; ok {
+			return kl
+		}
+	}
+	return ddgKLByLocale[locale.Language]
+}
+
 // BuildURL builds a DuckDuckGo web search URL for the provided query and page
 // index. It returns an error when query text or date parameters are invalid.
 func BuildURL(q core.Query, page int) (string, error) {
@@ -65,9 +128,8 @@ func BuildURL(q core.Query, page int) (string, error) {
 		params.Add("df", dateRange)
 	}
 
-	// Set language
-	if q.LangCode != "" {
-		params.Add("kl", strings.ToLower(q.LangCode))
+	if kl := duckDuckGoKL(q.LangCode); kl != "" {
+		params.Add("kl", kl)
 	}
 
 	// DuckDuckGo specific parameters
@@ -142,11 +204,9 @@ func BuildImageURL(q core.Query) (string, error) {
 		params.Add("df", dateRange)
 	}
 
-	// Set language
-	if q.LangCode != "" {
-		params.Add("kl", strings.ToLower(q.LangCode))
+	if kl := duckDuckGoKL(q.LangCode); kl != "" {
+		params.Add("kl", kl)
 	}
-
 	base.RawQuery = params.Encode()
 	return base.String(), nil
 }

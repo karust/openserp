@@ -44,7 +44,7 @@ func TestBuildURL(t *testing.T) {
 				Text:         "поиск",
 				Site:         "github.com",
 				Filetype:     "pdf",
-				LangCode:     "RU-ru",
+				LangCode:     "RU",
 				DateInterval: "20240101..20240131",
 			},
 			page: 0,
@@ -151,7 +151,7 @@ func TestBuildImageURL(t *testing.T) {
 				if got := params.Get("df"); got != "2024-02-01..2024-02-29" {
 					t.Fatalf("unexpected df value: %q", got)
 				}
-				if got := params.Get("kl"); got != "ru" {
+				if got := params.Get("kl"); got != "ru-ru" {
 					t.Fatalf("unexpected kl value: %q", got)
 				}
 			},
@@ -187,6 +187,48 @@ func TestBuildImageURL(t *testing.T) {
 			}
 			if tt.check != nil {
 				tt.check(t, parsed.Query(), parsed.Host)
+			}
+		})
+	}
+}
+
+func TestDuckDuckGoLanguageMapping(t *testing.T) {
+	tests := []struct {
+		name     string
+		langCode string
+		wantKL   string
+	}{
+		{
+			name:     "language only maps to default region",
+			langCode: "DE",
+			wantKL:   "de-de",
+		},
+		{
+			name:     "regional language maps to duckduckgo region",
+			langCode: "de-AT",
+			wantKL:   "at-de",
+		},
+		{
+			name:     "unknown language omits kl",
+			langCode: "xx",
+			wantKL:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := BuildURL(core.Query{Text: "golang", LangCode: tt.langCode}, 0)
+			if err != nil {
+				t.Fatalf("BuildURL() error = %v", err)
+			}
+
+			parsed, err := url.Parse(got)
+			if err != nil {
+				t.Fatalf("BuildURL() returned invalid URL: %v", err)
+			}
+
+			if gotKL := parsed.Query().Get("kl"); gotKL != tt.wantKL {
+				t.Fatalf("unexpected kl value: %q", gotKL)
 			}
 		})
 	}

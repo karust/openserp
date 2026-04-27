@@ -215,10 +215,21 @@ var GoogleDomains = map[string]string{
 	"zw":  "co.zw",
 }
 
+// googleDefaultCountryByLanguage maps a language subtag to the country Google
+// associates with it when the user did not provide an explicit region.
+var googleDefaultCountryByLanguage = map[string]string{
+	"en": "us",
+	"pt": "br",
+	"zh": "cn",
+	"ja": "jp",
+	"ko": "kr",
+}
+
 // BuildURL builds a Google web search URL from Query fields.
 // It returns an error when the resulting query text is empty or invalid.
 func BuildURL(q core.Query) (string, error) {
-	googleBase := GoogleDomains[strings.ToLower(q.LangCode)]
+	locale := googleLocale(q.LangCode)
+	googleBase := googleDomain(locale)
 	base, err := url.Parse(fmt.Sprintf("https://www.google.%s", googleBase))
 	if err != nil {
 		return "", err
@@ -275,9 +286,10 @@ func BuildURL(q core.Query) (string, error) {
 		params.Add("filter", "0")
 	}
 
-	if q.LangCode != "" {
-		params.Add("hl", q.LangCode)
-		params.Add("lr", "lang_"+strings.ToLower(q.LangCode))
+	if locale.language != "" {
+		params.Add("hl", locale.language)
+		params.Add("gl", locale.country)
+		params.Add("lr", "lang_"+locale.language)
 	}
 
 	params.Add("pws", "0")  // Do not personalize earch results
@@ -293,7 +305,8 @@ func BuildURL(q core.Query) (string, error) {
 // It returns an error when the resulting query text is empty or invalid.
 func BuildImageURL(q core.Query) (string, error) {
 	// TODO: Add new params
-	googleBase := GoogleDomains[strings.ToLower(q.LangCode)]
+	locale := googleLocale(q.LangCode)
+	googleBase := googleDomain(locale)
 	base, err := url.Parse(fmt.Sprintf("https://www.google.%s", googleBase))
 	if err != nil {
 		return "", err
@@ -337,9 +350,10 @@ func BuildImageURL(q core.Query) (string, error) {
 		params.Add("num", strconv.Itoa(q.Limit))
 	}
 
-	if q.LangCode != "" {
-		params.Add("hl", q.LangCode)
-		params.Add("lr", "lang_"+strings.ToLower(q.LangCode))
+	if locale.language != "" {
+		params.Add("hl", locale.language)
+		params.Add("gl", locale.country)
+		params.Add("lr", "lang_"+locale.language)
 	}
 
 	params.Add("pws", "0")  // Do not personalize earch results
@@ -347,6 +361,53 @@ func BuildImageURL(q core.Query) (string, error) {
 
 	base.RawQuery = params.Encode()
 	return base.String(), nil
+}
+
+type googleLocaleParams struct {
+	language string
+	country  string
+}
+
+// googleLocale parses langCode and fills in a default country when one is not
+// supplied so callers always get a usable (gl, hl) pair.
+func googleLocale(langCode string) googleLocaleParams {
+	parsed := core.ParseLocale(langCode)
+	if parsed.Language == "" {
+		return googleLocaleParams{}
+	}
+
+	country := strings.ToLower(parsed.Country)
+	if country == "" {
+		country = defaultGoogleCountry(parsed.Language)
+	}
+	return googleLocaleParams{
+		language: parsed.Language,
+		country:  country,
+	}
+}
+
+func defaultGoogleCountry(language string) string {
+	if country, ok := googleDefaultCountryByLanguage[language]; ok {
+		return country
+	}
+	// Many ISO 639-1 codes also exist as ccTLDs in GoogleDomains
+	// (e.g. "de", "fr", "ru"); fall back to that mapping when present.
+	if _, ok := GoogleDomains[language]; ok {
+		return language
+	}
+	return "us"
+}
+
+// googleDomain picks a Google ccTLD for the resolved locale, preferring the
+// country, then the language, then the global "com" default.
+func googleDomain(locale googleLocaleParams) string {
+	if domain, ok := GoogleDomains[locale.country]; ok {
+		return domain
+	}
+	if domain, ok := GoogleDomains[locale.language]; ok {
+		return domain
+	}
+	return GoogleDomains[""]
 }
 
 // SourceImage contains parsed Google image metadata extracted from result links.

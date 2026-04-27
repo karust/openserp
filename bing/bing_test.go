@@ -30,7 +30,7 @@ func TestBuildURL(t *testing.T) {
 				if host != "www.bing.com" {
 					t.Fatalf("unexpected host: %s", host)
 				}
-				if got := params.Get("q"); got != "golang тест site:example.com filetype:pdf after:2024-01-01 before:2024-01-31" {
+				if got := params.Get("q"); got != "golang тест site:example.com filetype:pdf" {
 					t.Fatalf("unexpected q value: %q", got)
 				}
 				if got := params.Get("pq"); got != params.Get("q") {
@@ -38,6 +38,15 @@ func TestBuildURL(t *testing.T) {
 				}
 				if got := params.Get("setlang"); got != "ru" {
 					t.Fatalf("unexpected setlang value: %q", got)
+				}
+				if got := params.Get("mkt"); got != "ru-RU" {
+					t.Fatalf("unexpected mkt value: %q", got)
+				}
+				if got := params.Get("cc"); got != "RU" {
+					t.Fatalf("unexpected cc value: %q", got)
+				}
+				if got := params.Get("filters"); got != `ex1:"ez5_19723_19753"` {
+					t.Fatalf("unexpected filters value: %q", got)
 				}
 				if got := params.Get("count"); got != "30" {
 					t.Fatalf("unexpected count value: %q", got)
@@ -53,6 +62,58 @@ func TestBuildURL(t *testing.T) {
 				}
 				if got := params.Get("sp"); got != "-1" {
 					t.Fatalf("unexpected sp value: %q", got)
+				}
+			},
+		},
+		{
+			name: "date operators in text are converted to filters",
+			query: core.Query{
+				Text:  "megadeth tickets after:2026-01-01 before:2026-04-27",
+				Limit: 10,
+			},
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("q"); got != "megadeth tickets" {
+					t.Fatalf("unexpected q value: %q", got)
+				}
+				if got := params.Get("pq"); got != "megadeth tickets" {
+					t.Fatalf("unexpected pq value: %q", got)
+				}
+				if got := params.Get("filters"); got != `ex1:"ez5_20454_20570"` {
+					t.Fatalf("unexpected filters value: %q", got)
+				}
+				// LangCode unset → no locale params; let Bing pick defaults
+				// from the request rather than biasing toward en-US.
+				for _, key := range []string{"mkt", "setlang", "cc"} {
+					if got := params.Get(key); got != "" {
+						t.Fatalf("expected %s to be empty, got %q", key, got)
+					}
+				}
+			},
+		},
+		{
+			name: "date param overrides date operators in text",
+			query: core.Query{
+				Text:         "megadeth tickets after:2026-01-01 before:2026-04-27",
+				DateInterval: "20240101..20240131",
+				LangCode:     "en-DE",
+			},
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("q"); got != "megadeth tickets" {
+					t.Fatalf("unexpected q value: %q", got)
+				}
+				if got := params.Get("filters"); got != `ex1:"ez5_19723_19753"` {
+					t.Fatalf("unexpected filters value: %q", got)
+				}
+				if got := params.Get("mkt"); got != "en-DE" {
+					t.Fatalf("unexpected mkt value: %q", got)
+				}
+				if got := params.Get("setlang"); got != "en" {
+					t.Fatalf("unexpected setlang value: %q", got)
+				}
+				if got := params.Get("cc"); got != "DE" {
+					t.Fatalf("unexpected cc value: %q", got)
 				}
 			},
 		},
@@ -78,6 +139,14 @@ func TestBuildURL(t *testing.T) {
 			query: core.Query{
 				Text:  "golang",
 				Start: -1,
+			},
+			wantErr: true,
+		},
+		{
+			name: "reversed date interval returns error",
+			query: core.Query{
+				Text:         "golang",
+				DateInterval: "20240131..20240101",
 			},
 			wantErr: true,
 		},
@@ -144,6 +213,12 @@ func TestBuildImageURL(t *testing.T) {
 				}
 				if got := params.Get("setlang"); got != "en" {
 					t.Fatalf("unexpected setlang value: %q", got)
+				}
+				if got := params.Get("mkt"); got != "en-US" {
+					t.Fatalf("unexpected mkt value: %q", got)
+				}
+				if got := params.Get("cc"); got != "US" {
+					t.Fatalf("unexpected cc value: %q", got)
 				}
 				if got := params.Get("form"); got != "HDRSC2" {
 					t.Fatalf("unexpected form value: %q", got)

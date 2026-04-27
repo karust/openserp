@@ -28,8 +28,10 @@ func BuildURL(q core.Query, page int) (string, error) {
 		if q.DateInterval != "" {
 			text += " date:" + q.DateInterval
 		}
-		if q.LangCode != "" {
-			text += " lang:" + q.LangCode
+		if locale := core.ParseLocale(q.LangCode); locale.Language != "" {
+			// Yandex's lang: operator accepts the lowercase language subtag
+			// only; region modifiers must go through the lr= parameter.
+			text += " lang:" + locale.Language
 		}
 
 		params.Add("text", text)
