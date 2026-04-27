@@ -23,6 +23,7 @@ func googleRequest(ctx context.Context, searchURL string, query core.Query) (*ht
 		return nil, err
 	}
 	req.Header.Set("User-Agent", uarand.GetRandom())
+	core.SetAcceptLanguageHeader(req, query.LangCode)
 
 	res, err := baseClient.Do(req)
 	if err != nil {

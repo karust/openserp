@@ -23,6 +23,7 @@ func baiduRequest(ctx context.Context, searchURL string, query core.Query) (*htt
 		return nil, err
 	}
 	req.Header.Set("User-Agent", uarand.GetRandom())
+	core.SetAcceptLanguageHeader(req, query.LangCode)
 
 	res, err := baseClient.Do(req)
 	if err != nil {

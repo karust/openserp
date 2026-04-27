@@ -486,6 +486,7 @@ func (b *Browser) laneProfile(ctx context.Context, browser *rod.Browser) (browse
 	// serialize all concurrent Navigate calls.
 	profile := browserprofile.SelectProfile(engine, region)
 	profile = applyRuntimeBrowserVersion(profile, browser)
+	profile = applyProfileLanguageHint(profile, region)
 	if overrideUA := strings.TrimSpace(b.UserAgent); overrideUA != "" {
 		profile.UserAgent = overrideUA
 	}
@@ -593,6 +594,32 @@ func navigatorPlatformForProfile(profile browserprofile.Profile) string {
 	default:
 		return strings.TrimSpace(profile.Platform)
 	}
+}
+
+// applyProfileLanguageHint overrides the profile's locale-derived fields when
+// the requested language differs from the cached profile's. A bare language
+// hint that already matches the profile language is treated as a no-op so that
+// an explicit profile region (e.g. en-GB) isn't clobbered by a default (en-US).
+func applyProfileLanguageHint(profile browserprofile.Profile, langCode string) browserprofile.Profile {
+	hint := ParseLocale(langCode)
+	if hint.Language == "" {
+		return profile
+	}
+
+	current := ParseLocale(profile.Locale)
+	if current.Language == hint.Language && (hint.Country == "" || current.Country == hint.Country) {
+		return profile
+	}
+
+	primary := PrimaryLanguageTag(langCode)
+	if primary == "" {
+		return profile
+	}
+
+	profile.AcceptLanguage = BuildAcceptLanguageHeader(langCode)
+	profile.NavigatorLangs = []string{primary}
+	profile.Locale = primary
+	return profile
 }
 
 func applyProfile(page *rod.Page, profile browserprofile.Profile) error {

@@ -15,6 +15,17 @@ import (
 
 const rawHTTPTimeout = 10 * time.Second
 
+// SetAcceptLanguageHeader sets the Accept-Language header from a lang code.
+// No-op when the code has no language subtag.
+func SetAcceptLanguageHeader(req *http.Request, langCode string) {
+	if req == nil {
+		return
+	}
+	if value := BuildAcceptLanguageHeader(langCode); value != "" {
+		req.Header.Set("Accept-Language", value)
+	}
+}
+
 // DrainAndCloseResponse drains unread bytes before closing so HTTP transports
 // can safely reuse connections when callers don't consume the full body.
 func DrainAndCloseResponse(resp *http.Response) {

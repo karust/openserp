@@ -11,6 +11,23 @@ type Locale struct {
 	Country  string
 }
 
+var defaultLocaleCountryByLanguage = map[string]string{
+	"en": "US",
+	"de": "DE",
+	"ru": "RU",
+	"fr": "FR",
+	"es": "ES",
+	"it": "IT",
+	"pt": "BR",
+	"zh": "CN",
+	"ja": "JP",
+	"ko": "KR",
+	"nl": "NL",
+	"pl": "PL",
+	"tr": "TR",
+	"ar": "SA",
+}
+
 // ParseLocale parses a language code such as "en", "EN-us", or "de_AT" into a
 // Locale. Returns the zero value when the input is empty or has no language
 // subtag. Country is uppercased; Language is lowercased.
@@ -32,4 +49,36 @@ func ParseLocale(code string) Locale {
 		country = strings.ToUpper(strings.TrimSpace(parts[1]))
 	}
 	return Locale{Language: language, Country: country}
+}
+
+// PrimaryLanguageTag returns the BCP47 primary tag for a lang code, filling in
+// a default country for bare languages (e.g. "de" -> "de-DE"). Returns "" when
+// the input has no language subtag.
+func PrimaryLanguageTag(langCode string) string {
+	locale := ParseLocale(langCode)
+	if locale.Language == "" {
+		return ""
+	}
+	country := locale.Country
+	if country == "" {
+		country = defaultLocaleCountryByLanguage[locale.Language]
+	}
+	if country == "" {
+		return locale.Language
+	}
+	return locale.Language + "-" + country
+}
+
+// BuildAcceptLanguageHeader formats an Accept-Language value from a lang code.
+// Example: "de" -> "de-DE,de;q=0.9", "en-GB" -> "en-GB,en;q=0.9", "sw" -> "sw".
+func BuildAcceptLanguageHeader(langCode string) string {
+	primary := PrimaryLanguageTag(langCode)
+	if primary == "" {
+		return ""
+	}
+	language := ParseLocale(langCode).Language
+	if primary == language {
+		return language
+	}
+	return primary + "," + language + ";q=0.9"
 }

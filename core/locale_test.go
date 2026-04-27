@@ -31,3 +31,27 @@ func TestParseLocale(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildAcceptLanguageHeader(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "empty", in: "", want: ""},
+		{name: "language only with default country", in: "de", want: "de-DE,de;q=0.9"},
+		{name: "language only with mapped country", in: "pt", want: "pt-BR,pt;q=0.9"},
+		{name: "explicit region", in: "en-GB", want: "en-GB,en;q=0.9"},
+		{name: "unknown language emits bare tag", in: "sw", want: "sw"},
+		{name: "invalid locale", in: "-US", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := BuildAcceptLanguageHeader(tt.in)
+			if got != tt.want {
+				t.Fatalf("BuildAcceptLanguageHeader(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
