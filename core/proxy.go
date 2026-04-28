@@ -18,6 +18,7 @@ const (
 	ProxyRuntimeRaw              = "raw"
 	ProxyModeOff                 = "off"
 	ProxyModeTagPool             = "tag_pool"
+	ProxyModeRequestURL          = "request_url"
 	DefaultProxyFailureThreshold = 3
 	ProxyOverrideDirect          = "direct"
 	// ProxyPoolQuarantineDuration is how long an exhausted tag pool stays quarantined
@@ -49,9 +50,11 @@ type ProxiesHealthConfig struct {
 }
 
 type ProxiesConfig struct {
-	Global  string              `json:"global,omitempty" mapstructure:"global"`
-	Entries []ProxyEntryConfig  `json:"entries" mapstructure:"entries"`
-	Health  ProxiesHealthConfig `json:"health" mapstructure:"health"`
+	Global               string              `json:"global,omitempty" mapstructure:"global"`
+	Entries              []ProxyEntryConfig  `json:"entries" mapstructure:"entries"`
+	Health               ProxiesHealthConfig `json:"health" mapstructure:"health"`
+	AllowRequestProxyURL bool                `json:"allow_request_proxy_url" mapstructure:"allow_request_proxy_url"`
+	Lanes                ProxyLanesConfig    `json:"lanes" mapstructure:"lanes"`
 }
 
 type ProxyConfig struct {
@@ -80,12 +83,15 @@ type ProxyEngineStats struct {
 }
 
 type ProxyStats struct {
-	ConfiguredCount int                         `json:"configured_count"`
-	HealthyCount    int                         `json:"healthy_count"`
-	UnhealthyCount  int                         `json:"unhealthy_count"`
-	Tags            map[string]ProxyTagSummary  `json:"tags"`
-	Entries         []ProxyStatsEntry           `json:"entries"`
-	Engines         map[string]ProxyEngineStats `json:"engines,omitempty"`
+	ConfiguredCount        int                         `json:"configured_count"`
+	HealthyCount           int                         `json:"healthy_count"`
+	UnhealthyCount         int                         `json:"unhealthy_count"`
+	RequestProxyURLEnabled bool                        `json:"request_proxy_url_enabled"`
+	Lanes                  LaneStats                   `json:"lanes"`
+	BrowserProcesses       BrowserPoolStats            `json:"browser_processes"`
+	Tags                   map[string]ProxyTagSummary  `json:"tags"`
+	Entries                []ProxyStatsEntry           `json:"entries"`
+	Engines                map[string]ProxyEngineStats `json:"engines,omitempty"`
 }
 
 type proxyState struct {
@@ -110,6 +116,7 @@ func DefaultProxiesConfig() ProxiesConfig {
 		Global:  "",
 		Entries: []ProxyEntryConfig{},
 		Health:  ProxiesHealthConfig{FailureThreshold: DefaultProxyFailureThreshold},
+		Lanes:   DefaultProxyLanesConfig(),
 	}
 }
 
@@ -203,6 +210,7 @@ func NormalizeProxiesConfig(cfg ProxiesConfig) (ProxiesConfig, error) {
 
 	cfg.Entries = normalizedEntries
 	cfg.Health = ProxiesHealthConfig{FailureThreshold: failureThreshold}
+	cfg.Lanes = NormalizeProxyLanesConfig(cfg.Lanes)
 	return cfg, nil
 }
 

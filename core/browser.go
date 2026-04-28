@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"regexp"
@@ -46,6 +47,8 @@ type BrowserOpts struct {
 	BrowserPath string
 	// ProxyURL defines the upstream proxy for browser traffic.
 	ProxyURL string
+	// ProxyLaneStore keeps sticky proxy lane profiles and cookies.
+	ProxyLaneStore *LaneStore
 	// Insecure allows invalid TLS certificates for browser requests.
 	Insecure bool
 	// UserAgent optionally overrides browser-reported user agent during emulation.
@@ -193,14 +196,18 @@ func (b *Browser) configureRequestBlocking(ctx context.Context, page *rod.Page) 
 type Browser struct {
 	BrowserOpts
 	browserAddr   string
+	proxyUser     string
+	proxyPass     string
 	conn          *browserConnection
 	CaptchaSolver *CaptchaSolver
 }
 
 type browserConnection struct {
-	mu           sync.Mutex
-	browser      *rod.Browser
-	laneProfiles map[string]browserprofile.Profile
+	mu             sync.Mutex
+	browser        *rod.Browser
+	laneProfiles   map[string]browserprofile.Profile
+	authCancel     context.CancelFunc
+	authStopped    chan struct{}
 }
 
 // NewBrowser launches a new Chromium process via Rod launcher and returns a
@@ -210,7 +217,7 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	if strings.TrimSpace(opts.UserAgent) != "" {
 		logrus.Warn("custom user_agent override can reduce profile coherence; use only for diagnostics")
 	}
-	logrus.WithField("browser_options", fmt.Sprintf("%+v", opts)).Debug("Browser options")
+	logrus.WithFields(browserOptsLogFields(opts)).Debug("Browser options")
 
 	path, err := resolveBrowserBinaryPath(opts.BrowserPath, launcher.LookPath)
 	if err != nil {
@@ -236,7 +243,13 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 		l = l.Bin(path)
 	}
 
-	// Configure proxy if specified
+	b := Browser{
+		conn: &browserConnection{},
+	}
+
+	// Configure proxy if specified. Chrome's --proxy-server flag must NOT
+	// include credentials; we strip them here and reinject via a persistent
+	// CDP Fetch.handleAuthRequired listener installed after each connect.
 	if opts.ProxyURL != "" {
 		normalizedProxyURL, err := NormalizeProxyURL(opts.ProxyURL)
 		if err != nil {
@@ -249,26 +262,21 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 			return nil, fmt.Errorf("invalid proxy URL: %v", err)
 		}
 
-		// Chrome's proxy-server flag must not contain credentials.
-		// Auth (if needed) is handled separately via DevTools auth callbacks.
 		proxyStr := proxyURLForBrowserLaunch(proxyUrl)
 		logrus.WithField("proxy", MaskProxyURL(proxyStr)).Debug("Setting up proxy")
 		l = l.Proxy(proxyStr)
 
-		// Check if proxy has auth credentials
-		if proxyUrl.User != nil {
-			username := proxyUrl.User.Username()
+		if proxyUrl.User != nil && (proxyUrl.Scheme == "http" || proxyUrl.Scheme == "https") {
+			b.proxyUser = proxyUrl.User.Username()
+			b.proxyPass, _ = proxyUrl.User.Password()
 			logrus.WithFields(logrus.Fields{
 				"proxy_scheme":   proxyUrl.Scheme,
-				"proxy_username": username,
-			}).Debugf("Proxy credentials configured for %s proxy: %s:****", proxyUrl.Scheme, username)
+				"proxy_username": b.proxyUser,
+			}).Debugf("Proxy credentials configured for %s proxy: %s:****", proxyUrl.Scheme, b.proxyUser)
 		}
 	}
 
-	b := Browser{
-		BrowserOpts: opts,
-		conn:        &browserConnection{},
-	}
+	b.BrowserOpts = opts
 	b.browserAddr, err = l.Launch()
 
 	if opts.CaptchaSolverEnabled && opts.CaptchaSolverApiKey != "" {
@@ -277,6 +285,33 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	}
 
 	return &b, err
+}
+
+func browserOptsLogFields(opts BrowserOpts) logrus.Fields {
+	return logrus.Fields{
+		"headless":                opts.IsHeadless,
+		"leakless":                opts.IsLeakless,
+		"timeout":                 opts.Timeout.String(),
+		"language_code":           opts.LanguageCode,
+		"wait_requests":           opts.WaitRequests,
+		"leave_page_open":         opts.LeavePageOpen,
+		"captcha_solver_enabled":  opts.CaptchaSolverEnabled,
+		"captcha_solver_has_key":  strings.TrimSpace(opts.CaptchaSolverApiKey) != "",
+		"browser_path_configured": strings.TrimSpace(opts.BrowserPath) != "",
+		"proxy":                   maskedProxyLogValue(opts.ProxyURL),
+		"insecure":                opts.Insecure,
+		"user_agent_override":     strings.TrimSpace(opts.UserAgent) != "",
+		"block_resource_types":    len(opts.BlockResourceTypes),
+		"block_trackers":          opts.BlockTrackers,
+		"proxy_lanes_enabled":     opts.ProxyLaneStore != nil,
+	}
+}
+
+func maskedProxyLogValue(proxyURL string) string {
+	if strings.TrimSpace(proxyURL) == "" {
+		return ""
+	}
+	return MaskProxyURL(proxyURL)
 }
 
 func proxyURLForBrowserLaunch(u *url.URL) string {
@@ -359,7 +394,86 @@ func (b *Browser) connectBrowser() (*rod.Browser, error) {
 		}
 	}
 
+	if b.proxyUser != "" {
+		if err := b.startProxyAuthListener(browser); err != nil {
+			return nil, fmt.Errorf("install proxy auth listener: %w", err)
+		}
+	}
+
 	return browser, nil
+}
+
+// startProxyAuthListener enables the Fetch domain with HandleAuthRequests=true
+// and runs a goroutine that responds to every Fetch.requestPaused (continue
+// the request) and every Fetch.authRequired (provide credentials). The
+// listener lives for the lifetime of the rod.Browser session and replaces
+// rod's single-shot HandleAuth helper.
+func (b *Browser) startProxyAuthListener(browser *rod.Browser) error {
+	state := b.connectionState()
+
+	// Stop a previous listener attached to a stale connection.
+	if state.authCancel != nil {
+		state.authCancel()
+		if state.authStopped != nil {
+			<-state.authStopped
+		}
+		state.authCancel = nil
+		state.authStopped = nil
+	}
+
+	listenCtx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	state.authCancel = cancel
+	state.authStopped = stopped
+
+	username := b.proxyUser
+	password := b.proxyPass
+	scoped := browser.Context(listenCtx)
+	started := make(chan struct{})
+
+	go func() {
+		defer close(stopped)
+		// Subscribe via EachEvent. The wait function it returns blocks until
+		// listenCtx is cancelled. We close `started` after EachEvent has
+		// installed its handlers but before we wait, so the caller can safely
+		// enable the Fetch domain without racing the listener install.
+		wait := scoped.EachEvent(
+			func(e *proto.FetchAuthRequired) bool {
+				resp := proto.FetchAuthChallengeResponseResponseProvideCredentials
+				err := proto.FetchContinueWithAuth{
+					RequestID: e.RequestID,
+					AuthChallengeResponse: &proto.FetchAuthChallengeResponse{
+						Response: resp,
+						Username: username,
+						Password: password,
+					},
+				}.Call(scoped)
+				if err != nil && !errors.Is(err, context.Canceled) {
+					logrus.WithError(err).Debug("Proxy auth response failed")
+				}
+				return false
+			},
+			func(e *proto.FetchRequestPaused) bool {
+				err := proto.FetchContinueRequest{RequestID: e.RequestID}.Call(scoped)
+				if err != nil && !errors.Is(err, context.Canceled) {
+					logrus.WithError(err).Debug("Continue paused request failed")
+				}
+				return false
+			},
+		)
+		close(started)
+		wait()
+	}()
+
+	<-started
+	if err := (proto.FetchEnable{HandleAuthRequests: true}).Call(browser); err != nil {
+		cancel()
+		<-stopped
+		state.authCancel = nil
+		state.authStopped = nil
+		return fmt.Errorf("enable Fetch domain: %w", err)
+	}
+	return nil
 }
 
 func (b *Browser) ensureConnectedBrowser(ctx context.Context, forceReconnect bool) (*rod.Browser, error) {
@@ -392,8 +506,17 @@ func (b *Browser) ensureConnectedBrowser(ctx context.Context, forceReconnect boo
 	return state.browser, nil
 }
 
-func createIsolatedPage(browser *rod.Browser) (*rod.Page, proto.BrowserBrowserContextID, error) {
-	browserContext, err := (proto.TargetCreateBrowserContext{}).Call(browser)
+func createIsolatedPage(browser *rod.Browser, proxyURL string) (*rod.Page, proto.BrowserBrowserContextID, error) {
+	create := proto.TargetCreateBrowserContext{}
+	if strings.TrimSpace(proxyURL) != "" {
+		parsed, err := url.Parse(proxyURL)
+		if err != nil {
+			return nil, "", err
+		}
+		create.ProxyServer = proxyURLForBrowserLaunch(parsed)
+	}
+
+	browserContext, err := create.Call(browser)
 	if err != nil {
 		return nil, "", err
 	}
@@ -425,40 +548,6 @@ func disposeBrowserContext(browser *rod.Browser, browserContextID proto.BrowserB
 	}).Call(browser)
 }
 
-func (b *Browser) startProxyAuthHandler(ctx context.Context, browser *rod.Browser) (context.CancelFunc, error) {
-	if browser == nil || b.ProxyURL == "" {
-		return nil, nil
-	}
-
-	proxyURL, err := url.Parse(b.ProxyURL)
-	if err != nil {
-		return nil, fmt.Errorf("parse proxy URL: %w", err)
-	}
-
-	if proxyURL.User == nil {
-		return nil, nil
-	}
-
-	if proxyURL.Scheme != "http" && proxyURL.Scheme != "https" {
-		if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
-			logrus.Debug("SOCKS proxy credentials are not handled by browser auth callback")
-		}
-		return nil, nil
-	}
-
-	username := proxyURL.User.Username()
-	password, _ := proxyURL.User.Password()
-	authCtx, cancel := context.WithCancel(EnsureContext(ctx))
-
-	go func() {
-		if err := browser.Context(authCtx).HandleAuth(username, password)(); err != nil && !errors.Is(err, context.Canceled) {
-			WithRequest(ctx).WithError(err).Debug("Proxy auth handler stopped")
-		}
-	}()
-
-	return cancel, nil
-}
-
 var chromeVersionPattern = regexp.MustCompile(`(?:HeadlessChrome|Chrome)/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)`)
 
 func (b *Browser) laneProfile(ctx context.Context, browser *rod.Browser) (browserprofile.Profile, string) {
@@ -467,6 +556,20 @@ func (b *Browser) laneProfile(ctx context.Context, browser *rod.Browser) (browse
 	if region == "" {
 		region = strings.TrimSpace(b.LanguageCode)
 	}
+
+	if laneKey := proxyLaneKeyFromContext(ctx); !laneKey.Empty() && b.ProxyLaneStore != nil {
+		profile := b.ProxyLaneStore.Profile(laneKey, func() browserprofile.Profile {
+			selected := browserprofile.SelectProfile(engine, region)
+			selected = applyRuntimeBrowserVersion(selected, browser)
+			selected = applyProfileLanguageHint(selected, region)
+			if overrideUA := strings.TrimSpace(b.UserAgent); overrideUA != "" {
+				selected.UserAgent = overrideUA
+			}
+			return selected
+		})
+		return profile, laneKey.ID()
+	}
+
 	laneKey := browserprofile.LaneKey(engine, region)
 
 	state := b.connectionState()
@@ -703,6 +806,103 @@ func applyProfile(page *rod.Page, profile browserprofile.Profile) error {
 	return nil
 }
 
+func (b *Browser) restoreLaneCookies(ctx context.Context, page *rod.Page) error {
+	if b == nil || b.ProxyLaneStore == nil {
+		return nil
+	}
+	laneKey := proxyLaneKeyFromContext(ctx)
+	if laneKey.Empty() {
+		return nil
+	}
+	cookies := b.ProxyLaneStore.Cookies(laneKey)
+	if len(cookies) == 0 {
+		return nil
+	}
+	if err := (proto.NetworkSetCookies{Cookies: cookieParams(cookies)}).Call(page); err != nil {
+		return fmt.Errorf("restore lane cookies: %w", err)
+	}
+	return nil
+}
+
+func (b *Browser) saveLaneCookies(ctx context.Context, page *rod.Page, pageURL string) {
+	if b == nil || b.ProxyLaneStore == nil || page == nil {
+		return
+	}
+	laneKey := proxyLaneKeyFromContext(ctx)
+	if laneKey.Empty() {
+		return
+	}
+	res, err := (proto.NetworkGetCookies{Urls: []string{pageURL}}).Call(page)
+	if err != nil {
+		WithRequest(ctx).WithError(err).Debug("Save lane cookies failed")
+		return
+	}
+	b.ProxyLaneStore.SaveCookies(laneKey, res.Cookies)
+}
+
+type mainDocumentStatusWatcher struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+	mu     sync.Mutex
+	status int
+}
+
+func startMainDocumentStatusWatcher(ctx context.Context, page *rod.Page) *mainDocumentStatusWatcher {
+	watchCtx, cancel := context.WithCancel(EnsureContext(ctx))
+	watcher := &mainDocumentStatusWatcher{
+		cancel: cancel,
+		done:   make(chan struct{}),
+	}
+
+	wait := page.Context(watchCtx).EachEvent(func(e *proto.NetworkResponseReceived) bool {
+		if e == nil || e.Response == nil || e.Type != proto.NetworkResourceTypeDocument {
+			return false
+		}
+		watcher.mu.Lock()
+		watcher.status = e.Response.Status
+		watcher.mu.Unlock()
+		return false
+	})
+
+	go func() {
+		defer close(watcher.done)
+		wait()
+	}()
+
+	return watcher
+}
+
+func (w *mainDocumentStatusWatcher) Stop() {
+	if w == nil {
+		return
+	}
+	w.cancel()
+	select {
+	case <-w.done:
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func (w *mainDocumentStatusWatcher) Status() int {
+	if w == nil {
+		return 0
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.status
+}
+
+func classifyMainDocumentStatus(status int) error {
+	switch status {
+	case http.StatusForbidden:
+		return ErrBlocked
+	case http.StatusTooManyRequests:
+		return ErrRateLimited
+	default:
+		return nil
+	}
+}
+
 func profileNavigatorLanguages(profile browserprofile.Profile) []string {
 	langs := make([]string, 0, len(profile.NavigatorLangs))
 	for _, language := range profile.NavigatorLangs {
@@ -783,20 +983,35 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	}
 
 	WithRequest(ctx).WithField("url", URL).Debug("Navigate")
+	// Per-context proxy override is only used for unauthenticated proxies on a
+	// Chrome that was launched without a process-level proxy. When this Browser
+	// was launched with a proxy (b.ProxyURL set), Chrome handles routing and
+	// auth natively for the whole process; per-context override is skipped to
+	// avoid breaking Chrome's auth flow.
+	contextProxyURL := ""
+	if strings.TrimSpace(b.ProxyURL) == "" {
+		contextProxyURL = requestProxyURLFromContext(ctx)
+	}
+	hasProxy := contextProxyURL != "" || strings.TrimSpace(b.ProxyURL) != ""
 
 	browser, err := b.ensureConnectedBrowser(ctx, false)
 	if err != nil {
 		return nil, fmt.Errorf("browser connect failed: %w", err)
 	}
+	if hasProxy || b.Insecure {
+		if err := browser.IgnoreCertErrors(true); err != nil {
+			return nil, fmt.Errorf("ignore cert errors failed: %w", err)
+		}
+	}
 
-	page, browserContextID, err := createIsolatedPage(browser)
+	page, browserContextID, err := createIsolatedPage(browser, contextProxyURL)
 	if err != nil {
 		// Single-shot reconnect for stale websocket sessions.
 		browser, err = b.ensureConnectedBrowser(ctx, true)
 		if err != nil {
 			return nil, fmt.Errorf("create isolated page failed, reconnect also failed: %w", err)
 		}
-		page, browserContextID, err = createIsolatedPage(browser)
+		page, browserContextID, err = createIsolatedPage(browser, contextProxyURL)
 		if err != nil {
 			return nil, fmt.Errorf("create isolated page failed after reconnect: %w", err)
 		}
@@ -814,19 +1029,14 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 		}
 	}
 
-	cancelProxyAuth, err := b.startProxyAuthHandler(ctx, browser)
-	if err != nil {
-		closeOnErr()
-		return nil, fmt.Errorf("proxy auth setup failed: %w", err)
-	}
-	if cancelProxyAuth != nil {
-		defer cancelProxyAuth()
-	}
-
 	profile, laneKey := b.laneProfile(ctx, browser)
 	if err := applyProfile(page, profile); err != nil {
 		closeOnErr()
 		return nil, fmt.Errorf("apply profile %s (%s) failed: %w", profile.ID, laneKey, err)
+	}
+	if err := b.restoreLaneCookies(ctx, page); err != nil {
+		closeOnErr()
+		return nil, err
 	}
 
 	page = page.Context(ctx)
@@ -834,11 +1044,13 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 		closeOnErr()
 		return nil, fmt.Errorf("configure request blocking failed: %w", err)
 	}
+	statusWatcher := startMainDocumentStatusWatcher(ctx, page)
+	defer statusWatcher.Stop()
 	timedPage := page.Timeout(b.Timeout)
 
 	if err := timedPage.Navigate(URL); err != nil {
 		closeOnErr()
-		return nil, err
+		return nil, classifyProxyNetworkError(err)
 	}
 
 	// Avoid panics from MustWaitLoad when the target navigates/closes mid-wait
@@ -865,6 +1077,11 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	if err := page.Context(ctx).WaitStable(800 * time.Millisecond); err != nil {
 		WithRequest(ctx).WithError(err).Debug("WaitStable returned early; continuing")
 	}
+	if err := classifyMainDocumentStatus(statusWatcher.Status()); err != nil {
+		closeOnErr()
+		return nil, err
+	}
+	b.saveLaneCookies(ctx, page, URL)
 	return page, nil
 }
 
@@ -889,6 +1106,14 @@ func (b *Browser) Close() error {
 		}
 	}
 
+	if state.authCancel != nil {
+		state.authCancel()
+		if state.authStopped != nil {
+			<-state.authStopped
+		}
+		state.authCancel = nil
+		state.authStopped = nil
+	}
 	state.browser = nil
 	state.laneProfiles = nil
 	if err := browser.Close(); err != nil && !isBrowserClosedError(err) {

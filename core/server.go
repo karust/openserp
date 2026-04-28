@@ -187,6 +187,10 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		WithRequest(c.UserContext()).WithError(err).Warn("Invalid query parameters")
 		return err
 	}
+	if err := s.validateRequestProxyURL(&q); err != nil {
+		WithRequest(c.UserContext()).WithError(err).Warn("Invalid request proxy URL")
+		return err
+	}
 
 	format, err := resolveFormat(c)
 	if err != nil {
@@ -206,7 +210,7 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		WithField("action", action).
 		Debugf("Starting %s request for query: %s", action, q.Text)
 
-	if format == "json" {
+	if format == "json" && !ShouldBypassCacheForProxyMarket(q) {
 		if hit, err := s.tryServeCacheHit(
 			c,
 			startedAt,
@@ -236,7 +240,7 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		s.applyProxyHeaders(c, proxyMeta)
 		if searchErr != nil {
 			WithRequest(requestCtx).WithFields(logrus.Fields{"action": action}).WithError(searchErr).Error("Search failed")
-			return fiber.NewError(fiber.StatusServiceUnavailable, classifySearchError(searchErr).Error())
+			return searchAPIError(searchErr, usedEngine, q, proxyMeta)
 		}
 
 		env := NewImageEnvelope(q, requestID, startedAt, engineNames)
@@ -277,7 +281,7 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 
 	if searchErr != nil {
 		WithRequest(requestCtx).WithFields(logrus.Fields{"action": action}).WithError(searchErr).Error("Search failed")
-		return fiber.NewError(fiber.StatusServiceUnavailable, classifySearchError(searchErr).Error())
+		return searchAPIError(searchErr, usedEngine, q, proxyMeta)
 	}
 
 	env := NewEnvelope(q, requestID, startedAt, engineNames)
@@ -308,27 +312,83 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 	return sendEnvelope(c, format, env)
 }
 
-// classifySearchError maps internal sentinel errors to user-facing messages.
-func classifySearchError(err error) error {
+type searchErrorSpec struct {
+	status  int
+	code    string
+	message string
+}
+
+func mapSearchError(err error) searchErrorSpec {
 	switch {
 	case errors.Is(err, ErrCaptcha):
-		return fmt.Errorf("captcha found, please stop sending requests for a while: %w", err)
+		return searchErrorSpec{status: fiber.StatusTooManyRequests, code: "captcha_detected", message: "captcha detected"}
+	case errors.Is(err, ErrBlocked):
+		return searchErrorSpec{status: fiber.StatusForbidden, code: "blocked", message: "search engine blocked the request"}
+	case errors.Is(err, ErrRateLimited):
+		return searchErrorSpec{status: fiber.StatusTooManyRequests, code: "rate_limited", message: "search engine rate limited the request"}
 	case errors.Is(err, ErrSearchTimeout):
-		return fmt.Errorf("%s", err)
-	case errors.Is(err, ErrParser):
-		return fmt.Errorf("%w", ErrParser)
-	case errors.Is(err, ErrEngineInternal):
-		return fmt.Errorf("%w", ErrEngineInternal)
+		return searchErrorSpec{status: fiber.StatusGatewayTimeout, code: "search_timeout", message: ErrSearchTimeout.Error()}
+	case errors.Is(err, ErrProxyAuth):
+		return searchErrorSpec{status: fiber.StatusServiceUnavailable, code: "proxy_auth", message: "proxy authentication failed"}
+	case errors.Is(err, ErrProxyConnect):
+		return searchErrorSpec{status: fiber.StatusServiceUnavailable, code: "proxy_connect", message: "proxy connection failed"}
+	case errors.Is(err, ErrTimeout):
+		return searchErrorSpec{status: fiber.StatusServiceUnavailable, code: "proxy_timeout", message: "proxy request timed out"}
 	case errors.Is(err, ErrProxyUnavailable):
-		return fmt.Errorf("%s", err)
+		return searchErrorSpec{status: fiber.StatusServiceUnavailable, code: "proxy_unavailable", message: "proxy unavailable"}
+	case errors.Is(err, ErrParser):
+		return searchErrorSpec{status: fiber.StatusBadGateway, code: "parser_failure", message: "parser failure"}
+	case errors.Is(err, ErrEngineInternal):
+		return searchErrorSpec{status: fiber.StatusBadGateway, code: "engine_internal", message: "engine internal error"}
 	}
-	return err
+	return searchErrorSpec{status: fiber.StatusBadGateway, code: "engine_internal", message: err.Error()}
+}
+
+func searchAPIError(err error, engineName string, q Query, proxyMeta ProxyExecutionMeta) error {
+	spec := mapSearchError(err)
+	return &APIError{
+		HTTPStatus: spec.status,
+		ErrorCode:  spec.code,
+		Message:    spec.message,
+		Meta:       searchErrorMeta(engineName, q, proxyMeta),
+	}
+}
+
+func searchErrorMeta(engineName string, q Query, proxyMeta ProxyExecutionMeta) map[string]interface{} {
+	meta := map[string]interface{}{}
+	if strings.TrimSpace(engineName) != "" {
+		meta["engine"] = engineName
+	}
+	proxyUsed := strings.TrimSpace(proxyMeta.Used)
+	if proxyUsed == "" && strings.TrimSpace(q.ProxyURL) != "" {
+		proxyUsed = MaskProxyURL(q.ProxyURL)
+	}
+	if proxyUsed != "" {
+		meta["proxy_used"] = proxyUsed
+	}
+	if q.ProxyCountry != "" {
+		meta["proxy_country"] = q.ProxyCountry
+	}
+	if q.ProxyClass != "" {
+		meta["proxy_class"] = q.ProxyClass
+	}
+	if q.ProxyProvider != "" {
+		meta["proxy_provider"] = q.ProxyProvider
+	}
+	if q.ProxySessionID != "" {
+		meta["proxy_session_id"] = q.ProxySessionID
+	}
+	return meta
 }
 
 // cacheEnvelopeIfEligible stores the envelope JSON and returns the cache status header value.
 func (s *Server) cacheEnvelopeIfEligible(engineName, usedEngine, action string, q Query, payload interface{}) string {
 	if s.cache == nil {
 		return ""
+	}
+	if ShouldBypassCacheForProxyMarket(q) {
+		s.cache.RecordBypass()
+		return "BYPASS"
 	}
 	// Don't cache fallback responses so the primary engine can recover.
 	if usedEngine != engineName {
@@ -562,6 +622,30 @@ func (s *Server) parseFingerprintCheckRequest(c *fiber.Ctx) (fingerprintCheckReq
 	browserOpts.ProxyURL = strings.TrimSpace(c.Query("proxy", browserOpts.ProxyURL))
 	browserOpts.LanguageCode = strings.TrimSpace(c.Query("language", browserOpts.LanguageCode))
 
+	if headerProxyURL := strings.TrimSpace(c.Get("X-Proxy-URL")); headerProxyURL != "" {
+		if !s.opts.Resilience.Proxy.Proxies.AllowRequestProxyURL {
+			return fingerprintCheckRequest{}, &APIError{
+				HTTPStatus: fiber.StatusBadRequest,
+				ErrorCode:  "bad_request",
+				Reason:     ReasonRequestProxyURLDisabled,
+				Message:    "X-Proxy-URL is disabled by server configuration",
+			}
+		}
+		normalized, err := NormalizeProxyURL(headerProxyURL)
+		if err != nil {
+			return fingerprintCheckRequest{}, errInvalidParam(fmt.Sprintf("X-Proxy-URL: %v", err))
+		}
+		if IsAuthenticatedSocksProxyURL(normalized) {
+			return fingerprintCheckRequest{}, &APIError{
+				HTTPStatus: fiber.StatusBadRequest,
+				ErrorCode:  "bad_request",
+				Reason:     ReasonUnsupportedProxyScheme,
+				Message:    "authenticated SOCKS proxies are not supported in browser mode",
+			}
+		}
+		browserOpts.ProxyURL = normalized
+	}
+
 	insecureDefault := browserOpts.Insecure
 	if detectors.IsCustom(detectorName) {
 		insecureDefault = true
@@ -654,6 +738,10 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 		WithRequest(c.UserContext()).WithError(err).Warn("Invalid query parameters")
 		return err
 	}
+	if err := s.validateRequestProxyURL(&q); err != nil {
+		WithRequest(c.UserContext()).WithError(err).Warn("Invalid request proxy URL")
+		return err
+	}
 
 	format, err := resolveFormat(c)
 	if err != nil {
@@ -694,7 +782,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 			logMessage: fmt.Sprintf("Cache hit for mega %s partial set: engines=%s query=%s", action, engineNamesJoined, q.Text),
 		})
 	}
-	if format == "json" {
+	if format == "json" && !ShouldBypassCacheForProxyMarket(q) {
 		if hit, err := s.tryServeCacheHit(c, startedAt, cacheHitCandidates...); hit || err != nil {
 			return err
 		}
@@ -916,6 +1004,10 @@ func (s *Server) cacheMegaEnvelopeResults(action string, enginesToUse []SearchEn
 	if s.cache == nil {
 		return ""
 	}
+	if ShouldBypassCacheForProxyMarket(q) {
+		s.cache.RecordBypass()
+		return "BYPASS"
+	}
 	if len(env.Results) == 0 {
 		s.cache.RecordBypass()
 		return "BYPASS"
@@ -934,6 +1026,10 @@ func (s *Server) cacheMegaEnvelopeResults(action string, enginesToUse []SearchEn
 func (s *Server) cacheMegaImageResults(action string, enginesToUse []SearchEngine, q Query, env *ImageEnvelope) string {
 	if s.cache == nil {
 		return ""
+	}
+	if ShouldBypassCacheForProxyMarket(q) {
+		s.cache.RecordBypass()
+		return "BYPASS"
 	}
 	if len(env.Results) == 0 {
 		s.cache.RecordBypass()
@@ -1014,8 +1110,35 @@ func (s *Server) applyProxyHeaders(c *fiber.Ctx, meta ProxyExecutionMeta) {
 	}
 
 	c.Set("X-Proxy-Mode", mode)
-	c.Set("X-Proxy-Tag", tag)
+	if tag != "" {
+		c.Set("X-Proxy-Tag", tag)
+	}
 	c.Set("X-Proxy-Used", used)
+}
+
+func (s *Server) validateRequestProxyURL(q *Query) error {
+	if q == nil || strings.TrimSpace(q.ProxyURL) == "" || q.ProxyOverride == ProxyOverrideDirect {
+		return nil
+	}
+
+	if !s.opts.Resilience.Proxy.Proxies.AllowRequestProxyURL {
+		return &APIError{
+			HTTPStatus: fiber.StatusBadRequest,
+			ErrorCode:  "bad_request",
+			Reason:     ReasonRequestProxyURLDisabled,
+			Message:    "X-Proxy-URL is disabled by server configuration",
+		}
+	}
+
+	if s.opts.Resilience.Proxy.Runtime == ProxyRuntimeBrowser && IsAuthenticatedSocksProxyURL(q.ProxyURL) {
+		return &APIError{
+			HTTPStatus: fiber.StatusBadRequest,
+			ErrorCode:  "bad_request",
+			Reason:     ReasonUnsupportedProxyScheme,
+			Message:    "authenticated SOCKS proxies are not supported in browser mode",
+		}
+	}
+	return nil
 }
 
 func (s *Server) handleOpenAPISpec(c *fiber.Ctx) error {

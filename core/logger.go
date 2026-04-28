@@ -77,6 +77,11 @@ func RequestIDFromContext(ctx context.Context) string {
 	return strings.TrimSpace(value)
 }
 
+func TenantFromContext(ctx context.Context) string {
+	value, _ := EnsureContext(ctx).Value(tenantContextKey).(string)
+	return strings.TrimSpace(value)
+}
+
 func WithRequest(ctx context.Context) *logrus.Entry {
 	ctx = EnsureContext(ctx)
 	fields := logrus.Fields{}

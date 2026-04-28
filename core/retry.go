@@ -36,7 +36,7 @@ type RetryResult struct {
 }
 
 // RetryableSearch executes searchFn with exponential backoff retries.
-// CAPTCHA, parser, engine-internal, and proxy-unavailable errors are not retried.
+// CAPTCHA, block, rate-limit, parser, engine-internal, and proxy-unavailable errors are not retried.
 func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, searchFn func(context.Context) ([]SearchResult, error)) RetryResult {
 	ctx = WithEngine(EnsureContext(ctx), engineName)
 	logger := WithRequest(ctx)
@@ -79,40 +79,8 @@ func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, se
 		}
 
 		lastErr = err
-		if errors.Is(err, ErrCaptcha) {
-			logger.Warn("CAPTCHA detected, skipping retries")
-			return RetryResult{
-				Err:      err,
-				Attempts: attempt + 1,
-				Engine:   engineName,
-			}
-		}
-		if errors.Is(err, ErrProxyUnavailable) {
-			logger.Warn("Proxy unavailable, skipping retries")
-			return RetryResult{
-				Err:      err,
-				Attempts: attempt + 1,
-				Engine:   engineName,
-			}
-		}
-		if errors.Is(err, ErrParser) {
-			logger.Warn("Parser failure, skipping retries")
-			return RetryResult{
-				Err:      err,
-				Attempts: attempt + 1,
-				Engine:   engineName,
-			}
-		}
-		if errors.Is(err, ErrEngineInternal) {
-			logger.Warn("Engine panic recovered, skipping retries")
-			return RetryResult{
-				Err:      err,
-				Attempts: attempt + 1,
-				Engine:   engineName,
-			}
-		}
-		if IsContextDone(err) {
-			logger.Warn("Context canceled/deadline exceeded, skipping retries")
+		if reason, skip := nonRetryableReason(err); skip {
+			logger.Warnf("%s, skipping retries", reason)
 			return RetryResult{
 				Err:      err,
 				Attempts: attempt + 1,
@@ -128,6 +96,30 @@ func RetryableSearch(ctx context.Context, cfg RetryConfig, engineName string, se
 		Attempts: cfg.MaxRetries + 1,
 		Engine:   engineName,
 	}
+}
+
+var nonRetryableSentinels = []struct {
+	err    error
+	reason string
+}{
+	{ErrCaptcha, "CAPTCHA detected"},
+	{ErrBlocked, "Blocked response detected"},
+	{ErrRateLimited, "Rate limited response detected"},
+	{ErrProxyUnavailable, "Proxy unavailable"},
+	{ErrParser, "Parser failure"},
+	{ErrEngineInternal, "Engine panic recovered"},
+}
+
+func nonRetryableReason(err error) (string, bool) {
+	for _, s := range nonRetryableSentinels {
+		if errors.Is(err, s.err) {
+			return s.reason, true
+		}
+	}
+	if IsContextDone(err) {
+		return "Context canceled/deadline exceeded", true
+	}
+	return "", false
 }
 
 func calculateBackoff(cfg RetryConfig, attempt int) time.Duration {

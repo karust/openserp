@@ -15,8 +15,10 @@ app:
   head: false # Show browser UI (headful mode)
   leakless: false # Force browser process cleanup after request
   leave_head: false # Keep tabs open after request for debugging
-
+  max_processes: 4 # LRU cap on concurrent Chrome processes
+  idle_ttl: 5m # close a Chrome that has not served traffic for this long
 proxies:
+  allow_request_proxy_url: false
   # Force a single proxy for all engines.
   # Same behavior as passing --proxy on the CLI.
   #global: http://127.0.0.1:8080
@@ -29,6 +31,10 @@ proxies:
   #    tags: [eu]
   health:
     failure_threshold: 3 # Disable proxy after this many consecutive failures
+  lanes:
+    enabled: true # Reuse browser profile/cookies per engine + proxy session ID
+    max_lanes: 100 # LRU cap for sticky lanes kept in worker memory
+    drop_cookies_on_challenge: true # Clear lane cookies on captcha/challenge only
 
 cache:
   ttl_seconds: 60 # Dedicated endpoint cache TTL in seconds (0 disables cache)
@@ -47,7 +53,7 @@ cors:
   enabled: true
   allow_origins: "*"
   allow_methods: "GET, POST, OPTIONS"
-  allow_headers: "Origin, Content-Type, Accept, Authorization, X-Use-Proxy"
+  allow_headers: "Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Proxy-URL, X-Proxy-Country, X-Proxy-Class, X-Proxy-Provider, X-Proxy-Session-ID, X-Request-ID, X-Tenant"
   max_age: 86400
 
 # 2captcha:

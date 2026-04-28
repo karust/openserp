@@ -48,6 +48,12 @@ paths:
         - $ref: "#/components/parameters/AnswersQuery"
         - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
+        - $ref: "#/components/parameters/ProxyURLHeader"
+        - $ref: "#/components/parameters/ProxyCountryHeader"
+        - $ref: "#/components/parameters/ProxyClassHeader"
+        - $ref: "#/components/parameters/ProxyProviderHeader"
+        - $ref: "#/components/parameters/ProxySessionIDHeader"
+        - $ref: "#/components/parameters/TenantHeader"
       responses:
         "200":
           description: Search results envelope
@@ -125,8 +131,16 @@ paths:
                 type: string
         "400":
           $ref: "#/components/responses/BadRequestError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+        "502":
+          $ref: "#/components/responses/BadGatewayError"
         "503":
           $ref: "#/components/responses/ServiceUnavailableError"
+        "504":
+          $ref: "#/components/responses/GatewayTimeoutError"
         "404":
           $ref: "#/components/responses/NotFoundError"
         "500":
@@ -149,6 +163,12 @@ paths:
         - $ref: "#/components/parameters/AnswersQuery"
         - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
+        - $ref: "#/components/parameters/ProxyURLHeader"
+        - $ref: "#/components/parameters/ProxyCountryHeader"
+        - $ref: "#/components/parameters/ProxyClassHeader"
+        - $ref: "#/components/parameters/ProxyProviderHeader"
+        - $ref: "#/components/parameters/ProxySessionIDHeader"
+        - $ref: "#/components/parameters/TenantHeader"
       responses:
         "200":
           description: Image search results envelope
@@ -171,8 +191,16 @@ paths:
                 $ref: "#/components/schemas/ImageEnvelope"
         "400":
           $ref: "#/components/responses/BadRequestError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+        "502":
+          $ref: "#/components/responses/BadGatewayError"
         "503":
           $ref: "#/components/responses/ServiceUnavailableError"
+        "504":
+          $ref: "#/components/responses/GatewayTimeoutError"
         "404":
           $ref: "#/components/responses/NotFoundError"
         "500":
@@ -200,6 +228,12 @@ paths:
         - $ref: "#/components/parameters/EnginesQuery"
         - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
+        - $ref: "#/components/parameters/ProxyURLHeader"
+        - $ref: "#/components/parameters/ProxyCountryHeader"
+        - $ref: "#/components/parameters/ProxyClassHeader"
+        - $ref: "#/components/parameters/ProxyProviderHeader"
+        - $ref: "#/components/parameters/ProxySessionIDHeader"
+        - $ref: "#/components/parameters/TenantHeader"
       responses:
         "200":
           description: Aggregated envelope with clusters
@@ -229,6 +263,16 @@ paths:
                 type: string
         "400":
           $ref: "#/components/responses/BadRequestError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+        "502":
+          $ref: "#/components/responses/BadGatewayError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailableError"
+        "504":
+          $ref: "#/components/responses/GatewayTimeoutError"
         "500":
           $ref: "#/components/responses/InternalServerError"
   /mega/image:
@@ -249,6 +293,12 @@ paths:
         - $ref: "#/components/parameters/EnginesQuery"
         - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
+        - $ref: "#/components/parameters/ProxyURLHeader"
+        - $ref: "#/components/parameters/ProxyCountryHeader"
+        - $ref: "#/components/parameters/ProxyClassHeader"
+        - $ref: "#/components/parameters/ProxyProviderHeader"
+        - $ref: "#/components/parameters/ProxySessionIDHeader"
+        - $ref: "#/components/parameters/TenantHeader"
       responses:
         "200":
           description: Aggregated image results envelope
@@ -269,6 +319,16 @@ paths:
                 $ref: "#/components/schemas/ImageEnvelope"
         "400":
           $ref: "#/components/responses/BadRequestError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "429":
+          $ref: "#/components/responses/TooManyRequestsError"
+        "502":
+          $ref: "#/components/responses/BadGatewayError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailableError"
+        "504":
+          $ref: "#/components/responses/GatewayTimeoutError"
         "500":
           $ref: "#/components/responses/InternalServerError"
   /mega/engines:
@@ -517,6 +577,67 @@ components:
           value: direct
         tag:
           value: us
+    ProxyURLHeader:
+      name: X-Proxy-URL
+      in: header
+      required: false
+      description: >
+        Per-request proxy URL supplied by an upstream balancer. Honored only when
+        `proxies.allow_request_proxy_url: true` is set on the worker; otherwise the
+        request is rejected with `400 bad_request` and `reason=REQUEST_PROXY_URL_DISABLED`.
+        Authenticated SOCKS proxies are rejected in browser mode
+        (`reason=UNSUPPORTED_PROXY_SCHEME`). Credentials are never logged or returned.
+        Precedence: `X-Use-Proxy: direct` > `X-Proxy-URL` > `X-Use-Proxy: <tag>` >
+        per-engine configured tag > `proxies.global` > direct.
+      schema:
+        type: string
+      example: http://user:pass@proxy.example:8080
+    ProxyCountryHeader:
+      name: X-Proxy-Country
+      in: header
+      required: false
+      description: >
+        Two-letter market country code for the supplied proxy. Used as part of the
+        cache key so different markets do not share results.
+      schema:
+        type: string
+      example: us
+    ProxyClassHeader:
+      name: X-Proxy-Class
+      in: header
+      required: false
+      description: Proxy class identifier (e.g. `datacenter`, `residential`, `mobile`). Part of the cache key.
+      schema:
+        type: string
+      example: residential
+    ProxyProviderHeader:
+      name: X-Proxy-Provider
+      in: header
+      required: false
+      description: Upstream proxy provider identifier (e.g. `webshare`, `brightdata`). Part of the cache key.
+      schema:
+        type: string
+      example: webshare
+    ProxySessionIDHeader:
+      name: X-Proxy-Session-ID
+      in: header
+      required: false
+      description: >
+        Sticky session identifier minted by the balancer. Reusing the same value lets
+        OpenSERP reuse cookies and browser profile for that lane. Lanes are LRU-bounded
+        by `proxies.lanes.max_lanes`. Rotating the session ID gives a clean lane.
+      schema:
+        type: string
+      example: sid-123
+    TenantHeader:
+      name: X-Tenant
+      in: header
+      required: false
+      description: >
+        Optional tenant scope used to namespace sticky lane state across multi-tenant
+        deployments. When present, lanes are keyed by `tenant + engine + session_id`.
+      schema:
+        type: string
   headers:
     XRequestID:
       description: >
@@ -534,16 +655,22 @@ components:
       schema:
         type: string
     XProxyMode:
-      description: Effective proxy mode for the request (`off` or `tag_pool`).
+      description: >
+        Effective proxy mode for the request. `request_url` indicates a per-request
+        `X-Proxy-URL` was honored.
       schema:
         type: string
-        enum: [off, tag_pool]
+        enum: [off, tag_pool, request_url]
     XProxyTag:
-      description: Effective proxy tag when `X-Proxy-Mode=tag_pool`.
+      description: >
+        Effective proxy tag when `X-Proxy-Mode=tag_pool`. Header is omitted when no
+        tag is in effect (i.e. `X-Proxy-Mode` is `request_url` or `off`).
       schema:
         type: string
     XProxyUsed:
-      description: Effective proxy target used (`direct`, masked URL, `pooled`, `multiple`, `mixed`).
+      description: >
+        Effective proxy target used. Values: `direct`, masked `scheme://host:port` URL,
+        `pooled`, `multiple`, or `mixed`. Credentials are never included.
       schema:
         type: string
   responses:
@@ -566,18 +693,142 @@ components:
                 code: 400
                 message: "EMPTY_QUERY: query cannot be empty"
                 reason: EMPTY_QUERY
-    ServiceUnavailableError:
-      description: Search failed and no result could be produced
+            requestProxyURLDisabled:
+              value:
+                error: bad_request
+                code: 400
+                message: "REQUEST_PROXY_URL_DISABLED: X-Proxy-URL is disabled by server configuration"
+                reason: REQUEST_PROXY_URL_DISABLED
+            unsupportedProxyScheme:
+              value:
+                error: bad_request
+                code: 400
+                message: "UNSUPPORTED_PROXY_SCHEME: authenticated SOCKS proxies are not supported in browser mode"
+                reason: UNSUPPORTED_PROXY_SCHEME
+    ForbiddenError:
+      description: The search engine blocked the request
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
           examples:
-            primaryFailed:
+            blocked:
               value:
-                error: service_unavailable
+                error: blocked
+                code: 403
+                message: "search engine blocked the request"
+                meta:
+                  engine: google
+                  proxy_used: http://proxy.example:8080
+                  proxy_country: us
+                  proxy_class: residential
+                  proxy_provider: webshare
+                  proxy_session_id: sid-123
+    TooManyRequestsError:
+      description: Captcha challenge or rate-limit response from the search engine
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            captcha:
+              value:
+                error: captcha_detected
+                code: 429
+                message: "captcha detected"
+                meta:
+                  engine: google
+                  proxy_used: http://proxy.example:8080
+                  proxy_session_id: sid-123
+            rateLimited:
+              value:
+                error: rate_limited
+                code: 429
+                message: "search engine rate limited the request"
+                meta:
+                  engine: google
+                  proxy_used: http://proxy.example:8080
+    BadGatewayError:
+      description: Engine internal failure, parser drift, or all-engine failure when fallback is enabled.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            parserFailure:
+              value:
+                error: parser_failure
+                code: 502
+                message: "parser failure"
+                meta:
+                  engine: google
+            engineInternal:
+              value:
+                error: engine_internal
+                code: 502
+                message: "engine internal error"
+                meta:
+                  engine: google
+            allEnginesFailed:
+              value:
+                error: engine_internal
+                code: 502
+                message: "all search engines failed"
+                meta:
+                  engine: google
+    GatewayTimeoutError:
+      description: Search timed out waiting for required SERP elements
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            searchTimeout:
+              value:
+                error: search_timeout
+                code: 504
+                message: "timeout. Cannot find element on page"
+                meta:
+                  engine: google
+    ServiceUnavailableError:
+      description: Proxy-layer failure (no healthy proxy or transport error). The search itself was not produced.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            proxyConnect:
+              value:
+                error: proxy_connect
                 code: 503
-                message: all search engines failed
+                message: "proxy connection failed"
+                meta:
+                  engine: google
+                  proxy_used: http://proxy.example:8080
+                  proxy_country: us
+            proxyAuth:
+              value:
+                error: proxy_auth
+                code: 503
+                message: "proxy authentication failed"
+                meta:
+                  engine: google
+                  proxy_used: http://proxy.example:8080
+            proxyTimeout:
+              value:
+                error: proxy_timeout
+                code: 503
+                message: "proxy request timed out"
+                meta:
+                  engine: google
+                  proxy_used: http://proxy.example:8080
+            proxyUnavailable:
+              value:
+                error: proxy_unavailable
+                code: 503
+                message: "proxy unavailable"
+                meta:
+                  engine: google
     NotFoundError:
       description: Endpoint not found
       content:
@@ -921,8 +1172,31 @@ components:
       properties:
         error:
           type: string
-          description: Stable machine-readable error class.
-          enum: [bad_request, not_found, rate_limited, service_unavailable, server_error, client_error, error]
+          description: >
+            Stable machine-readable error class. Search-pipeline failures use the
+            following codes: `captcha_detected`, `blocked`, `rate_limited`,
+            `search_timeout`, `proxy_connect`, `proxy_auth`, `proxy_timeout`,
+            `proxy_unavailable`, `parser_failure`, `engine_internal`. Validation
+            errors use `bad_request`. Other generic codes (`not_found`,
+            `service_unavailable`, `server_error`, `client_error`, `error`) may
+            appear for non-search routes.
+          enum:
+            - bad_request
+            - not_found
+            - rate_limited
+            - service_unavailable
+            - server_error
+            - client_error
+            - error
+            - captcha_detected
+            - blocked
+            - search_timeout
+            - proxy_connect
+            - proxy_auth
+            - proxy_timeout
+            - proxy_unavailable
+            - parser_failure
+            - engine_internal
           example: bad_request
         code:
           type: integer
@@ -935,8 +1209,35 @@ components:
           description: >
             Stable client-actionable reason code. Present on 400 errors.
             Known values: INVALID_LIMIT, INVALID_START, INVALID_PARAM, EMPTY_QUERY,
-            NO_ENGINES, UNKNOWN_FORMAT.
+            NO_ENGINES, UNKNOWN_FORMAT, REQUEST_PROXY_URL_DISABLED,
+            UNSUPPORTED_PROXY_SCHEME.
           example: INVALID_LIMIT
+        meta:
+          type: object
+          description: >
+            Sanitized context for search-pipeline errors. Credentials are never
+            included.
+          additionalProperties: true
+          properties:
+            engine:
+              type: string
+              example: google
+            proxy_used:
+              type: string
+              description: Masked `scheme://host:port`; never includes credentials.
+              example: http://proxy.example:8080
+            proxy_country:
+              type: string
+              example: us
+            proxy_class:
+              type: string
+              example: residential
+            proxy_provider:
+              type: string
+              example: webshare
+            proxy_session_id:
+              type: string
+              example: sid-123
     # ── Health / Stats ────────────────────────────────────────────────
     EngineHealth:
       type: object
@@ -1039,9 +1340,61 @@ components:
           type: string
         selected_proxy:
           type: string
+    LaneStats:
+      type: object
+      required: [active, evicted_lru, cookies_dropped]
+      description: Sticky proxy lane state observed by this worker.
+      properties:
+        active:
+          type: integer
+          description: Number of lanes currently held by the worker.
+          example: 12
+        evicted_lru:
+          type: integer
+          description: Lanes evicted by the LRU bound since worker start.
+          example: 7
+        cookies_dropped:
+          type: integer
+          description: Lane cookie drops triggered by captcha/challenge responses.
+          example: 20
+    BrowserPoolStats:
+      type: object
+      required: [active, max, evicted_lru, evicted_idle]
+      description: >
+        Live state of the per-process Chrome pool. Each authenticated upstream
+        proxy identity (scheme+host+port+username) gets a dedicated Chrome so
+        Chrome can answer 407 challenges natively. Direct and unauthenticated
+        proxies share one Chrome with per-BrowserContext proxy override.
+      properties:
+        active:
+          type: integer
+          description: Number of Chrome processes currently held by the pool.
+          example: 3
+        max:
+          type: integer
+          description: Configured `app.max_processes` LRU cap.
+          example: 4
+        evicted_lru:
+          type: integer
+          description: Chrome processes closed because the LRU cap was exceeded.
+          example: 12
+        evicted_idle:
+          type: integer
+          description: Chrome processes closed by the idle sweeper after `app.idle_ttl`.
+          example: 5
     ProxyStats:
       type: object
-      required: [configured_count, healthy_count, unhealthy_count, tags, entries]
+      required:
+        [
+          configured_count,
+          healthy_count,
+          unhealthy_count,
+          request_proxy_url_enabled,
+          lanes,
+          browser_processes,
+          tags,
+          entries,
+        ]
       properties:
         configured_count:
           type: integer
@@ -1049,6 +1402,13 @@ components:
           type: integer
         unhealthy_count:
           type: integer
+        request_proxy_url_enabled:
+          type: boolean
+          description: Whether `proxies.allow_request_proxy_url` is enabled on this worker.
+        lanes:
+          $ref: "#/components/schemas/LaneStats"
+        browser_processes:
+          $ref: "#/components/schemas/BrowserPoolStats"
         tags:
           type: object
           additionalProperties:

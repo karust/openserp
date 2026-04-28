@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -189,6 +190,24 @@ func TestMaskProxyURLRedactsCredentials(t *testing.T) {
 	}
 }
 
+func TestBrowserOptsLogFieldsRedactSecrets(t *testing.T) {
+	fields := browserOptsLogFields(BrowserOpts{
+		ProxyURL:             "http://user:sentinel-password@proxy.example:8080",
+		CaptchaSolverApiKey:  "captcha-secret",
+		CaptchaSolverEnabled: true,
+	})
+	rendered := fmt.Sprintf("%v", fields)
+	if strings.Contains(rendered, "sentinel-password") || strings.Contains(rendered, "captcha-secret") {
+		t.Fatalf("browser option log fields leaked secret: %s", rendered)
+	}
+	if fields["proxy"] != "http://proxy.example:8080" {
+		t.Fatalf("expected masked proxy field, got %#v", fields["proxy"])
+	}
+	if fields["captcha_solver_has_key"] != true {
+		t.Fatalf("expected captcha key presence boolean")
+	}
+}
+
 func TestProxyURLForBrowserLaunchStripsCredentials(t *testing.T) {
 	u, err := url.Parse("http://user:pass@127.0.0.1:18888")
 	if err != nil {
@@ -353,6 +372,18 @@ func TestClassifyProxyNetworkError(t *testing.T) {
 				t.Fatalf("expected original error to be preserved, got %v", got)
 			}
 		})
+	}
+}
+
+func TestClassifyMainDocumentStatus(t *testing.T) {
+	if !errors.Is(classifyMainDocumentStatus(http.StatusForbidden), ErrBlocked) {
+		t.Fatal("expected 403 to classify as ErrBlocked")
+	}
+	if !errors.Is(classifyMainDocumentStatus(http.StatusTooManyRequests), ErrRateLimited) {
+		t.Fatal("expected 429 to classify as ErrRateLimited")
+	}
+	if classifyMainDocumentStatus(http.StatusOK) != nil {
+		t.Fatal("expected 200 to remain unclassified")
 	}
 }
 

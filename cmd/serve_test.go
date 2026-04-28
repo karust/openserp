@@ -3,9 +3,118 @@ package cmd
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/karust/openserp/core"
 )
+
+func TestBrowserPoolKey(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"empty -> direct", "", directBrowserKey},
+		{"unauth http -> direct", "http://proxy.example:8080", directBrowserKey},
+		{"unauth socks -> direct", "socks5://proxy.example:1080", directBrowserKey},
+		{"auth socks -> direct (rejected upstream)", "socks5://user:pass@proxy.example:1080", directBrowserKey},
+		{"auth http", "http://user:pass@proxy.example:8080", "http|proxy.example:8080|user"},
+		{"auth https different scheme", "https://user:pass@proxy.example:8443", "https|proxy.example:8443|user"},
+		{"different password same key", "http://user:other-pass@proxy.example:8080", "http|proxy.example:8080|user"},
+		{"different user different key", "http://user2:pass@proxy.example:8080", "http|proxy.example:8080|user2"},
+		{"different host different key", "http://user:pass@proxy2.example:8080", "http|proxy2.example:8080|user"},
+		{"different port different key", "http://user:pass@proxy.example:9090", "http|proxy.example:9090|user"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := browserPoolKey(tc.raw); got != tc.want {
+				t.Fatalf("browserPoolKey(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBrowserLaunchURL(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"empty -> empty", "", ""},
+		{"unauth http -> empty (per-context path)", "http://proxy.example:8080", ""},
+		{"unauth socks -> empty", "socks5://proxy.example:1080", ""},
+		{"auth http -> normalized", "http://user:pass@proxy.example:8080", "http://user:pass@proxy.example:8080"},
+		{"auth https -> normalized", "https://u:p@proxy.example:8443", "https://u:p@proxy.example:8443"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := browserLaunchURL(tc.raw)
+			if got != tc.want {
+				t.Fatalf("browserLaunchURL(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBrowserPoolEvictLRU(t *testing.T) {
+	// Pre-populate with bare entries (browser=nil) so we exercise eviction
+	// without launching real Chrome. closePooledBrowser handles nil safely.
+	pool := &browserPool{
+		maxProcesses: 2,
+		browsers:     map[string]*pooledBrowser{},
+		stopSweeper:  make(chan struct{}),
+		sweeperDone:  make(chan struct{}),
+	}
+	close(pool.sweeperDone)
+
+	now := time.Now()
+	pool.browsers["a"] = &pooledBrowser{lastUsedAt: now.Add(-3 * time.Second)}
+	pool.browsers["b"] = &pooledBrowser{lastUsedAt: now.Add(-2 * time.Second)}
+	pool.browsers["c"] = &pooledBrowser{lastUsedAt: now.Add(-1 * time.Second)}
+
+	pool.mu.Lock()
+	pool.evictLRULocked()
+	pool.mu.Unlock()
+
+	if _, ok := pool.browsers["a"]; ok {
+		t.Fatal("expected oldest entry 'a' to be evicted")
+	}
+	if _, ok := pool.browsers["b"]; !ok {
+		t.Fatal("expected entry 'b' to remain")
+	}
+	if _, ok := pool.browsers["c"]; !ok {
+		t.Fatal("expected entry 'c' to remain")
+	}
+	if pool.evictedLRU != 1 {
+		t.Fatalf("expected 1 LRU eviction, got %d", pool.evictedLRU)
+	}
+}
+
+func TestBrowserPoolBrowserStats(t *testing.T) {
+	pool := &browserPool{
+		maxProcesses: 4,
+		browsers:     map[string]*pooledBrowser{},
+		stopSweeper:  make(chan struct{}),
+		sweeperDone:  make(chan struct{}),
+	}
+	close(pool.sweeperDone)
+
+	// Pre-bound entry without a launched browser should not count as active.
+	pool.browsers["pre-bound"] = &pooledBrowser{launchProxyURL: "http://u:p@proxy.example:8080", lastUsedAt: time.Now()}
+	pool.evictedLRU = 2
+	pool.evictedIdle = 5
+
+	stats := pool.browserStats()
+	if stats.Max != 4 {
+		t.Fatalf("expected max=4, got %d", stats.Max)
+	}
+	if stats.Active != 0 {
+		t.Fatalf("expected active=0 (entry has no live browser), got %d", stats.Active)
+	}
+	if stats.EvictedLRU != 2 || stats.EvictedIdle != 5 {
+		t.Fatalf("unexpected stats: %#v", stats)
+	}
+}
 
 func TestValidateBrowserProxyPolicyRejectsAuthenticatedSocks(t *testing.T) {
 	tests := []struct {

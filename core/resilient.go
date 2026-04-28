@@ -35,6 +35,18 @@ type ResilientConfig struct {
 	Proxy          ProxyConfig
 }
 
+type proxyLaneCookieDropper interface {
+	DropProxyLaneCookies(context.Context, Query)
+}
+
+type proxyLaneStatser interface {
+	ProxyLaneStats() LaneStats
+}
+
+type browserPoolStatser interface {
+	BrowserPoolStats() BrowserPoolStats
+}
+
 func DefaultResilientConfig() ResilientConfig {
 	return ResilientConfig{
 		Retry:          DefaultRetryConfig(),
@@ -174,6 +186,10 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 		case ProxyModeOff:
 			attemptQuery.ProxyURL = ""
 			attemptMeta.Used = "direct"
+		case ProxyModeRequestURL:
+			proxyURL = q.ProxyURL
+			attemptQuery.ProxyURL = proxyURL
+			attemptMeta.Used = MaskProxyURL(proxyURL)
 		case ProxyModeTagPool:
 			proxyURL = rs.selectProxyForQuery(policy, q, engineCtx)
 			if proxyURL == "" {
@@ -189,13 +205,23 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 			err     error
 		)
 		if isImage {
-			results, err = engine.SearchImage(callCtx, attemptQuery)
+			results, err = engine.SearchImage(proxyRequestContext(callCtx, engine.Name(), attemptQuery), attemptQuery)
 		} else {
-			results, err = engine.Search(callCtx, attemptQuery)
+			results, err = engine.Search(proxyRequestContext(callCtx, engine.Name(), attemptQuery), attemptQuery)
 		}
 
 		if reportToRegistry {
 			rs.reportProxyAttempt(engineCtx, proxyURL, err)
+		}
+		if err != nil && errors.Is(err, ErrCaptcha) && rs.proxyCfg.Proxies.Lanes.DropCookiesOnChallenge {
+			// Recompute lane key only to gate the call: empty key means we have no
+			// session to drop cookies for. The dropper recomputes the key itself
+			// when it actually needs to mutate lane state.
+			if !ProxyLaneKeyForTenant(engine.Name(), TenantFromContext(callCtx), attemptQuery, attemptQuery.ProxyURL).Empty() {
+				if dropper, ok := engine.(proxyLaneCookieDropper); ok {
+					dropper.DropProxyLaneCookies(callCtx, attemptQuery)
+				}
+			}
 		}
 
 		return results, err
@@ -294,16 +320,21 @@ func (rs *ResilientSearcher) GetCircuitBreakerStats() []map[string]interface{} {
 
 func (rs *ResilientSearcher) GetProxyStats() ProxyStats {
 	stats := ProxyStats{
-		ConfiguredCount: 0,
-		HealthyCount:    0,
-		UnhealthyCount:  0,
-		Tags:            map[string]ProxyTagSummary{},
-		Entries:         []ProxyStatsEntry{},
+		ConfiguredCount:        0,
+		HealthyCount:           0,
+		UnhealthyCount:         0,
+		RequestProxyURLEnabled: rs.proxyCfg.Proxies.AllowRequestProxyURL,
+		Lanes:                  rs.proxyLaneStats(),
+		Tags:                   map[string]ProxyTagSummary{},
+		Entries:                []ProxyStatsEntry{},
 	}
 
 	if rs.proxyRegistry != nil {
 		stats = rs.proxyRegistry.BuildStats()
 	}
+	stats.RequestProxyURLEnabled = rs.proxyCfg.Proxies.AllowRequestProxyURL
+	stats.Lanes = rs.proxyLaneStats()
+	stats.BrowserProcesses = rs.browserPoolStats()
 
 	engines := map[string]ProxyEngineStats{}
 	for _, engine := range rs.engines {
@@ -332,6 +363,38 @@ func (rs *ResilientSearcher) GetProxyStats() ProxyStats {
 	return stats
 }
 
+func (rs *ResilientSearcher) proxyLaneStats() LaneStats {
+	var out LaneStats
+	for _, engine := range rs.engines {
+		statser, ok := engine.(proxyLaneStatser)
+		if !ok {
+			continue
+		}
+		stats := statser.ProxyLaneStats()
+		out.Active += stats.Active
+		out.EvictedLRU += stats.EvictedLRU
+		out.CookiesDropped += stats.CookiesDropped
+	}
+	return out
+}
+
+// browserPoolStats reports the first non-zero browser pool stats found across
+// engines. The pool is shared across engines, so reading from any engine that
+// exposes it is sufficient; other engines' implementations return zero values.
+func (rs *ResilientSearcher) browserPoolStats() BrowserPoolStats {
+	for _, engine := range rs.engines {
+		statser, ok := engine.(browserPoolStatser)
+		if !ok {
+			continue
+		}
+		stats := statser.BrowserPoolStats()
+		if stats.Max > 0 || stats.Active > 0 || stats.EvictedLRU > 0 || stats.EvictedIdle > 0 {
+			return stats
+		}
+	}
+	return BrowserPoolStats{}
+}
+
 func (rs *ResilientSearcher) ResolveMegaProxyMeta(q Query, engines []SearchEngine) ProxyExecutionMeta {
 	if len(engines) == 0 {
 		return ProxyExecutionMeta{Mode: ProxyModeOff, Used: "direct"}
@@ -346,6 +409,9 @@ func (rs *ResilientSearcher) ResolveMegaProxyMeta(q Query, engines []SearchEngin
 		if policy.Mode == ProxyModeOff {
 			hasOff = true
 			continue
+		}
+		if policy.Mode == ProxyModeRequestURL {
+			return ProxyExecutionMeta{Mode: ProxyModeRequestURL, Used: MaskProxyURL(q.ProxyURL)}
 		}
 
 		allOff = false
@@ -406,10 +472,17 @@ func (rs *ResilientSearcher) effectivePolicyForEngine(engineName string) ProxyPo
 
 func (rs *ResilientSearcher) effectivePolicyForQuery(engineName string, q Query) ProxyPolicy {
 	switch q.ProxyOverride {
-	case "":
-		return rs.effectivePolicyForEngine(engineName)
 	case ProxyOverrideDirect:
 		return ProxyPolicy{Mode: ProxyModeOff}
+	}
+
+	if strings.TrimSpace(q.ProxyURL) != "" && rs.proxyCfg.Proxies.AllowRequestProxyURL {
+		return ProxyPolicy{Mode: ProxyModeRequestURL}
+	}
+
+	switch q.ProxyOverride {
+	case "":
+		return rs.effectivePolicyForEngine(engineName)
 	default:
 		return ProxyPolicy{Mode: ProxyModeTagPool, Tag: q.ProxyOverride}
 	}
@@ -449,6 +522,20 @@ func (rs *ResilientSearcher) selectProxyForQuery(policy ProxyPolicy, q Query, ct
 		}
 	}
 	return rs.selectProxyForTag(ctx, policy.Tag)
+}
+
+func proxyRequestContext(ctx context.Context, engineName string, q Query) context.Context {
+	ctx = WithRequestProxyURL(ctx, q.ProxyURL)
+	if q.ProxyURL == "" {
+		return ctx
+	}
+	if laneKey := ProxyLaneKeyForTenant(engineName, TenantFromContext(ctx), q, q.ProxyURL); !laneKey.Empty() {
+		ctx = WithProxyLaneKey(ctx, laneKey)
+		if q.ProxyCountry != "" {
+			ctx = WithProfileRegion(ctx, q.ProxyCountry)
+		}
+	}
+	return ctx
 }
 
 var ErrAllEnginesFailed = fmt.Errorf("all search engines failed")

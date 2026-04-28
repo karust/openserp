@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -35,8 +36,9 @@ func NewResponseCache(ttl time.Duration, maxSize int) *ResponseCache {
 }
 
 func BuildCacheKey(engine string, action string, q Query) string {
+	country, class, provider := cacheProxyMarket(q)
 	raw := fmt.Sprintf(
-		"%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s",
+		"%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s|%s|%s",
 		engine,
 		action,
 		q.Text,
@@ -48,10 +50,32 @@ func BuildCacheKey(engine string, action string, q Query) string {
 		q.Start,
 		q.Filter,
 		q.Answers,
-		q.ProxyOverride,
+		country,
+		class,
+		provider,
 	)
 	hash := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(hash[:])
+}
+
+func cacheProxyMarket(q Query) (country string, class string, provider string) {
+	country = strings.ToLower(strings.TrimSpace(q.ProxyCountry))
+	if country == "" {
+		// TODO: Use explicit balancer market metadata everywhere; language is only a weak market proxy.
+		country = strings.ToLower(strings.TrimSpace(q.LangCode))
+	}
+	return country,
+		strings.ToLower(strings.TrimSpace(q.ProxyClass)),
+		strings.ToLower(strings.TrimSpace(q.ProxyProvider))
+}
+
+func ShouldBypassCacheForProxyMarket(q Query) bool {
+	if strings.TrimSpace(q.ProxyURL) == "" && strings.TrimSpace(q.ProxyOverride) == "" {
+		return false
+	}
+	return strings.TrimSpace(q.ProxyCountry) == "" &&
+		strings.TrimSpace(q.ProxyClass) == "" &&
+		strings.TrimSpace(q.ProxyProvider) == ""
 }
 
 func (c *ResponseCache) Get(key string) ([]byte, bool) {

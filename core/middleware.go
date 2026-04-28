@@ -11,10 +11,11 @@ import (
 )
 
 type JSONErrorResponse struct {
-	Error   string `json:"error"`
-	Code    int    `json:"code"`
-	Message string `json:"message,omitempty"`
-	Reason  string `json:"reason,omitempty"`
+	Error   string                 `json:"error"`
+	Code    int                    `json:"code"`
+	Message string                 `json:"message,omitempty"`
+	Reason  string                 `json:"reason,omitempty"`
+	Meta    map[string]interface{} `json:"meta,omitempty"`
 }
 
 type CORSConfig struct {
@@ -28,7 +29,7 @@ func DefaultCORSConfig() CORSConfig {
 	return CORSConfig{
 		AllowOrigins: "*",
 		AllowMethods: "GET, POST, OPTIONS",
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Request-ID, X-Tenant",
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Proxy-URL, X-Proxy-Country, X-Proxy-Class, X-Proxy-Provider, X-Proxy-Session-ID, X-Request-ID, X-Tenant",
 		MaxAge:       86400,
 	}
 }
@@ -118,6 +119,7 @@ func RequestLoggerMiddleware() fiber.Handler {
 		if query := c.Query("text"); query != "" {
 			logFields["query_hash"] = QueryHash(query)
 		}
+		addProxyLogFields(c, logFields)
 
 		entry := WithRequest(c.UserContext()).WithFields(logFields)
 		if status >= 500 {
@@ -132,24 +134,56 @@ func RequestLoggerMiddleware() fiber.Handler {
 	}
 }
 
+func addProxyLogFields(c *fiber.Ctx, fields logrus.Fields) {
+	if country := strings.ToLower(strings.TrimSpace(c.Get("X-Proxy-Country"))); country != "" {
+		fields["proxy_country"] = country
+	}
+	if class := strings.ToLower(strings.TrimSpace(c.Get("X-Proxy-Class"))); class != "" {
+		fields["proxy_class"] = class
+	}
+	if provider := strings.ToLower(strings.TrimSpace(c.Get("X-Proxy-Provider"))); provider != "" {
+		fields["proxy_provider"] = provider
+	}
+
+	if sessionID := strings.TrimSpace(c.Get("X-Proxy-Session-ID")); sessionID != "" {
+		fields["proxy_session_id"] = sessionID
+	}
+
+	if proxyURL := strings.TrimSpace(c.Get("X-Proxy-URL")); proxyURL != "" {
+		fields["proxy_used"] = MaskProxyURL(proxyURL)
+	}
+
+	if laneKey := proxyLaneKeyFromContext(c.UserContext()); !laneKey.Empty() {
+		fields["lane_id"] = laneKey.ID()
+	}
+}
+
 func JSONErrorMiddleware() fiber.ErrorHandler {
 	return func(c *fiber.Ctx, err error) error {
 		code := fiber.StatusInternalServerError
+		errorCode := ""
 		reason := ""
+		var meta map[string]interface{}
 
 		if e, ok := err.(*fiber.Error); ok {
 			code = e.Code
 		}
 		if apiErr, ok := err.(*APIError); ok {
 			code = apiErr.HTTPStatus
+			errorCode = apiErr.ErrorCode
 			reason = apiErr.Reason
+			meta = apiErr.Meta
+		}
+		if errorCode == "" {
+			errorCode = statusText(code)
 		}
 
 		resp := JSONErrorResponse{
-			Error:   statusText(code),
+			Error:   errorCode,
 			Code:    code,
 			Message: err.Error(),
 			Reason:  reason,
+			Meta:    meta,
 		}
 
 		c.Set("Content-Type", "application/json")

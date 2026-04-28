@@ -153,3 +153,76 @@ func TestBuildCacheKeyChangesWithPaginationAndFlags(t *testing.T) {
 		t.Fatal("expected answers to affect cache key")
 	}
 }
+
+func TestBuildCacheKeyUsesProxyMarketNotSessionOrURL(t *testing.T) {
+	base := Query{
+		Text:           "golang",
+		LangCode:       "EN",
+		Limit:          10,
+		ProxyURL:       "http://user:password-a@proxy-a:8080",
+		ProxyCountry:   " US ",
+		ProxyClass:     " Residential ",
+		ProxyProvider:  " WebShare ",
+		ProxySessionID: "sid-a",
+	}
+	baseKey := BuildCacheKey("google", "search", base)
+
+	sameMarket := base
+	sameMarket.ProxyURL = "http://user:password-b@proxy-b:8080"
+	sameMarket.ProxySessionID = "sid-b"
+	if got := BuildCacheKey("google", "search", sameMarket); got != baseKey {
+		t.Fatal("expected proxy URL and session id not to affect cache key")
+	}
+
+	differentCountry := base
+	differentCountry.ProxyCountry = "de"
+	if got := BuildCacheKey("google", "search", differentCountry); got == baseKey {
+		t.Fatal("expected proxy country to affect cache key")
+	}
+
+	differentClass := base
+	differentClass.ProxyClass = "datacenter"
+	if got := BuildCacheKey("google", "search", differentClass); got == baseKey {
+		t.Fatal("expected proxy class to affect cache key")
+	}
+
+	differentProvider := base
+	differentProvider.ProxyProvider = "brightdata"
+	if got := BuildCacheKey("google", "search", differentProvider); got == baseKey {
+		t.Fatal("expected proxy provider to affect cache key")
+	}
+}
+
+func TestBuildCacheKeyFallsBackToLanguageWhenCountryAbsent(t *testing.T) {
+	base := Query{Text: "golang", LangCode: "en", Limit: 10}
+	baseKey := BuildCacheKey("google", "search", base)
+
+	changed := base
+	changed.LangCode = "de"
+	if got := BuildCacheKey("google", "search", changed); got == baseKey {
+		t.Fatal("expected language fallback to affect cache key when proxy country is absent")
+	}
+
+	withCountry := base
+	withCountry.ProxyCountry = "us"
+	changedWithCountry := withCountry
+	changedWithCountry.LangCode = "de"
+	if got := BuildCacheKey("google", "search", changedWithCountry); got == BuildCacheKey("google", "search", withCountry) {
+		t.Fatal("expected language itself to remain part of the cache key")
+	}
+}
+
+func TestShouldBypassCacheForProxyMarket(t *testing.T) {
+	if !ShouldBypassCacheForProxyMarket(Query{ProxyURL: "http://proxy.example:8080"}) {
+		t.Fatal("expected request proxy without market metadata to bypass cache")
+	}
+	if !ShouldBypassCacheForProxyMarket(Query{ProxyOverride: "us"}) {
+		t.Fatal("expected tag override without market metadata to bypass cache")
+	}
+	if ShouldBypassCacheForProxyMarket(Query{ProxyURL: "http://proxy.example:8080", ProxyCountry: "us"}) {
+		t.Fatal("expected explicit country market metadata to allow cache")
+	}
+	if ShouldBypassCacheForProxyMarket(Query{Text: "golang"}) {
+		t.Fatal("expected direct query without proxy override to allow cache")
+	}
+}

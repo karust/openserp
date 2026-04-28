@@ -24,9 +24,10 @@ type engineMock struct {
 	searchFn    func(context.Context, Query) ([]SearchResult, error)
 	imageFn     func(context.Context, Query) ([]SearchResult, error)
 
-	mu          sync.Mutex
-	searchCalls int
-	imageCalls  int
+	mu                 sync.Mutex
+	searchCalls        int
+	imageCalls         int
+	droppedLaneQueries []Query
 }
 
 func (e *engineMock) Name() string { return e.name }
@@ -53,6 +54,12 @@ func (e *engineMock) SearchImage(ctx context.Context, q Query) ([]SearchResult, 
 		return e.imageFn(ctx, q)
 	}
 	return []SearchResult{{Rank: 1, URL: "https://img.example.com/" + e.name, Title: e.name}}, nil
+}
+
+func (e *engineMock) DropProxyLaneCookies(_ context.Context, q Query) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.droppedLaneQueries = append(e.droppedLaneQueries, q)
 }
 
 func request(t *testing.T, s *Server, path string) *http.Response {
@@ -547,8 +554,8 @@ func TestDedicatedEndpointNoFallbackByDefault(t *testing.T) {
 	srv := NewServerWithOptions("127.0.0.1", 7072, opts, primary, fallback)
 
 	resp := request(t, srv, "/google/search?text=golang")
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503 when primary fails and fallback disabled, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("expected 502 when primary fails and fallback disabled, got %d", resp.StatusCode)
 	}
 	if got := resp.Header.Get("X-Fallback-Engine"); got != "" {
 		t.Fatalf("unexpected fallback header: %s", got)
@@ -615,6 +622,70 @@ func TestDedicatedEndpointCachesImageResults(t *testing.T) {
 	}
 	if engine.imageCalls != 1 {
 		t.Fatalf("expected image engine to be called once, got %d", engine.imageCalls)
+	}
+}
+
+func TestProxiedRequestWithoutMarketMetadataBypassesCache(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.CacheTTL = time.Minute
+	opts.CacheMaxSize = 10
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			AllowRequestProxyURL: true,
+		},
+	}
+	srv := NewServerWithOptions("127.0.0.1", 7124, opts, engine)
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/google/search?text=golang", nil)
+		req.Header.Set("X-Proxy-URL", "http://proxy.example:8080")
+		resp, err := srv.app.Test(req, -1)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected request to succeed, got %d", resp.StatusCode)
+		}
+		if got := resp.Header.Get("X-Cache"); got != "BYPASS" {
+			t.Fatalf("expected X-Cache=BYPASS, got %q", got)
+		}
+	}
+	if engine.searchCalls != 2 {
+		t.Fatalf("expected cache bypass to execute both searches, got %d calls", engine.searchCalls)
+	}
+}
+
+func TestProxiedRequestWithMarketMetadataUsesCache(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.CacheTTL = time.Minute
+	opts.CacheMaxSize = 10
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			AllowRequestProxyURL: true,
+		},
+	}
+	srv := NewServerWithOptions("127.0.0.1", 7125, opts, engine)
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/google/search?text=golang", nil)
+		req.Header.Set("X-Proxy-URL", "http://proxy.example:8080")
+		req.Header.Set("X-Proxy-Country", "us")
+		resp, err := srv.app.Test(req, -1)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected request to succeed, got %d", resp.StatusCode)
+		}
+	}
+	if engine.searchCalls != 1 {
+		t.Fatalf("expected second market-scoped request to hit cache, got %d calls", engine.searchCalls)
 	}
 }
 
@@ -908,6 +979,7 @@ func TestStatsProxyV2Payload(t *testing.T) {
 	opts.Resilience.Proxy = ProxyConfig{
 		Runtime: ProxyRuntimeRaw,
 		Proxies: ProxiesConfig{
+			AllowRequestProxyURL: true,
 			Entries: []ProxyEntryConfig{
 				{URL: "http://user:pass@proxy1:8080", Tags: []string{"default", "us"}},
 				{URL: "http://proxy2:8080", Tags: []string{"default"}},
@@ -936,6 +1008,18 @@ func TestStatsProxyV2Payload(t *testing.T) {
 	}
 	if got := payload["unhealthy_count"].(float64); got != 0 {
 		t.Fatalf("expected unhealthy_count=0, got %v", got)
+	}
+	if got := payload["request_proxy_url_enabled"].(bool); !got {
+		t.Fatalf("expected request_proxy_url_enabled=true")
+	}
+	lanes, ok := payload["lanes"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected lanes object, got %T", payload["lanes"])
+	}
+	for _, field := range []string{"active", "evicted_lru", "cookies_dropped"} {
+		if _, ok := lanes[field].(float64); !ok {
+			t.Fatalf("expected lanes.%s number, got %T", field, lanes[field])
+		}
 	}
 
 	if _, exists := payload["defaults"]; exists {
@@ -1150,6 +1234,156 @@ func TestRequestProxyOverrideDirectBeatsGlobal(t *testing.T) {
 	}
 }
 
+func TestRequestProxyURLDisabledByDefault(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	srv := NewServerWithOptions("127.0.0.1", 7117, DefaultServerOptions(), engine)
+
+	resp := requestWithHeader(t, srv, "/google/search?text=golang", "X-Proxy-URL", "http://user:pass@proxy.example:8080")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected disabled request proxy URL to return 400, got %d", resp.StatusCode)
+	}
+
+	var payload JSONErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if payload.Error != "bad_request" {
+		t.Fatalf("expected bad_request error, got %q", payload.Error)
+	}
+	if payload.Reason != ReasonRequestProxyURLDisabled {
+		t.Fatalf("expected reason=%q, got %q", ReasonRequestProxyURLDisabled, payload.Reason)
+	}
+}
+
+func TestRequestProxyURLHonoredWhenEnabled(t *testing.T) {
+	var got Query
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			got = q
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			AllowRequestProxyURL: true,
+		},
+	}
+	srv := NewServerWithOptions("127.0.0.1", 7118, opts, engine)
+
+	req := httptest.NewRequest(http.MethodGet, "/google/search?text=golang", nil)
+	req.Header.Set("X-Proxy-URL", "http://user:pass@proxy.example:8080")
+	req.Header.Set("X-Proxy-Country", " US ")
+	req.Header.Set("X-Proxy-Class", " Residential ")
+	req.Header.Set("X-Proxy-Provider", " WebShare ")
+	req.Header.Set("X-Proxy-Session-ID", "SID-1")
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected request proxy URL request to succeed, got %d", resp.StatusCode)
+	}
+	if got.ProxyURL != "http://user:pass@proxy.example:8080" {
+		t.Fatalf("expected raw proxy URL on query, got %q", got.ProxyURL)
+	}
+	if got.ProxyCountry != "us" || got.ProxyClass != "residential" || got.ProxyProvider != "webshare" || got.ProxySessionID != "SID-1" {
+		t.Fatalf("unexpected normalized proxy metadata: %#v", got)
+	}
+	if header := resp.Header.Get("X-Proxy-Mode"); header != ProxyModeRequestURL {
+		t.Fatalf("expected X-Proxy-Mode=%s, got %q", ProxyModeRequestURL, header)
+	}
+	if header := resp.Header.Get("X-Proxy-Tag"); header != "" {
+		t.Fatalf("expected empty X-Proxy-Tag, got %q", header)
+	}
+	if header := resp.Header.Get("X-Proxy-Used"); header != "http://proxy.example:8080" {
+		t.Fatalf("expected masked X-Proxy-Used, got %q", header)
+	}
+}
+
+func TestRequestProxyURLBeatsTagOverride(t *testing.T) {
+	var googleProxy string
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			googleProxy = q.ProxyURL
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			AllowRequestProxyURL: true,
+			Entries: []ProxyEntryConfig{
+				{URL: "http://tag-proxy:8080", Tags: []string{"us"}},
+			},
+		},
+	}
+	srv := NewServerWithOptions("127.0.0.1", 7123, opts, engine)
+
+	req := httptest.NewRequest(http.MethodGet, "/google/search?text=golang", nil)
+	req.Header.Set("X-Use-Proxy", "us")
+	req.Header.Set("X-Proxy-URL", "http://request-proxy:8080")
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected request to succeed, got %d", resp.StatusCode)
+	}
+	if googleProxy != "http://request-proxy:8080" {
+		t.Fatalf("expected request proxy URL to beat tag override, got %q", googleProxy)
+	}
+	if got := resp.Header.Get("X-Proxy-Mode"); got != ProxyModeRequestURL {
+		t.Fatalf("expected X-Proxy-Mode=%s, got %q", ProxyModeRequestURL, got)
+	}
+}
+
+func TestRequestProxyOverrideDirectIgnoresRequestProxyURL(t *testing.T) {
+	var googleProxy string
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			googleProxy = q.ProxyURL
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			AllowRequestProxyURL: true,
+		},
+	}
+	srv := NewServerWithOptions("127.0.0.1", 7119, opts, engine)
+
+	req := httptest.NewRequest(http.MethodGet, "/google/search?text=golang", nil)
+	req.Header.Set("X-Use-Proxy", "direct")
+	req.Header.Set("X-Proxy-URL", "http://user:pass@proxy.example:8080")
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected direct override to succeed, got %d", resp.StatusCode)
+	}
+	if googleProxy != "" {
+		t.Fatalf("expected direct override to clear proxy, got %q", googleProxy)
+	}
+	if header := resp.Header.Get("X-Proxy-Mode"); header != ProxyModeOff {
+		t.Fatalf("expected X-Proxy-Mode=%s, got %q", ProxyModeOff, header)
+	}
+}
+
 func TestRequestProxyOverrideTagBeatsGlobal(t *testing.T) {
 	var googleProxy string
 	engine := &engineMock{
@@ -1185,6 +1419,164 @@ func TestRequestProxyOverrideTagBeatsGlobal(t *testing.T) {
 	}
 	if got := resp.Header.Get("X-Proxy-Used"); got != "http://proxy-us:8080" {
 		t.Fatalf("expected X-Proxy-Used to reflect override proxy, got %q", got)
+	}
+}
+
+func TestCaptchaDropsProxyLaneCookies(t *testing.T) {
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, _ Query) ([]SearchResult, error) {
+			return nil, ErrCaptcha
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			AllowRequestProxyURL: true,
+			Lanes:                DefaultProxyLanesConfig(),
+		},
+	}
+	srv := NewServerWithOptions("127.0.0.1", 7120, opts, engine)
+
+	req := httptest.NewRequest(http.MethodGet, "/google/search?text=golang", nil)
+	req.Header.Set("X-Proxy-URL", "http://user:pass@proxy.example:8080")
+	req.Header.Set("X-Proxy-Session-ID", "sid-a")
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected captcha failure to return 429, got %d", resp.StatusCode)
+	}
+
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	if len(engine.droppedLaneQueries) != 1 {
+		t.Fatalf("expected one cookie-drop hook call, got %d", len(engine.droppedLaneQueries))
+	}
+	if got := engine.droppedLaneQueries[0].ProxySessionID; got != "sid-a" {
+		t.Fatalf("expected drop hook to receive session id sid-a, got %q", got)
+	}
+}
+
+func TestProxyErrorDoesNotDropProxyLaneCookies(t *testing.T) {
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, _ Query) ([]SearchResult, error) {
+			return nil, ErrProxyConnect
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			AllowRequestProxyURL: true,
+			Lanes:                DefaultProxyLanesConfig(),
+		},
+	}
+	srv := NewServerWithOptions("127.0.0.1", 7121, opts, engine)
+
+	req := httptest.NewRequest(http.MethodGet, "/google/search?text=golang", nil)
+	req.Header.Set("X-Proxy-URL", "http://user:pass@proxy.example:8080")
+	req.Header.Set("X-Proxy-Session-ID", "sid-a")
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected proxy failure before P5 status mapping, got %d", resp.StatusCode)
+	}
+
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	if len(engine.droppedLaneQueries) != 0 {
+		t.Fatalf("expected no cookie-drop hook for proxy error, got %d", len(engine.droppedLaneQueries))
+	}
+}
+
+func TestStableSearchErrorJSONWithProxyMeta(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantError  string
+	}{
+		{name: "captcha", err: ErrCaptcha, wantStatus: http.StatusTooManyRequests, wantError: "captcha_detected"},
+		{name: "blocked", err: ErrBlocked, wantStatus: http.StatusForbidden, wantError: "blocked"},
+		{name: "rate limited", err: ErrRateLimited, wantStatus: http.StatusTooManyRequests, wantError: "rate_limited"},
+		{name: "search timeout", err: ErrSearchTimeout, wantStatus: http.StatusGatewayTimeout, wantError: "search_timeout"},
+		{name: "proxy connect", err: ErrProxyConnect, wantStatus: http.StatusServiceUnavailable, wantError: "proxy_connect"},
+		{name: "proxy auth", err: ErrProxyAuth, wantStatus: http.StatusServiceUnavailable, wantError: "proxy_auth"},
+		{name: "proxy timeout", err: ErrTimeout, wantStatus: http.StatusServiceUnavailable, wantError: "proxy_timeout"},
+		{name: "proxy unavailable", err: ErrProxyUnavailable, wantStatus: http.StatusServiceUnavailable, wantError: "proxy_unavailable"},
+		{name: "parser", err: ErrParser, wantStatus: http.StatusBadGateway, wantError: "parser_failure"},
+		{name: "engine internal", err: ErrEngineInternal, wantStatus: http.StatusBadGateway, wantError: "engine_internal"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := &engineMock{
+				name:        "google",
+				initialized: true,
+				searchFn: func(_ context.Context, _ Query) ([]SearchResult, error) {
+					return nil, tt.err
+				},
+			}
+
+			opts := DefaultServerOptions()
+			opts.Resilience.Retry.MaxRetries = 0
+			opts.Resilience.Proxy = ProxyConfig{
+				Runtime: ProxyRuntimeRaw,
+				Proxies: ProxiesConfig{
+					AllowRequestProxyURL: true,
+				},
+			}
+			srv := NewServerWithOptions("127.0.0.1", 7122, opts, engine)
+
+			req := httptest.NewRequest(http.MethodGet, "/google/search?text=golang", nil)
+			req.Header.Set("X-Proxy-URL", "http://user:sentinel-password@proxy.example:8080")
+			req.Header.Set("X-Proxy-Country", "US")
+			req.Header.Set("X-Proxy-Class", "Residential")
+			req.Header.Set("X-Proxy-Provider", "WebShare")
+			req.Header.Set("X-Proxy-Session-ID", "sid-a")
+			resp, err := srv.app.Test(req, -1)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("expected status %d, got %d", tt.wantStatus, resp.StatusCode)
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read response body: %v", err)
+			}
+			if strings.Contains(string(body), "sentinel-password") {
+				t.Fatalf("response leaked proxy password: %s", string(body))
+			}
+
+			var payload JSONErrorResponse
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode error response: %v", err)
+			}
+			if payload.Error != tt.wantError {
+				t.Fatalf("expected error=%q, got %q", tt.wantError, payload.Error)
+			}
+			if payload.Meta["proxy_used"] != "http://proxy.example:8080" {
+				t.Fatalf("expected masked proxy_used, got %#v", payload.Meta["proxy_used"])
+			}
+			if payload.Meta["proxy_country"] != "us" || payload.Meta["proxy_class"] != "residential" ||
+				payload.Meta["proxy_provider"] != "webshare" || payload.Meta["proxy_session_id"] != "sid-a" {
+				t.Fatalf("unexpected proxy meta: %#v", payload.Meta)
+			}
+		})
 	}
 }
 
@@ -1374,7 +1766,7 @@ func TestRetryAppliesRateLimiterOnEachAttempt(t *testing.T) {
 	start := time.Now()
 	resp := request(t, srv, "/google/search?text=golang")
 	elapsed := time.Since(start)
-	if resp.StatusCode != http.StatusServiceUnavailable {
+	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("expected failure response, got %d", resp.StatusCode)
 	}
 

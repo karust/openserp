@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/karust/openserp/core"
 	browserprofile "github.com/karust/openserp/core/browser"
@@ -15,7 +16,7 @@ import (
 )
 
 const (
-	version               = "0.7.2"
+	version               = "0.7.3"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -52,16 +53,18 @@ type ServerConfig struct {
 }
 
 type AppConfig struct {
-	Timeout        int    `mapstructure:"timeout"`
-	BrowserPath    string `mapstructure:"browser_path"`
-	ProfilesJSON   string `mapstructure:"profiles"`
-	IsBrowserHead  bool   `mapstructure:"head"`
-	IsLeaveHead    bool   `mapstructure:"leave_head"`
-	IsLeakless     bool   `mapstructure:"leakless"`
-	BlockResources string `mapstructure:"block_resources"`
-	BlockTrackers  bool   `mapstructure:"block_trackers"`
-	DebugEndpoints bool   `mapstructure:"debug_endpoints"`
-	LogFormat      string `mapstructure:"log_format"`
+	Timeout        int           `mapstructure:"timeout"`
+	BrowserPath    string        `mapstructure:"browser_path"`
+	ProfilesJSON   string        `mapstructure:"profiles"`
+	IsBrowserHead  bool          `mapstructure:"head"`
+	IsLeaveHead    bool          `mapstructure:"leave_head"`
+	IsLeakless     bool          `mapstructure:"leakless"`
+	BlockResources string        `mapstructure:"block_resources"`
+	BlockTrackers  bool          `mapstructure:"block_trackers"`
+	DebugEndpoints bool          `mapstructure:"debug_endpoints"`
+	LogFormat      string        `mapstructure:"log_format"`
+	MaxProcesses   int           `mapstructure:"max_processes"`
+	IdleTTL        time.Duration `mapstructure:"idle_ttl"`
 }
 
 type EngineConfig struct {
@@ -148,9 +151,56 @@ var RootCmd = &cobra.Command{
 		config.App.LogFormat = logFormat
 
 		core.InitLogger(config.Server.IsVerbose, config.Server.IsDebug, config.App.LogFormat)
-		logrus.WithField("config", fmt.Sprintf("%+v", config)).Debug("Final config")
+		logrus.WithField("config", sanitizedConfigForLog(config)).Debug("Final config")
 		return nil
 	},
+}
+
+func sanitizedConfigForLog(cfg Config) map[string]interface{} {
+	return map[string]interface{}{
+		"server": cfg.Server,
+		"app": map[string]interface{}{
+			"timeout":         cfg.App.Timeout,
+			"browser_path":    cfg.App.BrowserPath != "",
+			"profiles":        cfg.App.ProfilesJSON != "",
+			"head":            cfg.App.IsBrowserHead,
+			"leave_head":      cfg.App.IsLeaveHead,
+			"leakless":        cfg.App.IsLeakless,
+			"block_resources": cfg.App.BlockResources,
+			"block_trackers":  cfg.App.BlockTrackers,
+			"debug_endpoints": cfg.App.DebugEndpoints,
+			"log_format":      cfg.App.LogFormat,
+			"max_processes":   cfg.App.MaxProcesses,
+			"idle_ttl":        cfg.App.IdleTTL.String(),
+		},
+		"proxies": map[string]interface{}{
+			"global":                  maskedProxyForLog(cfg.Proxies.Global),
+			"entries":                 len(cfg.Proxies.Entries),
+			"allow_request_proxy_url": cfg.Proxies.AllowRequestProxyURL,
+			"health":                  cfg.Proxies.Health,
+			"lanes":                   cfg.Proxies.Lanes,
+		},
+		"cache":           cfg.Cache,
+		"resilience":      cfg.Resilience,
+		"circuit_breaker": cfg.CircuitBreaker,
+		"cors":            cfg.CORS,
+		"captcha":         cfg.Captcha,
+		"2captcha": map[string]interface{}{
+			"apikey_configured": strings.TrimSpace(cfg.Config2Capcha.ApiKey) != "",
+		},
+		"google":     cfg.GoogleConfig,
+		"yandex":     cfg.YandexConfig,
+		"baidu":      cfg.BaiduConfig,
+		"bing":       cfg.BingConfig,
+		"duckduckgo": cfg.DuckDuckGoConfig,
+	}
+}
+
+func maskedProxyForLog(proxyURL string) string {
+	if strings.TrimSpace(proxyURL) == "" {
+		return ""
+	}
+	return core.MaskProxyURL(proxyURL)
 }
 
 // Bind each cobra flag to its associated viper configuration (config file and environment variable)
@@ -259,10 +309,6 @@ func initializeConfig(cmd *cobra.Command) error {
 		return fmt.Errorf("invalid proxies config: %w", err)
 	}
 
-	if config.Server.IsDebug {
-		logrus.Debug("Viper config:")
-		v.Debug()
-	}
 	return nil
 }
 
@@ -340,10 +386,16 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("app.block_resources", "")
 	v.SetDefault("app.block_trackers", false)
 	v.SetDefault("app.debug_endpoints", false)
+	v.SetDefault("app.max_processes", 4)
+	v.SetDefault("app.idle_ttl", "10m")
 
 	v.SetDefault("proxies.entries", []interface{}{})
 	v.SetDefault("proxies.global", "")
+	v.SetDefault("proxies.allow_request_proxy_url", false)
 	v.SetDefault("proxies.health.failure_threshold", core.DefaultProxyFailureThreshold)
+	v.SetDefault("proxies.lanes.enabled", true)
+	v.SetDefault("proxies.lanes.max_lanes", core.DefaultProxyLaneMaxLanes)
+	v.SetDefault("proxies.lanes.drop_cookies_on_challenge", true)
 
 	v.SetDefault("cache.ttl_seconds", 300)
 	v.SetDefault("cache.max_size", 1000)
@@ -356,7 +408,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("cors.enabled", true)
 	v.SetDefault("cors.allow_origins", "*")
 	v.SetDefault("cors.allow_methods", "GET, POST, OPTIONS")
-	v.SetDefault("cors.allow_headers", "Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Request-ID, X-Tenant")
+	v.SetDefault("cors.allow_headers", "Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Proxy-URL, X-Proxy-Country, X-Proxy-Class, X-Proxy-Provider, X-Proxy-Session-ID, X-Request-ID, X-Tenant")
 	v.SetDefault("cors.max_age", 86400)
 	v.SetDefault("captcha.solver_enabled", false)
 }

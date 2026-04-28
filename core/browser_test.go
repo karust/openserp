@@ -6,6 +6,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -100,6 +101,162 @@ func TestNavigateUsesIsolatedBrowserContext(t *testing.T) {
 
 	if strings.Contains(cookieHeader, "openserp_session=request-a") {
 		t.Fatalf("cookie leaked between requests; got header %q", cookieHeader)
+	}
+}
+
+func TestNavigateReusesCookiesForSameProxyLane(t *testing.T) {
+	testutil.RequireIntegration(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/cookies/set":
+			http.SetCookie(w, &http.Cookie{Name: "openserp_lane", Value: "same-lane", Path: "/"})
+			_, _ = w.Write([]byte("cookie-set"))
+		case "/cookies":
+			_, _ = w.Write([]byte(r.Header.Get("Cookie")))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	browser, err := NewBrowser(BrowserOpts{
+		IsHeadless:     true,
+		IsLeakless:     false,
+		Timeout:        15 * time.Second,
+		ProxyLaneStore: NewLaneStore(10),
+	})
+	if err != nil {
+		t.Fatalf("failed initializing browser: %s", err)
+	}
+	defer closeTestBrowser(t, browser)
+
+	laneCtx := WithProxyLaneKey(WithEngine(context.Background(), "google"), ProxyLaneKey{Engine: "google", SessionID: "sid-a"})
+	pageA, err := browser.Navigate(laneCtx, srv.URL+"/cookies/set")
+	if err != nil {
+		t.Fatalf("navigate cookie setter: %v", err)
+	}
+	if err := ClosePageWithTimeout(context.Background(), pageA, time.Second); err != nil {
+		t.Fatalf("close setter page: %v", err)
+	}
+
+	pageB, err := browser.Navigate(laneCtx, srv.URL+"/cookies")
+	if err != nil {
+		t.Fatalf("navigate cookie reader: %v", err)
+	}
+	defer func() {
+		if err := ClosePageWithTimeout(context.Background(), pageB, time.Second); err != nil {
+			t.Logf("close reader page: %v", err)
+		}
+	}()
+
+	body, err := pageB.Timeout(5 * time.Second).Element("body")
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	cookieHeader, err := body.Text()
+	if err != nil {
+		t.Fatalf("extract response text: %v", err)
+	}
+	if !strings.Contains(cookieHeader, "openserp_lane=same-lane") {
+		t.Fatalf("expected same proxy lane to restore cookie, got %q", cookieHeader)
+	}
+}
+
+func TestNavigateDoesNotShareCookiesAcrossProxyLanes(t *testing.T) {
+	testutil.RequireIntegration(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/cookies/set":
+			http.SetCookie(w, &http.Cookie{Name: "openserp_lane", Value: "lane-a", Path: "/"})
+			_, _ = w.Write([]byte("cookie-set"))
+		case "/cookies":
+			_, _ = w.Write([]byte(r.Header.Get("Cookie")))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	browser, err := NewBrowser(BrowserOpts{
+		IsHeadless:     true,
+		IsLeakless:     false,
+		Timeout:        15 * time.Second,
+		ProxyLaneStore: NewLaneStore(10),
+	})
+	if err != nil {
+		t.Fatalf("failed initializing browser: %s", err)
+	}
+	defer closeTestBrowser(t, browser)
+
+	laneA := WithProxyLaneKey(WithEngine(context.Background(), "google"), ProxyLaneKey{Engine: "google", SessionID: "sid-a"})
+	laneB := WithProxyLaneKey(WithEngine(context.Background(), "google"), ProxyLaneKey{Engine: "google", SessionID: "sid-b"})
+	pageA, err := browser.Navigate(laneA, srv.URL+"/cookies/set")
+	if err != nil {
+		t.Fatalf("navigate cookie setter: %v", err)
+	}
+	if err := ClosePageWithTimeout(context.Background(), pageA, time.Second); err != nil {
+		t.Fatalf("close setter page: %v", err)
+	}
+
+	pageB, err := browser.Navigate(laneB, srv.URL+"/cookies")
+	if err != nil {
+		t.Fatalf("navigate cookie reader: %v", err)
+	}
+	defer func() {
+		if err := ClosePageWithTimeout(context.Background(), pageB, time.Second); err != nil {
+			t.Logf("close reader page: %v", err)
+		}
+	}()
+
+	body, err := pageB.Timeout(5 * time.Second).Element("body")
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	cookieHeader, err := body.Text()
+	if err != nil {
+		t.Fatalf("extract response text: %v", err)
+	}
+	if strings.Contains(cookieHeader, "openserp_lane=lane-a") {
+		t.Fatalf("cookie leaked across proxy lanes; got header %q", cookieHeader)
+	}
+}
+
+func TestNavigateClassifiesMainDocumentStatus(t *testing.T) {
+	testutil.RequireIntegration(t)
+
+	tests := []struct {
+		name   string
+		status int
+		want   error
+	}{
+		{name: "blocked", status: http.StatusForbidden, want: ErrBlocked},
+		{name: "rate limited", status: http.StatusTooManyRequests, want: ErrRateLimited},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte("classified"))
+			}))
+			defer srv.Close()
+
+			browser, err := NewBrowser(BrowserOpts{IsHeadless: true, IsLeakless: false, Timeout: 15 * time.Second})
+			if err != nil {
+				t.Fatalf("failed initializing browser: %s", err)
+			}
+			defer closeTestBrowser(t, browser)
+
+			page, err := browser.Navigate(context.Background(), srv.URL)
+			if page != nil {
+				_ = ClosePageWithTimeout(context.Background(), page, time.Second)
+			}
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("expected %v, got %v", tt.want, err)
+			}
+		})
 	}
 }
 

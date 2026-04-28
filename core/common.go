@@ -45,6 +45,12 @@ var ErrTimeout = errors.New("timeout")
 // It is not a failure; the proxy stays healthy and no credit is charged.
 var ErrEmptyResult = errors.New("empty_result")
 
+// ErrBlocked is returned when the search engine blocks the browser request.
+var ErrBlocked = errors.New("blocked")
+
+// ErrRateLimited is returned when the search engine returns an HTTP rate limit.
+var ErrRateLimited = errors.New("rate_limited")
+
 // IsProxyNetworkError reports whether err is a network-level error that
 // indicates a faulty proxy (connect failure, auth rejection, or timeout).
 // Parser drift, captcha pages, and engine errors must NOT degrade proxy health.
@@ -165,11 +171,36 @@ type Query struct {
 	Answers bool
 	// ProxyURL is a direct proxy URL used by raw HTTP search paths.
 	ProxyURL string
+	// ProxyCountry identifies the proxy market country for cache/error metadata.
+	ProxyCountry string
+	// ProxyClass identifies the proxy class such as datacenter or residential.
+	ProxyClass string
+	// ProxyProvider identifies the upstream proxy provider.
+	ProxyProvider string
+	// ProxySessionID identifies a sticky balancer session/lane.
+	ProxySessionID string
 	// ProxyOverride is a request-scoped proxy policy override (tag or "direct"),
 	// typically parsed from the X-Use-Proxy header.
 	ProxyOverride string
 	// Insecure enables insecure TLS for request/browser execution.
 	Insecure bool
+}
+
+// String renders Query for logs with the proxy URL credentials masked. The
+// default %+v formatter calls this method, so logging Query through %v/%+v
+// never leaks proxy passwords.
+func (q Query) String() string {
+	maskedProxyURL := ""
+	if q.ProxyURL != "" {
+		maskedProxyURL = MaskProxyURL(q.ProxyURL)
+	}
+	return fmt.Sprintf(
+		"{Text:%s LangCode:%s DateInterval:%s Filetype:%s Site:%s Limit:%d Start:%d Filter:%t Answers:%t ProxyURL:%s ProxyCountry:%s ProxyClass:%s ProxyProvider:%s ProxySessionID:%s ProxyOverride:%s Insecure:%t}",
+		q.Text, q.LangCode, q.DateInterval, q.Filetype, q.Site,
+		q.Limit, q.Start, q.Filter, q.Answers,
+		maskedProxyURL, q.ProxyCountry, q.ProxyClass, q.ProxyProvider,
+		q.ProxySessionID, q.ProxyOverride, q.Insecure,
+	)
 }
 
 // ComputePagination translates an absolute start offset into page index and
@@ -239,6 +270,18 @@ func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 	if err != nil {
 		return errInvalidParam(fmt.Sprintf("X-Use-Proxy: %v", err))
 	}
+	rawProxyURL := strings.TrimSpace(reqCtx.Get("X-Proxy-URL"))
+	if rawProxyURL != "" {
+		normalized, err := NormalizeProxyURL(rawProxyURL)
+		if err != nil {
+			return errInvalidParam(fmt.Sprintf("X-Proxy-URL: %v", err))
+		}
+		searchQuery.ProxyURL = normalized
+	}
+	searchQuery.ProxyCountry = strings.ToLower(strings.TrimSpace(reqCtx.Get("X-Proxy-Country")))
+	searchQuery.ProxyClass = strings.ToLower(strings.TrimSpace(reqCtx.Get("X-Proxy-Class")))
+	searchQuery.ProxyProvider = strings.ToLower(strings.TrimSpace(reqCtx.Get("X-Proxy-Provider")))
+	searchQuery.ProxySessionID = strings.TrimSpace(reqCtx.Get("X-Proxy-Session-ID"))
 
 	if searchQuery.IsEmpty() {
 		return errEmptyQuery()
