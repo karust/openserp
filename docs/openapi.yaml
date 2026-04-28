@@ -70,6 +70,8 @@ paths:
               $ref: "#/components/headers/XProxyTag"
             X-Proxy-Used:
               $ref: "#/components/headers/XProxyUsed"
+            X-Network-Bytes:
+              $ref: "#/components/headers/XNetworkBytes"
           content:
             application/json:
               schema:
@@ -185,6 +187,8 @@ paths:
               $ref: "#/components/headers/XProxyTag"
             X-Proxy-Used:
               $ref: "#/components/headers/XProxyUsed"
+            X-Network-Bytes:
+              $ref: "#/components/headers/XNetworkBytes"
           content:
             application/json:
               schema:
@@ -213,8 +217,10 @@ paths:
       description: >
         Results are deduplicated by normalized URL. The `clusters` field groups
         results that appeared in multiple engines, scored by cross-engine agreement.
-        Partial failures are surfaced in `meta.engines_failed` rather than causing
-        a 503. Use `?format=markdown|text|ndjson` for alternative output formats.
+        Partial failures are surfaced in `meta.engines_failed` and
+        `meta.engine_errors`. If all selected engines fail, the endpoint returns
+        a 502 with per-engine error details. Use `?format=markdown|text|ndjson`
+        for alternative output formats.
       parameters:
         - $ref: "#/components/parameters/TextQuery"
         - $ref: "#/components/parameters/LangQuery"
@@ -248,6 +254,8 @@ paths:
               $ref: "#/components/headers/XProxyTag"
             X-Proxy-Used:
               $ref: "#/components/headers/XProxyUsed"
+            X-Network-Bytes:
+              $ref: "#/components/headers/XNetworkBytes"
           content:
             application/json:
               schema:
@@ -313,6 +321,8 @@ paths:
               $ref: "#/components/headers/XProxyTag"
             X-Proxy-Used:
               $ref: "#/components/headers/XProxyUsed"
+            X-Network-Bytes:
+              $ref: "#/components/headers/XNetworkBytes"
           content:
             application/json:
               schema:
@@ -673,6 +683,15 @@ components:
         `pooled`, `multiple`, or `mixed`. Credentials are never included.
       schema:
         type: string
+    XNetworkBytes:
+      description: >
+        Aggregate inbound network bytes consumed while executing the search request.
+        Single-engine endpoints report that engine's request bytes; mega endpoints
+        report the sum across selected engines. Cache hits return `0`.
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
   responses:
     BadRequestError:
       description: Invalid request parameters
@@ -877,9 +896,28 @@ components:
           items:
             type: string
           example: []
+        engine_errors:
+          type: array
+          description: Sanitized per-engine failures for mega endpoints.
+          items:
+            $ref: "#/components/schemas/EngineErrorDetail"
         version:
           type: string
           example: "1.0"
+    EngineErrorDetail:
+      type: object
+      required: [engine, error]
+      properties:
+        engine:
+          type: string
+          example: bing
+        error:
+          type: string
+          example: blocked
+        message:
+          type: string
+          description: Sanitized detail; proxy credentials are never included.
+          example: "blocked: 403"
     Pagination:
       type: object
       required: [page, has_more, next_start]
@@ -1176,10 +1214,11 @@ components:
             Stable machine-readable error class. Search-pipeline failures use the
             following codes: `captcha_detected`, `blocked`, `rate_limited`,
             `search_timeout`, `proxy_connect`, `proxy_auth`, `proxy_timeout`,
-            `proxy_unavailable`, `parser_failure`, `engine_internal`. Validation
-            errors use `bad_request`. Other generic codes (`not_found`,
-            `service_unavailable`, `server_error`, `client_error`, `error`) may
-            appear for non-search routes.
+            `proxy_unavailable`, `parser_failure`, `engine_internal`,
+            `all_engines_failed`, `circuit_open`, `request_timeout`,
+            `request_canceled`. Validation errors use `bad_request`. Other
+            generic codes (`not_found`, `service_unavailable`, `server_error`,
+            `client_error`, `error`) may appear for non-search routes.
           enum:
             - bad_request
             - not_found
@@ -1197,10 +1236,18 @@ components:
             - proxy_unavailable
             - parser_failure
             - engine_internal
+            - all_engines_failed
+            - circuit_open
+            - request_timeout
+            - request_canceled
           example: bad_request
         code:
           type: integer
           example: 400
+        request_id:
+          type: string
+          description: Matches the `X-Request-ID` response header.
+          example: 01HXYZ...
         message:
           type: string
           example: "INVALID_LIMIT: limit must be between 1 and 100"
@@ -1238,6 +1285,14 @@ components:
             proxy_session_id:
               type: string
               example: sid-123
+            error_detail:
+              type: string
+              description: Sanitized underlying error detail when available.
+              example: "proxy_connect: dial tcp proxy.example:8080: connection refused"
+            engine_errors:
+              type: array
+              items:
+                $ref: "#/components/schemas/EngineErrorDetail"
     # ── Health / Stats ────────────────────────────────────────────────
     EngineHealth:
       type: object

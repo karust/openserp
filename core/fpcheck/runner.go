@@ -53,7 +53,7 @@ func RunWithOptions(ctx context.Context, browser BrowserNavigator, detector Dete
 		if options.WaitBeforeClose > 0 {
 			_ = sleepWithContext(ctx, options.WaitBeforeClose)
 		}
-		closePageWithTimeout(context.Background(), page, time.Second)
+		closePageWithTimeout(context.Background(), browser, page, time.Second)
 	}()
 
 	detections, rawNotes, err := detector.Extract(ctx, page)
@@ -124,8 +124,16 @@ func saveScreenshot(page *rod.Page, path string) error {
 	return nil
 }
 
-func closePageWithTimeout(ctx context.Context, page *rod.Page, timeout time.Duration) {
+type pageCloser interface {
+	ClosePage(context.Context, *rod.Page, time.Duration) error
+}
+
+func closePageWithTimeout(ctx context.Context, browser BrowserNavigator, page *rod.Page, timeout time.Duration) {
 	if page == nil {
+		return
+	}
+	if closer, ok := browser.(pageCloser); ok {
+		_ = closer.ClosePage(ctx, page, timeout)
 		return
 	}
 	if timeout <= 0 {

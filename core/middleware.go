@@ -11,11 +11,12 @@ import (
 )
 
 type JSONErrorResponse struct {
-	Error   string                 `json:"error"`
-	Code    int                    `json:"code"`
-	Message string                 `json:"message,omitempty"`
-	Reason  string                 `json:"reason,omitempty"`
-	Meta    map[string]interface{} `json:"meta,omitempty"`
+	Error     string                 `json:"error"`
+	Code      int                    `json:"code"`
+	RequestID string                 `json:"request_id,omitempty"`
+	Message   string                 `json:"message,omitempty"`
+	Reason    string                 `json:"reason,omitempty"`
+	Meta      map[string]interface{} `json:"meta,omitempty"`
 }
 
 type CORSConfig struct {
@@ -24,6 +25,8 @@ type CORSConfig struct {
 	AllowHeaders string
 	MaxAge       int
 }
+
+const exposedResponseHeaders = "X-Request-ID, X-Cache, X-Fallback-Engine, X-Proxy-Mode, X-Proxy-Tag, X-Proxy-Used, X-Network-Bytes"
 
 func DefaultCORSConfig() CORSConfig {
 	return CORSConfig{
@@ -64,6 +67,7 @@ func CORSMiddleware(cfg CORSConfig) fiber.Handler {
 		c.Set("Access-Control-Allow-Methods", cfg.AllowMethods)
 		c.Set("Access-Control-Allow-Headers", cfg.AllowHeaders)
 		c.Set("Access-Control-Max-Age", fmt.Sprintf("%d", cfg.MaxAge))
+		c.Set("Access-Control-Expose-Headers", exposedResponseHeaders)
 
 		if c.Method() == "OPTIONS" {
 			return c.SendStatus(fiber.StatusNoContent)
@@ -177,13 +181,18 @@ func JSONErrorMiddleware() fiber.ErrorHandler {
 		if errorCode == "" {
 			errorCode = statusText(code)
 		}
+		requestID := RequestIDFromContext(c.UserContext())
+		if requestID == "" {
+			requestID = strings.TrimSpace(c.Get("X-Request-ID"))
+		}
 
 		resp := JSONErrorResponse{
-			Error:   errorCode,
-			Code:    code,
-			Message: err.Error(),
-			Reason:  reason,
-			Meta:    meta,
+			Error:     errorCode,
+			Code:      code,
+			RequestID: requestID,
+			Message:   err.Error(),
+			Reason:    reason,
+			Meta:      meta,
 		}
 
 		c.Set("Content-Type", "application/json")

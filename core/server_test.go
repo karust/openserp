@@ -113,6 +113,24 @@ func TestRequestIDHeaderIsGeneratedWhenMissing(t *testing.T) {
 	}
 }
 
+func TestErrorResponseIncludesRequestID(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	srv := NewServerWithOptions("127.0.0.1", 7112, DefaultServerOptions(), engine)
+
+	resp := requestWithHeader(t, srv, "/google/search?text=", "X-Request-ID", "req-error")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+
+	var payload JSONErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if payload.RequestID != "req-error" {
+		t.Fatalf("expected request_id=req-error, got %q", payload.RequestID)
+	}
+}
+
 func TestOpenAPISpecEndpoint(t *testing.T) {
 	engine := &engineMock{name: "google", initialized: true}
 	srv := NewServerWithOptions("127.0.0.1", 7107, DefaultServerOptions(), engine)
@@ -178,6 +196,9 @@ func TestDebugFingerprintEndpointValidatesDetectorParam(t *testing.T) {
 	resp := request(t, srv, "/debug/fingerprint-check?detector=unknown")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected invalid detector to return 400, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Network-Bytes"); got != "0" {
+		t.Fatalf("expected X-Network-Bytes=0, got %q", got)
 	}
 }
 
@@ -562,6 +583,29 @@ func TestDedicatedEndpointNoFallbackByDefault(t *testing.T) {
 	}
 	if fallback.searchCalls != 0 {
 		t.Fatalf("fallback engine should not be called, got %d calls", fallback.searchCalls)
+	}
+}
+
+func TestDedicatedEndpointReturnsNetworkBytesHeader(t *testing.T) {
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(ctx context.Context, q Query) ([]SearchResult, error) {
+			AddNetworkBytes(ctx, 123)
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7211, opts, engine)
+
+	resp := request(t, srv, "/google/search?text=golang")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Network-Bytes"); got != "123" {
+		t.Fatalf("expected X-Network-Bytes=123, got %q", got)
 	}
 }
 
@@ -1580,6 +1624,55 @@ func TestStableSearchErrorJSONWithProxyMeta(t *testing.T) {
 	}
 }
 
+func TestSearchErrorIncludesSanitizedDetail(t *testing.T) {
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return nil, fmt.Errorf("%w: dial via %s failed", ErrProxyConnect, q.ProxyURL)
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeRaw,
+		Proxies: ProxiesConfig{
+			AllowRequestProxyURL: true,
+		},
+	}
+	srv := NewServerWithOptions("127.0.0.1", 7123, opts, engine)
+
+	req := httptest.NewRequest(http.MethodGet, "/google/search?text=golang", nil)
+	req.Header.Set("X-Proxy-URL", "http://user:sentinel-password@proxy.example:8080")
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if strings.Contains(string(body), "sentinel-password") {
+		t.Fatalf("response leaked proxy password: %s", string(body))
+	}
+
+	var payload JSONErrorResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if payload.Meta["error_detail"] == "" {
+		t.Fatalf("expected error_detail, got %#v", payload.Meta)
+	}
+	if !strings.Contains(payload.Meta["error_detail"].(string), "http://proxy.example:8080") {
+		t.Fatalf("expected masked proxy in error_detail, got %#v", payload.Meta["error_detail"])
+	}
+}
+
 func TestBrowserProxyPoolRotatesPerRequest(t *testing.T) {
 	var attemptedProxies []string
 	engine := &engineMock{
@@ -1974,6 +2067,81 @@ func TestMegaSearchReturnsV1EnvelopeWithEnginesFailed(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected bing in engines_failed, got %v", env.Meta.EnginesFailed)
+	}
+	if len(env.Meta.EngineErrors) != 1 || env.Meta.EngineErrors[0].Engine != "bing" || env.Meta.EngineErrors[0].Message == "" {
+		t.Fatalf("expected bing engine error detail, got %#v", env.Meta.EngineErrors)
+	}
+}
+
+func TestMegaSearchReturnsAggregateNetworkBytesHeader(t *testing.T) {
+	google := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(ctx context.Context, q Query) ([]SearchResult, error) {
+			AddNetworkBytes(ctx, 10)
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+	bing := &engineMock{
+		name:        "bing",
+		initialized: true,
+		searchFn: func(ctx context.Context, q Query) ([]SearchResult, error) {
+			AddNetworkBytes(ctx, 20)
+			return []SearchResult{{Rank: 1, URL: "https://example.com/bing", Title: "bing"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7212, opts, google, bing)
+
+	resp := request(t, srv, "/mega/search?text=golang&engines=google,bing")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Network-Bytes"); got != "30" {
+		t.Fatalf("expected X-Network-Bytes=30, got %q", got)
+	}
+}
+
+func TestMegaSearchAllFailuresReturnsDetails(t *testing.T) {
+	google := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return nil, fmt.Errorf("%w: selector timeout", ErrSearchTimeout)
+		},
+	}
+	bing := &engineMock{
+		name:        "bing",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return nil, fmt.Errorf("%w: 403", ErrBlocked)
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7210, opts, google, bing)
+
+	resp := requestWithHeader(t, srv, "/mega/search?text=golang&engines=google,bing", "X-Request-ID", "mega-fail")
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", resp.StatusCode)
+	}
+
+	var payload JSONErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if payload.RequestID != "mega-fail" {
+		t.Fatalf("expected request_id=mega-fail, got %q", payload.RequestID)
+	}
+	if payload.Error != "all_engines_failed" {
+		t.Fatalf("expected all_engines_failed, got %q", payload.Error)
+	}
+	engineErrors, ok := payload.Meta["engine_errors"].([]interface{})
+	if !ok || len(engineErrors) != 2 {
+		t.Fatalf("expected two engine_errors, got %#v", payload.Meta["engine_errors"])
 	}
 }
 

@@ -154,6 +154,7 @@ func buildServerOptions(corsCfg core.CORSConfig, proxyCfg core.ProxyConfig, fing
 		EnableDebugEndpoints:   config.App.DebugEndpoints,
 		FingerprintArtifactDir: core.DefaultFingerprintArtifactDir,
 		FingerprintBrowserOpts: fingerprintBrowserOpts,
+		MegaTimeout:            config.App.MegaTimeout,
 		Resilience: core.ResilientConfig{
 			Retry: core.RetryConfig{
 				MaxRetries:     config.Resilience.MaxRetries,

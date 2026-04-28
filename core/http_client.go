@@ -44,7 +44,7 @@ func NewRawHTTPClient(query Query) (*http.Client, error) {
 	}
 	roundTripper := http.RoundTripper(transport)
 	if transport.Proxy != nil {
-		roundTripper = proxyErrorTransport{base: transport}
+		roundTripper = proxyErrorTransport{base: roundTripper}
 	}
 
 	return &http.Client{
@@ -54,7 +54,9 @@ func NewRawHTTPClient(query Query) (*http.Client, error) {
 }
 
 func newRawTransport(query Query) (*http.Transport, error) {
-	transport := &http.Transport{}
+	transport := &http.Transport{
+		DialContext: dialNetworkUsageConn,
+	}
 	if query.Insecure {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
@@ -76,8 +78,7 @@ func newRawTransport(query Query) (*http.Transport, error) {
 	}
 
 	transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		dialer := &net.Dialer{}
-		rawConn, err := dialer.DialContext(ctx, network, addr)
+		rawConn, err := dialNetworkUsageConn(ctx, network, addr)
 		if err != nil {
 			return nil, err
 		}
@@ -98,6 +99,26 @@ func newRawTransport(query Query) (*http.Transport, error) {
 	}
 
 	return transport, nil
+}
+
+func dialNetworkUsageConn(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := &net.Dialer{}
+	conn, err := dialer.DialContext(ctx, network, addr)
+	if err != nil {
+		return nil, err
+	}
+	return networkUsageConn{Conn: conn, ctx: ctx}, nil
+}
+
+type networkUsageConn struct {
+	net.Conn
+	ctx context.Context
+}
+
+func (c networkUsageConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	AddNetworkBytes(c.ctx, int64(n))
+	return n, err
 }
 
 type proxyErrorTransport struct {

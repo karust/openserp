@@ -241,14 +241,26 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 // SearchAllParallel applies retry/circuit protections per engine for mega search.
 // Returns results, list of engines that responded, and list of engines that failed.
 func (rs *ResilientSearcher) SearchAllParallel(ctx context.Context, q Query, engines []SearchEngine) ([]MegaSearchResult, []string, []string) {
-	return rs.runParallel(ctx, q, engines, false)
+	results, responded, failed, _ := rs.runParallelDetailed(ctx, q, engines, false)
+	return results, responded, failed
 }
 
 func (rs *ResilientSearcher) SearchAllImageParallel(ctx context.Context, q Query, engines []SearchEngine) ([]MegaSearchResult, []string, []string) {
-	return rs.runParallel(ctx, q, engines, true)
+	results, responded, failed, _ := rs.runParallelDetailed(ctx, q, engines, true)
+	return results, responded, failed
 }
 
-func (rs *ResilientSearcher) runParallel(ctx context.Context, q Query, engines []SearchEngine, isImage bool) ([]MegaSearchResult, []string, []string) {
+func (rs *ResilientSearcher) searchAllParallelDetailed(ctx context.Context, q Query, engines []SearchEngine) ([]MegaSearchResult, []string, []EngineErrorDetail) {
+	results, responded, _, errors := rs.runParallelDetailed(ctx, q, engines, false)
+	return results, responded, errors
+}
+
+func (rs *ResilientSearcher) searchAllImageParallelDetailed(ctx context.Context, q Query, engines []SearchEngine) ([]MegaSearchResult, []string, []EngineErrorDetail) {
+	results, responded, _, errors := rs.runParallelDetailed(ctx, q, engines, true)
+	return results, responded, errors
+}
+
+func (rs *ResilientSearcher) runParallelDetailed(ctx context.Context, q Query, engines []SearchEngine, isImage bool) ([]MegaSearchResult, []string, []string, []EngineErrorDetail) {
 	ctx = EnsureContext(ctx)
 
 	type engineResult struct {
@@ -294,14 +306,37 @@ func (rs *ResilientSearcher) runParallel(ctx context.Context, q Query, engines [
 
 	var allResults []MegaSearchResult
 	var responded, failed []string
+	var engineErrors []EngineErrorDetail
 
-	for i := 0; i < started; i++ {
-		res := <-resultCh
-		if res.err != nil {
-			failed = append(failed, res.name)
-		} else {
-			responded = append(responded, res.name)
-			allResults = append(allResults, res.results...)
+	// Collect results, but bail out early if the parent context is cancelled
+	// (e.g. mega-search hits its aggregate deadline). Engines whose work has
+	// not yet returned a result are reported as failed with the context error
+	// so the caller can return partial results to the client instead of
+	// blocking on a slow/stuck engine.
+	pending := map[string]struct{}{}
+	for _, eng := range engines {
+		pending[eng.Name()] = struct{}{}
+	}
+	collected := 0
+collectLoop:
+	for collected < started {
+		select {
+		case res := <-resultCh:
+			collected++
+			delete(pending, res.name)
+			if res.err != nil {
+				failed = append(failed, res.name)
+				engineErrors = append(engineErrors, engineErrorDetail(res.name, res.err, q))
+			} else {
+				responded = append(responded, res.name)
+				allResults = append(allResults, res.results...)
+			}
+		case <-ctx.Done():
+			for name := range pending {
+				failed = append(failed, name)
+				engineErrors = append(engineErrors, engineErrorDetail(name, ctx.Err(), q))
+			}
+			break collectLoop
 		}
 	}
 
@@ -311,7 +346,10 @@ func (rs *ResilientSearcher) runParallel(ctx context.Context, q Query, engines [
 	if failed == nil {
 		failed = []string{}
 	}
-	return allResults, responded, failed
+	if engineErrors == nil {
+		engineErrors = []EngineErrorDetail{}
+	}
+	return allResults, responded, failed, engineErrors
 }
 
 func (rs *ResilientSearcher) GetCircuitBreakerStats() []map[string]interface{} {

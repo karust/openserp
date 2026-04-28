@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	version               = "0.7.3"
+	version               = "0.7.4"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -65,6 +65,7 @@ type AppConfig struct {
 	LogFormat      string        `mapstructure:"log_format"`
 	MaxProcesses   int           `mapstructure:"max_processes"`
 	IdleTTL        time.Duration `mapstructure:"idle_ttl"`
+	MegaTimeout    time.Duration `mapstructure:"mega_timeout"`
 }
 
 type EngineConfig struct {
@@ -172,6 +173,7 @@ func sanitizedConfigForLog(cfg Config) map[string]interface{} {
 			"log_format":      cfg.App.LogFormat,
 			"max_processes":   cfg.App.MaxProcesses,
 			"idle_ttl":        cfg.App.IdleTTL.String(),
+			"mega_timeout":    cfg.App.MegaTimeout.String(),
 		},
 		"proxies": map[string]interface{}{
 			"global":                  maskedProxyForLog(cfg.Proxies.Global),
@@ -388,6 +390,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("app.debug_endpoints", false)
 	v.SetDefault("app.max_processes", 4)
 	v.SetDefault("app.idle_ttl", "10m")
+	v.SetDefault("app.mega_timeout", "90s")
 
 	v.SetDefault("proxies.entries", []interface{}{})
 	v.SetDefault("proxies.global", "")

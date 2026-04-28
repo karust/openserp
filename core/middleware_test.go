@@ -63,6 +63,9 @@ func TestCORSMiddleware_UsesConfiguredHeaders(t *testing.T) {
 	if got := resp.Header.Get("Access-Control-Max-Age"); got != "1200" {
 		t.Fatalf("unexpected max-age: %q", got)
 	}
+	if got := resp.Header.Get("Access-Control-Expose-Headers"); !strings.Contains(got, "X-Network-Bytes") {
+		t.Fatalf("expected exposed headers to include X-Network-Bytes, got %q", got)
+	}
 }
 
 func TestCORSMiddleware_OPTIONSReturnsNoContent(t *testing.T) {

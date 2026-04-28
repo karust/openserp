@@ -171,6 +171,18 @@ func (b *Browser) configureRequestBlocking(ctx context.Context, page *rod.Page) 
 		return nil
 	}
 
+	// HijackRequests calls Fetch.enable on the page, which collides with the
+	// browser-level Fetch.enable installed by the proxy-auth listener. Two
+	// consumers competing for the same RequestID produce "Invalid
+	// InterceptionId" errors and stall parallel navigations (e.g. mega search
+	// behind an authenticated proxy). Resource-type blocking is dropped on the
+	// auth-proxy path; tracker URL blocking via NetworkSetBlockedURLs above
+	// still works because it is not Fetch-based.
+	if b.proxyUser != "" {
+		WithRequest(ctx).Debug("Skipping HijackRequests resource blocking under proxy auth listener")
+		return nil
+	}
+
 	blocked := blockedResourceTypeSet(b.BlockResourceTypes)
 	router := page.HijackRequests()
 	router.MustAdd("*", func(h *rod.Hijack) {
@@ -203,11 +215,11 @@ type Browser struct {
 }
 
 type browserConnection struct {
-	mu             sync.Mutex
-	browser        *rod.Browser
-	laneProfiles   map[string]browserprofile.Profile
-	authCancel     context.CancelFunc
-	authStopped    chan struct{}
+	mu           sync.Mutex
+	browser      *rod.Browser
+	laneProfiles map[string]browserprofile.Profile
+	authCancel   context.CancelFunc
+	authStopped  chan struct{}
 }
 
 // NewBrowser launches a new Chromium process via Rod launcher and returns a
@@ -437,27 +449,40 @@ func (b *Browser) startProxyAuthListener(browser *rod.Browser) error {
 		// listenCtx is cancelled. We close `started` after EachEvent has
 		// installed its handlers but before we wait, so the caller can safely
 		// enable the Fetch domain without racing the listener install.
+		//
+		// Each ack runs in its own goroutine. EachEvent invokes our callbacks
+		// sequentially on a single dispatch goroutine, and each ack performs a
+		// synchronous CDP roundtrip. Under concurrent load (e.g. mega search
+		// fanning out 5 engines through one Chrome) sequential dispatch
+		// becomes the bottleneck — Chrome times out paused requests faster
+		// than we can ack them, producing "Invalid InterceptionId" errors and
+		// stalled navigations. Acks for distinct RequestIDs are independent,
+		// so dispatching them concurrently is safe.
 		wait := scoped.EachEvent(
 			func(e *proto.FetchAuthRequired) bool {
-				resp := proto.FetchAuthChallengeResponseResponseProvideCredentials
-				err := proto.FetchContinueWithAuth{
-					RequestID: e.RequestID,
-					AuthChallengeResponse: &proto.FetchAuthChallengeResponse{
-						Response: resp,
-						Username: username,
-						Password: password,
-					},
-				}.Call(scoped)
-				if err != nil && !errors.Is(err, context.Canceled) {
-					logrus.WithError(err).Debug("Proxy auth response failed")
-				}
+				go func(requestID proto.FetchRequestID) {
+					resp := proto.FetchAuthChallengeResponseResponseProvideCredentials
+					err := proto.FetchContinueWithAuth{
+						RequestID: requestID,
+						AuthChallengeResponse: &proto.FetchAuthChallengeResponse{
+							Response: resp,
+							Username: username,
+							Password: password,
+						},
+					}.Call(scoped)
+					if err != nil && !errors.Is(err, context.Canceled) {
+						logrus.WithError(err).Debug("Proxy auth response failed")
+					}
+				}(e.RequestID)
 				return false
 			},
 			func(e *proto.FetchRequestPaused) bool {
-				err := proto.FetchContinueRequest{RequestID: e.RequestID}.Call(scoped)
-				if err != nil && !errors.Is(err, context.Canceled) {
-					logrus.WithError(err).Debug("Continue paused request failed")
-				}
+				go func(requestID proto.FetchRequestID) {
+					err := proto.FetchContinueRequest{RequestID: requestID}.Call(scoped)
+					if err != nil && !errors.Is(err, context.Canceled) {
+						logrus.WithError(err).Debug("Continue paused request failed")
+					}
+				}(e.RequestID)
 				return false
 			},
 		)
@@ -847,6 +872,13 @@ type mainDocumentStatusWatcher struct {
 	status int
 }
 
+type networkUsageWatcher struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+var pageNetworkUsageWatchers sync.Map
+
 func startMainDocumentStatusWatcher(ctx context.Context, page *rod.Page) *mainDocumentStatusWatcher {
 	watchCtx, cancel := context.WithCancel(EnsureContext(ctx))
 	watcher := &mainDocumentStatusWatcher{
@@ -873,6 +905,67 @@ func startMainDocumentStatusWatcher(ctx context.Context, page *rod.Page) *mainDo
 }
 
 func (w *mainDocumentStatusWatcher) Stop() {
+	if w == nil {
+		return
+	}
+	w.cancel()
+	select {
+	case <-w.done:
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func startNetworkUsageWatcher(ctx context.Context, page *rod.Page) *networkUsageWatcher {
+	if networkUsageFromContext(ctx) == nil {
+		return nil
+	}
+	if err := (proto.NetworkEnable{}).Call(page); err != nil {
+		WithRequest(ctx).WithError(err).Debug("Enable network usage tracking failed")
+		return nil
+	}
+
+	watchCtx, cancel := context.WithCancel(EnsureContext(ctx))
+	watcher := &networkUsageWatcher{
+		cancel: cancel,
+		done:   make(chan struct{}),
+	}
+
+	wait := page.Context(watchCtx).EachEvent(func(e *proto.NetworkLoadingFinished) bool {
+		if e != nil && e.EncodedDataLength > 0 {
+			AddNetworkBytes(ctx, int64(e.EncodedDataLength))
+		}
+		return false
+	})
+
+	go func() {
+		defer close(watcher.done)
+		wait()
+	}()
+
+	return watcher
+}
+
+func rememberNetworkUsageWatcher(page *rod.Page, watcher *networkUsageWatcher) {
+	if page == nil || watcher == nil {
+		return
+	}
+	pageNetworkUsageWatchers.Store(page, watcher)
+}
+
+func stopNetworkUsageWatcher(page *rod.Page) {
+	if page == nil {
+		return
+	}
+	raw, ok := pageNetworkUsageWatchers.LoadAndDelete(page)
+	if !ok {
+		return
+	}
+	if watcher, ok := raw.(*networkUsageWatcher); ok {
+		watcher.Stop()
+	}
+}
+
+func (w *networkUsageWatcher) Stop() {
 	if w == nil {
 		return
 	}
@@ -1021,6 +1114,7 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	// context first causes Chrome to kill the page target before our Close call,
 	// producing a spurious "target closed" error on the page.Close() that follows.
 	closeOnErr := func() {
+		stopNetworkUsageWatcher(page)
 		if cerr := page.Close(); cerr != nil && !isBrowserClosedError(cerr) {
 			WithRequest(ctx).WithError(cerr).Debug("Close page after navigate error failed")
 		}
@@ -1043,6 +1137,12 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	if err := b.configureRequestBlocking(ctx, page); err != nil {
 		closeOnErr()
 		return nil, fmt.Errorf("configure request blocking failed: %w", err)
+	}
+	networkUsageWatcher := startNetworkUsageWatcher(ctx, page)
+	if b.LeavePageOpen {
+		defer networkUsageWatcher.Stop()
+	} else {
+		rememberNetworkUsageWatcher(page, networkUsageWatcher)
 	}
 	statusWatcher := startMainDocumentStatusWatcher(ctx, page)
 	defer statusWatcher.Stop()
@@ -1122,6 +1222,10 @@ func (b *Browser) Close() error {
 	return nil
 }
 
+func (b *Browser) ClosePage(ctx context.Context, page *rod.Page, timeout time.Duration) error {
+	return ClosePageWithTimeout(ctx, page, timeout)
+}
+
 func isBrowserClosedError(err error) bool {
 	if err == nil {
 		return false
@@ -1138,6 +1242,7 @@ func ClosePageWithTimeout(ctx context.Context, page *rod.Page, timeout time.Dura
 	if page == nil {
 		return nil
 	}
+	stopNetworkUsageWatcher(page)
 	if timeout <= 0 {
 		timeout = time.Second
 	}

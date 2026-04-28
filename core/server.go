@@ -8,6 +8,7 @@ import (
 	"html"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -22,6 +23,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
+
+var credentialedURLPattern = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s/@]+(?::[^\s/@]*)?@[^\s]+`)
 
 // DefaultFingerprintArtifactDir is the artifact directory used when none is
 // configured. It is relative to the server's working directory at start time.
@@ -77,6 +80,12 @@ type ServerOptions struct {
 	FingerprintBrowserOpts BrowserOpts
 	// Resilience defines retry/circuit-breaker/proxy strategy settings.
 	Resilience ResilientConfig
+	// MegaTimeout bounds total wait time for a /mega/* request. When a
+	// mega request exceeds this deadline, engines that have already
+	// responded contribute their results and slower engines are reported
+	// as failed with a context-deadline error. Zero disables the bound
+	// (legacy behavior — wait until the slowest engine finishes).
+	MegaTimeout time.Duration
 }
 
 // DefaultServerOptions returns production-oriented defaults for cache, CORS,
@@ -94,7 +103,8 @@ func DefaultServerOptions() ServerOptions {
 			IsHeadless: true,
 			Timeout:    30 * time.Second,
 		},
-		Resilience: DefaultResilientConfig(),
+		Resilience:  DefaultResilientConfig(),
+		MegaTimeout: 90 * time.Second,
 	}
 }
 
@@ -179,8 +189,9 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 
 func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isImage bool) error {
 	startedAt := time.Now()
-	requestCtx := WithEngine(c.UserContext(), engine.Name())
+	requestCtx := WithNetworkUsage(WithEngine(c.UserContext(), engine.Name()))
 	c.SetUserContext(requestCtx)
+	defer setNetworkBytesHeader(c, requestCtx)
 
 	q := Query{}
 	if err := q.InitFromContext(c); err != nil {
@@ -340,17 +351,27 @@ func mapSearchError(err error) searchErrorSpec {
 		return searchErrorSpec{status: fiber.StatusBadGateway, code: "parser_failure", message: "parser failure"}
 	case errors.Is(err, ErrEngineInternal):
 		return searchErrorSpec{status: fiber.StatusBadGateway, code: "engine_internal", message: "engine internal error"}
+	case errors.Is(err, ErrAllEnginesFailed):
+		return searchErrorSpec{status: fiber.StatusBadGateway, code: "all_engines_failed", message: "all search engines failed"}
+	case errors.Is(err, ErrCircuitOpen):
+		return searchErrorSpec{status: fiber.StatusServiceUnavailable, code: "circuit_open", message: "engine circuit breaker is open"}
+	case errors.Is(err, context.DeadlineExceeded):
+		return searchErrorSpec{status: fiber.StatusGatewayTimeout, code: "request_timeout", message: "request timed out"}
+	case errors.Is(err, context.Canceled):
+		return searchErrorSpec{status: fiber.StatusServiceUnavailable, code: "request_canceled", message: "request canceled"}
 	}
 	return searchErrorSpec{status: fiber.StatusBadGateway, code: "engine_internal", message: err.Error()}
 }
 
-func searchAPIError(err error, engineName string, q Query, proxyMeta ProxyExecutionMeta) error {
+func searchAPIError(err error, engineName string, q Query, proxyMeta ProxyExecutionMeta) *APIError {
 	spec := mapSearchError(err)
+	meta := searchErrorMeta(engineName, q, proxyMeta)
+	addErrorDetail(meta, err, spec.message, q)
 	return &APIError{
 		HTTPStatus: spec.status,
 		ErrorCode:  spec.code,
 		Message:    spec.message,
-		Meta:       searchErrorMeta(engineName, q, proxyMeta),
+		Meta:       meta,
 	}
 }
 
@@ -379,6 +400,45 @@ func searchErrorMeta(engineName string, q Query, proxyMeta ProxyExecutionMeta) m
 		meta["proxy_session_id"] = q.ProxySessionID
 	}
 	return meta
+}
+
+func addErrorDetail(meta map[string]interface{}, err error, message string, q Query) {
+	if err == nil {
+		return
+	}
+	detail := sanitizeErrorDetail(err.Error(), q)
+	if detail == "" || detail == message {
+		return
+	}
+	meta["error_detail"] = detail
+}
+
+func engineErrorDetail(engineName string, err error, q Query) EngineErrorDetail {
+	spec := mapSearchError(err)
+	return EngineErrorDetail{
+		Engine:  engineName,
+		Error:   spec.code,
+		Message: sanitizeErrorDetail(err.Error(), q),
+	}
+}
+
+func sanitizeErrorDetail(detail string, q Query) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return ""
+	}
+	if q.ProxyURL != "" {
+		detail = strings.ReplaceAll(detail, q.ProxyURL, MaskProxyURL(q.ProxyURL))
+	}
+	return maskCredentialedURLs(detail)
+}
+
+func maskCredentialedURLs(detail string) string {
+	return credentialedURLPattern.ReplaceAllStringFunc(detail, func(raw string) string {
+		trimmed := strings.TrimRight(raw, `.,;)]}`)
+		suffix := strings.TrimPrefix(raw, trimmed)
+		return MaskProxyURL(trimmed) + suffix
+	})
 }
 
 // cacheEnvelopeIfEligible stores the envelope JSON and returns the cache status header value.
@@ -536,12 +596,16 @@ func (s *Server) handleCircuitBreakerStats(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleFingerprintCheck(c *fiber.Ctx) error {
+	requestCtx := WithNetworkUsage(WithEngine(c.UserContext(), "fingerprint"))
+	c.SetUserContext(requestCtx)
+	defer setNetworkBytesHeader(c, requestCtx)
+
 	req, err := s.parseFingerprintCheckRequest(c)
 	if err != nil {
 		return err
 	}
 
-	runCtx, cancel := context.WithTimeout(c.UserContext(), time.Duration(req.timeoutMs)*time.Millisecond)
+	runCtx, cancel := context.WithTimeout(requestCtx, time.Duration(req.timeoutMs)*time.Millisecond)
 	defer cancel()
 
 	browser, err := NewBrowser(req.browserOpts)
@@ -721,17 +785,18 @@ type MegaSearchResult struct {
 }
 
 func (s *Server) handleMegaSearch(c *fiber.Ctx) error {
-	return s.handleMegaEndpoint(c, "search", s.resilient.SearchAllParallel)
+	return s.handleMegaEndpoint(c, "search", s.resilient.searchAllParallelDetailed)
 }
 
 func (s *Server) handleMegaImage(c *fiber.Ctx) error {
-	return s.handleMegaEndpoint(c, "image", s.resilient.SearchAllImageParallel)
+	return s.handleMegaEndpoint(c, "image", s.resilient.searchAllImageParallelDetailed)
 }
 
-func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(context.Context, Query, []SearchEngine) ([]MegaSearchResult, []string, []string)) error {
+func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(context.Context, Query, []SearchEngine) ([]MegaSearchResult, []string, []EngineErrorDetail)) error {
 	startedAt := time.Now()
-	requestCtx := WithEngine(c.UserContext(), "mega")
+	requestCtx := WithNetworkUsage(WithEngine(c.UserContext(), "mega"))
 	c.SetUserContext(requestCtx)
+	defer setNetworkBytesHeader(c, requestCtx)
 
 	q := Query{}
 	if err := q.InitFromContext(c); err != nil {
@@ -788,11 +853,28 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 		}
 	}
 
-	rawResults, _, enginesFailed := run(requestCtx, q, enginesToUse)
+	runCtx := requestCtx
+	if s.opts.MegaTimeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(requestCtx, s.opts.MegaTimeout)
+		defer cancel()
+	}
+	rawResults, _, engineErrors := run(runCtx, q, enginesToUse)
+	enginesFailed := engineErrorNames(engineErrors)
+	if len(engineErrors) == len(enginesToUse) {
+		err := fmt.Errorf("%w: %s", ErrAllEnginesFailed, strings.Join(enginesFailed, ","))
+		apiErr := searchAPIError(err, "mega", q, ProxyExecutionMeta{})
+		apiErr.Meta["engine_errors"] = engineErrors
+		WithRequest(requestCtx).WithFields(logrus.Fields{
+			"action": action, "engines": engineNamesJoined,
+		}).WithError(err).Error("Mega search failed")
+		return apiErr
+	}
 
 	if action == "image" {
 		env := NewImageEnvelope(q, requestID, startedAt, engineNames)
 		env.Meta.EnginesFailed = enginesFailed
+		env.Meta.EngineErrors = engineErrors
 		for _, r := range rawResults {
 			ectx := EnrichContext{Engine: r.Engine, Query: q}
 			env.Results = append(env.Results, EnrichImageResult(r.SearchResult, ectx))
@@ -821,6 +903,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 	dedupedRaw := s.deduplicateMegaResults(rawResults)
 	env := NewEnvelope(q, requestID, startedAt, engineNames)
 	env.Meta.EnginesFailed = enginesFailed
+	env.Meta.EngineErrors = engineErrors
 	for _, r := range dedupedRaw {
 		ectx := EnrichContext{Engine: r.Engine, Query: q}
 		env.Results = append(env.Results, EnrichResult(r.SearchResult, ectx))
@@ -841,6 +924,14 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 		"results_count": len(env.Results),
 	}).Info("Mega search completed")
 	return sendEnvelope(c, format, env)
+}
+
+func engineErrorNames(details []EngineErrorDetail) []string {
+	names := make([]string, 0, len(details))
+	for _, d := range details {
+		names = append(names, d.Engine)
+	}
+	return names
 }
 
 func (s *Server) handleListEngines(c *fiber.Ctx) error {
@@ -1114,6 +1205,10 @@ func (s *Server) applyProxyHeaders(c *fiber.Ctx, meta ProxyExecutionMeta) {
 		c.Set("X-Proxy-Tag", tag)
 	}
 	c.Set("X-Proxy-Used", used)
+}
+
+func setNetworkBytesHeader(c *fiber.Ctx, ctx context.Context) {
+	c.Set("X-Network-Bytes", strconv.FormatInt(NetworkBytesFromContext(ctx), 10))
 }
 
 func (s *Server) validateRequestProxyURL(q *Query) error {
