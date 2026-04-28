@@ -12,6 +12,7 @@ import (
 	"github.com/karust/openserp/bing"
 	"github.com/karust/openserp/core"
 	"github.com/karust/openserp/duckduckgo"
+	"github.com/karust/openserp/ecosia"
 	"github.com/karust/openserp/google"
 	"github.com/karust/openserp/yandex"
 	"github.com/sirupsen/logrus"
@@ -21,7 +22,7 @@ import (
 var searchCMD = &cobra.Command{
 	Use:     "search",
 	Aliases: []string{"find"},
-	Short:   "Search results using chosen web search engine (google, yandex, baidu, bing, duckduckgo)",
+	Short:   "Search results using chosen web search engine (google, yandex, baidu, bing, duckduckgo, ecosia)",
 	Args:    cobra.MatchAll(cobra.OnlyValidArgs, cobra.ExactArgs(2)),
 	Run:     search,
 }
@@ -142,6 +143,8 @@ func searchBrowser(engineType string, query core.Query, browserProxyURL string, 
 		engine = bing.New(*browser, config.BingConfig.SearchEngineOptions)
 	case "duckduckgo":
 		engine = duckduckgo.New(*browser, config.DuckDuckGoConfig.SearchEngineOptions)
+	case "ecosia":
+		engine = ecosia.New(*browser, config.EcosiaConfig.SearchEngineOptions)
 	default:
 		return nil, fmt.Errorf("no %q search engine found", engineType)
 	}
@@ -160,6 +163,8 @@ func searchRaw(engineType string, query core.Query) ([]core.SearchResult, error)
 		return google.Search(ctx, query)
 	case "baidu":
 		return baidu.Search(ctx, query)
+	case "ecosia":
+		return ecosia.Search(ctx, query)
 	case "bing":
 		logrus.Warn("Bing does not support raw HTTP requests mode. Please use browser mode instead.")
 		return nil, fmt.Errorf("bing does not support raw requests mode")
