@@ -153,6 +153,21 @@ func blockedResourceTypeSet(types []proto.NetworkResourceType) map[proto.Network
 	return out
 }
 
+func proxyAuthFetchPatterns() []*proto.FetchRequestPattern {
+	return []*proto.FetchRequestPattern{
+		{
+			URLPattern:   "http://*/*",
+			ResourceType: proto.NetworkResourceTypeDocument,
+			RequestStage: proto.FetchRequestStageRequest,
+		},
+		{
+			URLPattern:   "https://*/*",
+			ResourceType: proto.NetworkResourceTypeDocument,
+			RequestStage: proto.FetchRequestStageRequest,
+		},
+	}
+}
+
 func (b *Browser) configureRequestBlocking(ctx context.Context, page *rod.Page) error {
 	if !b.BlockTrackers && len(b.BlockResourceTypes) == 0 {
 		return nil
@@ -198,7 +213,9 @@ func (b *Browser) configureRequestBlocking(ctx context.Context, page *rod.Page) 
 	// Stop the router when the page context is done to avoid goroutine leak.
 	go func() {
 		<-ctx.Done()
-		router.MustStop()
+		if err := router.Stop(); err != nil && !errors.Is(err, context.Canceled) && !isBrowserClosedError(err) {
+			WithRequest(ctx).WithError(err).Debug("Stop request-blocking router failed")
+		}
 	}()
 
 	return nil
@@ -491,7 +508,10 @@ func (b *Browser) startProxyAuthListener(browser *rod.Browser) error {
 	}()
 
 	<-started
-	if err := (proto.FetchEnable{HandleAuthRequests: true}).Call(browser); err != nil {
+	if err := (proto.FetchEnable{
+		Patterns:           proxyAuthFetchPatterns(),
+		HandleAuthRequests: true,
+	}).Call(browser); err != nil {
 		cancel()
 		<-stopped
 		state.authCancel = nil

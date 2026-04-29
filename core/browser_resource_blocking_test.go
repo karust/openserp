@@ -51,6 +51,25 @@ func TestShouldBlockResourceType(t *testing.T) {
 	}
 }
 
+func TestProxyAuthFetchPatternsOnlyInterceptDocuments(t *testing.T) {
+	patterns := proxyAuthFetchPatterns()
+	if len(patterns) != 2 {
+		t.Fatalf("expected 2 proxy auth fetch patterns, got %d", len(patterns))
+	}
+
+	for _, pattern := range patterns {
+		if pattern.URLPattern != "http://*/*" && pattern.URLPattern != "https://*/*" {
+			t.Fatalf("unexpected proxy auth URL pattern: %q", pattern.URLPattern)
+		}
+		if pattern.ResourceType != proto.NetworkResourceTypeDocument {
+			t.Fatalf("expected document-only proxy auth interception, got %s", pattern.ResourceType)
+		}
+		if pattern.RequestStage != proto.FetchRequestStageRequest {
+			t.Fatalf("expected request-stage proxy auth interception, got %s", pattern.RequestStage)
+		}
+	}
+}
+
 func TestParseBlockedResourceTypes(t *testing.T) {
 	got, err := ParseBlockedResourceTypes("image,font,css,js,media")
 	if err != nil {
