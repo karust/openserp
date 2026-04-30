@@ -98,6 +98,12 @@ func WithRequest(ctx context.Context) *logrus.Entry {
 	if queryHash, ok := ctx.Value(queryHashContextKey).(string); ok && strings.TrimSpace(queryHash) != "" {
 		fields["query_hash"] = strings.TrimSpace(queryHash)
 	}
+	profileIDs := BrowserProfileIDsFromContext(ctx)
+	if len(profileIDs) == 1 {
+		fields["browser_profile_id"] = profileIDs[0]
+	} else if len(profileIDs) > 1 {
+		fields["browser_profile_ids"] = strings.Join(profileIDs, ",")
+	}
 
 	return logrus.WithFields(fields)
 }

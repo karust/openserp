@@ -1144,6 +1144,8 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	}
 
 	profile, laneKey := b.laneProfile(ctx, browser)
+	SetBrowserProfileID(ctx, profile.ID)
+	WithRequest(ctx).WithField("lane_id", laneKey).Info("Browser profile selected")
 	if err := applyProfile(page, profile); err != nil {
 		closeOnErr()
 		return nil, fmt.Errorf("apply profile %s (%s) failed: %w", profile.ID, laneKey, err)

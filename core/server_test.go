@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -606,6 +607,61 @@ func TestDedicatedEndpointReturnsNetworkBytesHeader(t *testing.T) {
 	}
 	if got := resp.Header.Get("X-Network-Bytes"); got != "123" {
 		t.Fatalf("expected X-Network-Bytes=123, got %q", got)
+	}
+}
+
+func TestDedicatedEndpointReturnsBrowserProfileHeader(t *testing.T) {
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(ctx context.Context, q Query) ([]SearchResult, error) {
+			SetBrowserProfileID(ctx, "chrome-win-us")
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7212, opts, engine)
+
+	resp := request(t, srv, "/google/search?text=golang")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get(browserProfileIDHeader); got != "chrome-win-us" {
+		t.Fatalf("expected %s=chrome-win-us, got %q", browserProfileIDHeader, got)
+	}
+}
+
+func TestMegaEndpointReturnsBrowserProfileHeader(t *testing.T) {
+	google := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(ctx context.Context, q Query) ([]SearchResult, error) {
+			SetBrowserProfileID(ctx, "chrome-win-us")
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+	bing := &engineMock{
+		name:        "bing",
+		initialized: true,
+		searchFn: func(ctx context.Context, q Query) ([]SearchResult, error) {
+			SetBrowserProfileID(ctx, "chrome-linux-us")
+			return []SearchResult{{Rank: 1, URL: "https://example.com/bing", Title: "bing"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7213, opts, google, bing)
+
+	resp := request(t, srv, "/mega/search?text=golang&engines=google,bing")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	got := strings.Split(resp.Header.Get(browserProfileIDHeader), ",")
+	if len(got) != 2 || !slices.Contains(got, "chrome-win-us") || !slices.Contains(got, "chrome-linux-us") {
+		t.Fatalf("expected both profile IDs, got %q", got)
 	}
 }
 

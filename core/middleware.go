@@ -26,7 +26,9 @@ type CORSConfig struct {
 	MaxAge       int
 }
 
-const exposedResponseHeaders = "X-Request-ID, X-Cache, X-Fallback-Engine, X-Proxy-Mode, X-Proxy-Tag, X-Proxy-Used, X-Network-Bytes"
+const browserProfileIDHeader = "X-Browser-Profile-Id"
+
+const exposedResponseHeaders = "X-Request-ID, X-Cache, X-Fallback-Engine, X-Proxy-Mode, X-Proxy-Tag, X-Proxy-Used, X-Network-Bytes, " + browserProfileIDHeader
 
 func DefaultCORSConfig() CORSConfig {
 	return CORSConfig{

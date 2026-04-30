@@ -72,6 +72,8 @@ paths:
               $ref: "#/components/headers/XProxyUsed"
             X-Network-Bytes:
               $ref: "#/components/headers/XNetworkBytes"
+            X-Browser-Profile-Id:
+              $ref: "#/components/headers/XBrowserProfileID"
           content:
             application/json:
               schema:
@@ -189,6 +191,8 @@ paths:
               $ref: "#/components/headers/XProxyUsed"
             X-Network-Bytes:
               $ref: "#/components/headers/XNetworkBytes"
+            X-Browser-Profile-Id:
+              $ref: "#/components/headers/XBrowserProfileID"
           content:
             application/json:
               schema:
@@ -256,6 +260,8 @@ paths:
               $ref: "#/components/headers/XProxyUsed"
             X-Network-Bytes:
               $ref: "#/components/headers/XNetworkBytes"
+            X-Browser-Profile-Id:
+              $ref: "#/components/headers/XBrowserProfileID"
           content:
             application/json:
               schema:
@@ -323,6 +329,8 @@ paths:
               $ref: "#/components/headers/XProxyUsed"
             X-Network-Bytes:
               $ref: "#/components/headers/XNetworkBytes"
+            X-Browser-Profile-Id:
+              $ref: "#/components/headers/XBrowserProfileID"
           content:
             application/json:
               schema:
@@ -692,6 +700,12 @@ components:
         type: integer
         format: int64
         minimum: 0
+    XBrowserProfileID:
+      description: >
+        Browser profile ID selected for browser-mode execution. Mega endpoints may
+        return a comma-separated list when multiple profiles were used.
+      schema:
+        type: string
   responses:
     BadRequestError:
       description: Invalid request parameters

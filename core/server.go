@@ -189,9 +189,10 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 
 func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isImage bool) error {
 	startedAt := time.Now()
-	requestCtx := WithNetworkUsage(WithEngine(c.UserContext(), engine.Name()))
+	requestCtx := withRequestUsage(c.UserContext(), engine.Name())
 	c.SetUserContext(requestCtx)
 	defer setNetworkBytesHeader(c, requestCtx)
+	defer setBrowserProfileHeader(c, requestCtx)
 
 	q := Query{}
 	if err := q.InitFromContext(c); err != nil {
@@ -596,9 +597,10 @@ func (s *Server) handleCircuitBreakerStats(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleFingerprintCheck(c *fiber.Ctx) error {
-	requestCtx := WithNetworkUsage(WithEngine(c.UserContext(), "fingerprint"))
+	requestCtx := withRequestUsage(c.UserContext(), "fingerprint")
 	c.SetUserContext(requestCtx)
 	defer setNetworkBytesHeader(c, requestCtx)
+	defer setBrowserProfileHeader(c, requestCtx)
 
 	req, err := s.parseFingerprintCheckRequest(c)
 	if err != nil {
@@ -794,9 +796,10 @@ func (s *Server) handleMegaImage(c *fiber.Ctx) error {
 
 func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(context.Context, Query, []SearchEngine) ([]MegaSearchResult, []string, []EngineErrorDetail)) error {
 	startedAt := time.Now()
-	requestCtx := WithNetworkUsage(WithEngine(c.UserContext(), "mega"))
+	requestCtx := withRequestUsage(c.UserContext(), "mega")
 	c.SetUserContext(requestCtx)
 	defer setNetworkBytesHeader(c, requestCtx)
+	defer setBrowserProfileHeader(c, requestCtx)
 
 	q := Query{}
 	if err := q.InitFromContext(c); err != nil {
@@ -1209,6 +1212,18 @@ func (s *Server) applyProxyHeaders(c *fiber.Ctx, meta ProxyExecutionMeta) {
 
 func setNetworkBytesHeader(c *fiber.Ctx, ctx context.Context) {
 	c.Set("X-Network-Bytes", strconv.FormatInt(NetworkBytesFromContext(ctx), 10))
+}
+
+func setBrowserProfileHeader(c *fiber.Ctx, ctx context.Context) {
+	profileIDs := BrowserProfileIDsFromContext(ctx)
+	if len(profileIDs) == 0 {
+		return
+	}
+	c.Set(browserProfileIDHeader, strings.Join(profileIDs, ","))
+}
+
+func withRequestUsage(ctx context.Context, engine string) context.Context {
+	return WithBrowserProfileUsage(WithNetworkUsage(WithEngine(ctx, engine)))
 }
 
 func (s *Server) validateRequestProxyURL(q *Query) error {
