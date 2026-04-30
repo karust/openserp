@@ -38,7 +38,7 @@ var sel = struct {
 	Timeout string
 	Results string
 }{
-	Captcha: "div.passMod_dialog-body",
+	Captcha: "div.passMod_dialog-wrapper",
 	Timeout: "button.timeout-button",
 	Results: "div.c-container.new-pmd",
 }
@@ -80,11 +80,24 @@ func (baid *Baidu) isTimeout(page *rod.Page) bool {
 	return has
 }
 
+func (baid *Baidu) classifyBlockPage(page *rod.Page, url string) error {
+	if baid.isCaptcha(page) {
+		baid.logger.Error("Captcha detected: %s", url)
+		return core.ErrCaptcha
+	}
+	if baid.isTimeout(page) {
+		baid.logger.Error("Timeout occurred: %s", url)
+		return core.ErrSearchTimeout
+	}
+	return nil
+}
+
 // Search executes a Baidu web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.WithEngine(core.EnsureContext(ctx), baid.Name())
 	ctx = core.WithProfileRegion(ctx, query.LangCode)
+	ctx = core.WithMinimalBrowserProfile(ctx)
 	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	scoped := *baid
 	scoped.logger = baid.logger.WithRequest(ctx)
@@ -121,6 +134,10 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 
 	searchRes, err := page.Timeout(baid.Timeout).Search(sel.Results)
 	if err != nil {
+		if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
+			closePage()
+			return nil, blockErr
+		}
 		closePage()
 		baid.logger.Error("Cannot parse search results: %s", err)
 		return nil, core.ErrParser
@@ -128,15 +145,11 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 
 	// Check why no results, maybe captcha?
 	if searchRes == nil {
-		closePage()
-
-		if baid.isCaptcha(page) {
-			baid.logger.Error("Captcha detected: %s", url)
-			return nil, core.ErrCaptcha
-		} else if baid.isTimeout(page) {
-			baid.logger.Error("Timeout occurred: %s", url)
-			return nil, core.ErrCaptcha
+		if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
+			closePage()
+			return nil, blockErr
 		}
+		closePage()
 		return nil, nil
 	}
 
@@ -189,6 +202,7 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
 	ctx = core.WithEngine(core.EnsureContext(ctx), baid.Name())
 	ctx = core.WithProfileRegion(ctx, query.LangCode)
+	ctx = core.WithMinimalBrowserProfile(ctx)
 	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	scoped := *baid
 	scoped.logger = baid.logger.WithRequest(ctx)
@@ -231,6 +245,10 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 
 		result, err := page.Timeout(baid.Timeout).Search("body > pre")
 		if err != nil {
+			if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
+				closePage()
+				return nil, blockErr
+			}
 			closePage()
 			baid.logger.Error("Cannot parse search results: %s", err)
 			return nil, core.ErrParser
@@ -238,15 +256,11 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 
 		// Check why no results, maybe captcha?
 		if result == nil {
-			closePage()
-
-			if baid.isCaptcha(page) {
-				baid.logger.Error("Captcha detected: %s", url)
-				return nil, core.ErrCaptcha
-			} else if baid.isTimeout(page) {
-				baid.logger.Error("Timeout occurred: %s", url)
-				return nil, core.ErrCaptcha
+			if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
+				closePage()
+				return nil, blockErr
 			}
+			closePage()
 			return nil, nil
 		}
 

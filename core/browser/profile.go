@@ -4,8 +4,10 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -35,6 +37,10 @@ type Profile struct {
 	Locale          string         `json:"locale"`
 	Timezone        string         `json:"timezone"`
 	Viewport        Viewport       `json:"viewport"`
+	WebGLVendor     string         `json:"webgl_vendor"`
+	WebGLRenderer   string         `json:"webgl_renderer"`
+	Tags            []string       `json:"tags"`
+	Weight          int            `json:"weight"`
 }
 
 type catalogConfig struct {
@@ -44,10 +50,10 @@ type catalogConfig struct {
 }
 
 const (
-	ProfileChromeWinUS   = "chrome-win-us"
+	ProfileChromeWinUS   = "chrome-win-uhd620"
 	ProfileChromeWinRU   = "chrome-win-ru"
-	ProfileChromeMacUS   = "chrome-macos-us"
-	ProfileChromeLinuxUS = "chrome-linux-us"
+	ProfileChromeMacUS   = "chrome-macos-intel-iris"
+	ProfileChromeLinuxUS = "chrome-linux-mesa-uhd620"
 	ProfileChromeLinuxRU = "chrome-linux-ru"
 )
 
@@ -182,7 +188,19 @@ func Catalog() []Profile {
 	return out
 }
 
+// SelectProfile returns a deterministic profile for the given engine and region.
+// It respects lane_profile_ids overrides and falls back to the OS-preferred default.
+// Used by tests and single-instance callers; internally delegates to SelectProfileForSession with empty salt.
 func SelectProfile(engine string, region string) Profile {
+	return SelectProfileForSession(engine, region, "")
+}
+
+// SelectProfileForSession picks a profile for (engine, region, salt).
+// If a lane_profile_ids override exists it is always honoured.
+// Empty salt picks the first eligible profile (same as SelectProfile).
+// Non-empty salt uses weighted selection seeded by FNV-1a hash of salt,
+// giving each session a stable but varied profile.
+func SelectProfileForSession(engine, region, salt string) Profile {
 	engine = NormalizeEngine(engine)
 	region = NormalizeRegion(region)
 	if region == "" {
@@ -196,7 +214,101 @@ func SelectProfile(engine string, region string) Profile {
 	if ok {
 		return profileByID(profileID)
 	}
-	return profileByID(defaultProfileID(region))
+
+	pool := eligibleProfiles(engine, region)
+	return pickWeighted(pool, salt)
+}
+
+type weightedProfile struct {
+	profile Profile
+	weight  int
+}
+
+// eligibleProfiles builds the weighted pool for (engine, region).
+// Linux profiles are preferred 4x on linux runtime; Windows 4x on windows; macOS 4x on darwin.
+// Profiles tagged "ru" are included only when region == "ru"; "ru"-tagged profiles are excluded otherwise.
+func eligibleProfiles(engine, region string) []weightedProfile {
+	profileCatalogMu.RLock()
+	snap := make([]Profile, 0, len(catalog))
+	for _, p := range catalog {
+		snap = append(snap, p)
+	}
+	profileCatalogMu.RUnlock()
+
+	// Stable ordering so empty-salt picks are deterministic across map iterations.
+	slices.SortFunc(snap, func(a, b Profile) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+
+	goos := runtime.GOOS
+
+	var pool []weightedProfile
+	for _, p := range snap {
+		isRu := slices.Contains(p.Tags, "ru")
+		if region == "ru" && !isRu {
+			continue
+		}
+		if region != "ru" && isRu {
+			continue
+		}
+
+		w := p.Weight
+		if w <= 0 {
+			w = 1
+		}
+
+		platformLower := strings.ToLower(p.Platform)
+		switch goos {
+		case "linux":
+			if platformLower == "linux" {
+				w *= 4
+			}
+		case "windows":
+			if platformLower == "windows" {
+				w *= 4
+			}
+		case "darwin":
+			if platformLower == "macos" {
+				w *= 4
+			}
+		}
+
+		pool = append(pool, weightedProfile{profile: p, weight: w})
+	}
+
+	return pool
+}
+
+// pickWeighted selects a profile from pool using FNV-1a hash of salt modulo total weight.
+// Empty salt returns the first profile in the pool (deterministic for tests).
+func pickWeighted(pool []weightedProfile, salt string) Profile {
+	if len(pool) == 0 {
+		return profileByID(defaultProfileID("us"))
+	}
+	if salt == "" {
+		return pool[0].profile
+	}
+
+	total := 0
+	for _, wp := range pool {
+		total += wp.weight
+	}
+	if total <= 0 {
+		return pool[0].profile
+	}
+
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(salt))
+	idx := int(h.Sum32()) % total
+
+	cumulative := 0
+	for _, wp := range pool {
+		cumulative += wp.weight
+		if idx < cumulative {
+			return wp.profile
+		}
+	}
+	return pool[len(pool)-1].profile
 }
 
 func LaneKey(engine string, region string) string {
@@ -253,6 +365,16 @@ func NormalizeRegion(region string) string {
 	default:
 		return "us"
 	}
+}
+
+// ProfileByID looks up a profile by exact ID. Returns (profile, true) when found,
+// (zero, false) when the ID is not in the catalog. Unlike the internal profileByID,
+// it does not fall back to a default; the caller decides what to do on miss.
+func ProfileByID(profileID string) (Profile, bool) {
+	profileCatalogMu.RLock()
+	defer profileCatalogMu.RUnlock()
+	profile, ok := catalog[strings.TrimSpace(profileID)]
+	return profile, ok
 }
 
 func profileByID(profileID string) Profile {

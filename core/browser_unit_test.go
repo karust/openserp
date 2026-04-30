@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	browserprofile "github.com/karust/openserp/core/browser"
 )
@@ -57,6 +58,40 @@ func TestResolveBrowserBinaryPathRejectsInvalidExplicit(t *testing.T) {
 		return "", false
 	}); err == nil {
 		t.Fatalf("expected error when explicit browser_path points to a directory")
+	}
+}
+
+func TestMinPositiveDuration(t *testing.T) {
+	tests := []struct {
+		name string
+		a    time.Duration
+		b    time.Duration
+		want time.Duration
+	}{
+		{name: "both positive", a: 30 * time.Second, b: 2 * time.Second, want: 2 * time.Second},
+		{name: "first unset", a: 0, b: 2 * time.Second, want: 2 * time.Second},
+		{name: "second unset", a: 30 * time.Second, b: 0, want: 30 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := minPositiveDuration(tt.a, tt.b); got != tt.want {
+				t.Fatalf("minPositiveDuration() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyProfileLanguageHintRewritesTimezone(t *testing.T) {
+	profile := browserprofile.Profile{
+		AcceptLanguage: "ru-RU,ru;q=0.9",
+		NavigatorLangs: []string{"ru-RU"},
+		Locale:         "ru-RU",
+		Timezone:       "Europe/Moscow",
+	}
+	got := applyProfileLanguageHint(profile, "de-DE")
+	if got.Timezone != "Europe/Berlin" {
+		t.Fatalf("expected timezone Europe/Berlin, got %q", got.Timezone)
 	}
 }
 

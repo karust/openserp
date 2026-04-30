@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	browserprofile "github.com/karust/openserp/core/browser"
 	"github.com/karust/openserp/core/fpcheck"
 	"github.com/karust/openserp/core/fpcheck/detectors"
 	apidocs "github.com/karust/openserp/docs"
@@ -193,6 +194,14 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 	c.SetUserContext(requestCtx)
 	defer setNetworkBytesHeader(c, requestCtx)
 	defer setBrowserProfileHeader(c, requestCtx)
+
+	if profileID := strings.TrimSpace(c.Get(useProfileHeader)); profileID != "" {
+		if _, ok := browserprofile.ProfileByID(profileID); !ok {
+			return errInvalidParam(fmt.Sprintf("%s: unknown profile id %q", useProfileHeader, profileID))
+		}
+		requestCtx = WithForcedProfileID(requestCtx, profileID)
+		c.SetUserContext(requestCtx)
+	}
 
 	q := Query{}
 	if err := q.InitFromContext(c); err != nil {
@@ -602,6 +611,14 @@ func (s *Server) handleFingerprintCheck(c *fiber.Ctx) error {
 	defer setNetworkBytesHeader(c, requestCtx)
 	defer setBrowserProfileHeader(c, requestCtx)
 
+	if profileID := strings.TrimSpace(c.Get(useProfileHeader)); profileID != "" {
+		if _, ok := browserprofile.ProfileByID(profileID); !ok {
+			return errInvalidParam(fmt.Sprintf("%s: unknown profile id %q", useProfileHeader, profileID))
+		}
+		requestCtx = WithForcedProfileID(requestCtx, profileID)
+		c.SetUserContext(requestCtx)
+	}
+
 	req, err := s.parseFingerprintCheckRequest(c)
 	if err != nil {
 		return err
@@ -628,7 +645,7 @@ func (s *Server) handleFingerprintCheck(c *fiber.Ctx) error {
 			ArtifactDir: artifactDir,
 		}
 		if req.waitMs > 0 && idx == len(req.detectors)-1 {
-			runOpts.WaitBeforeClose = time.Duration(req.waitMs) * time.Millisecond
+			runOpts.WaitBeforeExtract = time.Duration(req.waitMs) * time.Millisecond
 		}
 
 		report, runErr := fpcheck.RunWithOptions(runCtx, browser, detector, runOpts)
@@ -657,7 +674,8 @@ type fingerprintCheckRequest struct {
 func (s *Server) parseFingerprintCheckRequest(c *fiber.Ctx) (fingerprintCheckRequest, error) {
 	detectorName := strings.TrimSpace(c.Query("detector", "all"))
 	customURL := strings.TrimSpace(c.Query("url", ""))
-	selectedDetectors, err := detectors.Select(detectorName, customURL)
+	customSelector := strings.TrimSpace(c.Query("selector", ""))
+	selectedDetectors, err := detectors.SelectWithCustomSelector(detectorName, customURL, customSelector)
 	if err != nil {
 		return fingerprintCheckRequest{}, fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}

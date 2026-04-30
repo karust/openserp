@@ -5,9 +5,11 @@ package browser_test
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +18,9 @@ import (
 	browserprofile "github.com/karust/openserp/core/browser"
 	"github.com/karust/openserp/testutil"
 )
+
+//go:embed profile_surface_test.js
+var profileSurfaceScript string
 
 func TestProfileCoherence(t *testing.T) {
 	testutil.RequireIntegration(t)
@@ -59,9 +64,9 @@ func TestProfileCoherence(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			expected := browserprofile.SelectProfile(tc.engine, tc.region)
 			ctx := core.WithEngine(context.Background(), tc.engine)
 			ctx = core.WithProfileRegion(ctx, tc.region)
+			ctx = core.WithBrowserProfileUsage(ctx)
 
 			page, err := browser.Navigate(ctx, fixture.URL)
 			if err != nil {
@@ -78,6 +83,8 @@ func TestProfileCoherence(t *testing.T) {
 				t.Fatalf("collect profile surfaces: %v", err)
 			}
 
+			expected := selectedProfileFromContext(t, ctx)
+			expected.UserAgent = expectedUserAgentForRuntime(expected.UserAgent, got.UserAgent)
 			if got.UserAgent != expected.UserAgent {
 				t.Fatalf("navigator.userAgent mismatch:\nexpected: %s\nactual:   %s", expected.UserAgent, got.UserAgent)
 			}
@@ -120,63 +127,48 @@ func TestProfileCoherence(t *testing.T) {
 			if got.WorkerTimezone != got.Timezone {
 				t.Fatalf("worker timezone mismatch: main %q worker %q", got.Timezone, got.WorkerTimezone)
 			}
+			if got.WorkerWebGLVendor != expected.WebGLVendor {
+				t.Fatalf("worker WebGL vendor mismatch: expected %q got %q", expected.WebGLVendor, got.WorkerWebGLVendor)
+			}
+			if got.WorkerWebGLRenderer != expected.WebGLRenderer {
+				t.Fatalf("worker WebGL renderer mismatch: expected %q got %q", expected.WebGLRenderer, got.WorkerWebGLRenderer)
+			}
+			if got.InnerHeight >= got.OuterHeight {
+				t.Fatalf("innerHeight should be smaller than outerHeight, got inner=%d outer=%d", got.InnerHeight, got.OuterHeight)
+			}
+			if got.OuterHeight > got.ScreenAvailHeight {
+				t.Fatalf("outerHeight should fit in screen.availHeight, got outer=%d avail=%d", got.OuterHeight, got.ScreenAvailHeight)
+			}
+			if got.ScreenAvailHeight >= got.ScreenHeight {
+				t.Fatalf("screen.availHeight should be smaller than screen.height, got avail=%d screen=%d", got.ScreenAvailHeight, got.ScreenHeight)
+			}
 		})
 	}
 }
 
 type profileSurface struct {
-	UserAgent                string   `json:"userAgent"`
-	Platform                 string   `json:"platform"`
-	NavigatorPlatform        string   `json:"navigatorPlatform"`
-	NavigatorLanguages       []string `json:"navigatorLanguages"`
-	Timezone                 string   `json:"timezone"`
-	Locale                   string   `json:"locale"`
-	WebdriverType            string   `json:"webdriverType"`
-	WebdriverOwnPropPresent  bool     `json:"webdriverOwnPropPresent"`
-	WorkerUserAgent          string   `json:"workerUserAgent"`
-	WorkerPlatform           string   `json:"workerPlatform"`
-	WorkerNavigatorLangs     []string `json:"workerNavigatorLangs"`
-	WorkerTimezone           string   `json:"workerTimezone"`
+	UserAgent               string   `json:"userAgent"`
+	Platform                string   `json:"platform"`
+	NavigatorPlatform       string   `json:"navigatorPlatform"`
+	NavigatorLanguages      []string `json:"navigatorLanguages"`
+	Timezone                string   `json:"timezone"`
+	Locale                  string   `json:"locale"`
+	WebdriverType           string   `json:"webdriverType"`
+	WebdriverOwnPropPresent bool     `json:"webdriverOwnPropPresent"`
+	WorkerUserAgent         string   `json:"workerUserAgent"`
+	WorkerPlatform          string   `json:"workerPlatform"`
+	WorkerNavigatorLangs    []string `json:"workerNavigatorLangs"`
+	WorkerTimezone          string   `json:"workerTimezone"`
+	WorkerWebGLVendor       string   `json:"workerWebGLVendor"`
+	WorkerWebGLRenderer     string   `json:"workerWebGLRenderer"`
+	InnerHeight             int      `json:"innerHeight"`
+	OuterHeight             int      `json:"outerHeight"`
+	ScreenHeight            int      `json:"screenHeight"`
+	ScreenAvailHeight       int      `json:"screenAvailHeight"`
 }
 
 func browserProfileSurface(page *rod.Page) (profileSurface, error) {
-	result, err := page.Eval(`async () => {
-		const workerData = await new Promise((resolve) => {
-			try {
-				const source = "self.onmessage=()=>{self.postMessage({userAgent:self.navigator.userAgent||'',platform:self.navigator.platform||'',navigatorLanguages:Array.from(self.navigator.languages||[]),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||''});};";
-				const blob = new Blob([source], { type: 'application/javascript' });
-				const url = URL.createObjectURL(blob);
-				const worker = new Worker(url);
-				worker.onmessage = (event) => {
-					resolve(event.data || {});
-					worker.terminate();
-					URL.revokeObjectURL(url);
-				};
-				worker.onerror = () => {
-					resolve({});
-					worker.terminate();
-					URL.revokeObjectURL(url);
-				};
-				worker.postMessage('run');
-			} catch (_) {
-				resolve({});
-			}
-		});
-		return {
-			userAgent: navigator.userAgent || "",
-			platform: navigator.userAgentData ? (navigator.userAgentData.platform || "") : "",
-			navigatorPlatform: navigator.platform || "",
-			navigatorLanguages: Array.from(navigator.languages || []),
-			timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
-			locale: Intl.DateTimeFormat().resolvedOptions().locale || "",
-			webdriverType: typeof navigator.webdriver,
-			webdriverOwnPropPresent: Object.getOwnPropertyNames(navigator).includes('webdriver'),
-			workerUserAgent: workerData.userAgent || "",
-			workerPlatform: workerData.platform || "",
-			workerNavigatorLangs: Array.from(workerData.navigatorLanguages || []),
-			workerTimezone: workerData.timezone || "",
-		};
-	}`)
+	result, err := page.Eval(profileSurfaceScript)
 	if err != nil {
 		return profileSurface{}, err
 	}
@@ -197,4 +189,43 @@ func expectedNavigatorPlatform(platform string) string {
 	default:
 		return "Linux x86_64"
 	}
+}
+
+func selectedProfileFromContext(t *testing.T, ctx context.Context) browserprofile.Profile {
+	t.Helper()
+
+	ids := core.BrowserProfileIDsFromContext(ctx)
+	if len(ids) == 0 {
+		t.Fatal("expected selected browser profile id")
+	}
+	profile, ok := browserprofile.ProfileByID(ids[0])
+	if !ok {
+		t.Fatalf("selected browser profile %q not found", ids[0])
+	}
+	return profile
+}
+
+func expectedUserAgentForRuntime(profileUserAgent, runtimeUserAgent string) string {
+	runtimeChrome := chromeToken(runtimeUserAgent)
+	if runtimeChrome == "" {
+		return profileUserAgent
+	}
+	profileChrome := chromeToken(profileUserAgent)
+	if profileChrome == "" {
+		return profileUserAgent
+	}
+	return strings.Replace(profileUserAgent, profileChrome, runtimeChrome, 1)
+}
+
+func chromeToken(userAgent string) string {
+	const prefix = "Chrome/"
+	start := strings.Index(userAgent, prefix)
+	if start < 0 {
+		return ""
+	}
+	end := strings.IndexByte(userAgent[start:], ' ')
+	if end < 0 {
+		return userAgent[start:]
+	}
+	return userAgent[start : start+end]
 }

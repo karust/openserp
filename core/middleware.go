@@ -27,6 +27,7 @@ type CORSConfig struct {
 }
 
 const browserProfileIDHeader = "X-Browser-Profile-Id"
+const useProfileHeader = "X-Use-Profile"
 
 const exposedResponseHeaders = "X-Request-ID, X-Cache, X-Fallback-Engine, X-Proxy-Mode, X-Proxy-Tag, X-Proxy-Used, X-Network-Bytes, " + browserProfileIDHeader
 
@@ -34,7 +35,7 @@ func DefaultCORSConfig() CORSConfig {
 	return CORSConfig{
 		AllowOrigins: "*",
 		AllowMethods: "GET, POST, OPTIONS",
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Proxy-URL, X-Proxy-Country, X-Proxy-Class, X-Proxy-Provider, X-Proxy-Session-ID, X-Request-ID, X-Tenant",
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Proxy-URL, X-Proxy-Country, X-Proxy-Class, X-Proxy-Provider, X-Proxy-Session-ID, X-Request-ID, X-Tenant, X-Use-Profile",
 		MaxAge:       86400,
 	}
 }

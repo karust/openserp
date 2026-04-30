@@ -1,35 +1,185 @@
 {
   "profiles": [
     {
-      "id": "chrome-win-us",
-      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "id": "chrome-linux-mesa-uhd620",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
       "uach_brands": [
-        {
-          "brand": "Not_A Brand",
-          "version": "24"
-        },
-        {
-          "brand": "Chromium",
-          "version": "136"
-        },
-        {
-          "brand": "Google Chrome",
-          "version": "136"
-        }
+        {"brand": "Not_A Brand", "version": "24"},
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"}
       ],
       "uach_full_version_list": [
-        {
-          "brand": "Not_A Brand",
-          "version": "24.0.0.0"
-        },
-        {
-          "brand": "Chromium",
-          "version": "136.0.0.0"
-        },
-        {
-          "brand": "Google Chrome",
-          "version": "136.0.0.0"
-        }
+        {"brand": "Not_A Brand", "version": "24.0.0.0"},
+        {"brand": "Chromium", "version": "136.0.0.0"},
+        {"brand": "Google Chrome", "version": "136.0.0.0"}
+      ],
+      "platform": "Linux",
+      "platform_version": "6.1.0",
+      "architecture": "x86",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "en-US,en;q=0.9",
+      "navigator_langs": ["en-US"],
+      "locale": "en-US",
+      "timezone": "America/New_York",
+      "viewport": {"width": 1920, "height": 1080},
+      "webgl_vendor": "Intel Inc.",
+      "webgl_renderer": "Mesa Intel(R) UHD Graphics 620 (KBL GT2)",
+      "tags": ["linux", "mesa", "integrated"],
+      "weight": 3
+    },
+    {
+      "id": "chrome-linux-mesa-iris-xe",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {"brand": "Not_A Brand", "version": "24"},
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"}
+      ],
+      "uach_full_version_list": [
+        {"brand": "Not_A Brand", "version": "24.0.0.0"},
+        {"brand": "Chromium", "version": "136.0.0.0"},
+        {"brand": "Google Chrome", "version": "136.0.0.0"}
+      ],
+      "platform": "Linux",
+      "platform_version": "6.1.0",
+      "architecture": "x86",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "en-US,en;q=0.9",
+      "navigator_langs": ["en-US"],
+      "locale": "en-US",
+      "timezone": "America/New_York",
+      "viewport": {"width": 1920, "height": 1080},
+      "webgl_vendor": "Intel Inc.",
+      "webgl_renderer": "Mesa Intel(R) Graphics (RPL-S)",
+      "tags": ["linux", "mesa", "integrated"],
+      "weight": 2
+    },
+    {
+      "id": "chrome-linux-nvidia",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {"brand": "Not_A Brand", "version": "24"},
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"}
+      ],
+      "uach_full_version_list": [
+        {"brand": "Not_A Brand", "version": "24.0.0.0"},
+        {"brand": "Chromium", "version": "136.0.0.0"},
+        {"brand": "Google Chrome", "version": "136.0.0.0"}
+      ],
+      "platform": "Linux",
+      "platform_version": "6.1.0",
+      "architecture": "x86",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "en-US,en;q=0.9",
+      "navigator_langs": ["en-US"],
+      "locale": "en-US",
+      "timezone": "America/New_York",
+      "viewport": {"width": 1920, "height": 1080},
+      "webgl_vendor": "Google Inc. (NVIDIA Corporation)",
+      "webgl_renderer": "ANGLE (NVIDIA Corporation, NVIDIA GeForce GTX 1660 SUPER/PCIe/SSE2, OpenGL 4.5.0 NVIDIA 535.86.05)",
+      "tags": ["linux", "nvidia"],
+      "weight": 2
+    },
+    {
+      "id": "chrome-linux-amd",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {"brand": "Not_A Brand", "version": "24"},
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"}
+      ],
+      "uach_full_version_list": [
+        {"brand": "Not_A Brand", "version": "24.0.0.0"},
+        {"brand": "Chromium", "version": "136.0.0.0"},
+        {"brand": "Google Chrome", "version": "136.0.0.0"}
+      ],
+      "platform": "Linux",
+      "platform_version": "6.1.0",
+      "architecture": "x86",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "en-US,en;q=0.9",
+      "navigator_langs": ["en-US"],
+      "locale": "en-US",
+      "timezone": "America/New_York",
+      "viewport": {"width": 1920, "height": 1080},
+      "webgl_vendor": "Google Inc. (AMD)",
+      "webgl_renderer": "ANGLE (AMD, AMD Radeon RX 6600 (radeonsi, navi23, ACO, DRM 3.42.0, 5.15.0-91-generic), OpenGL 4.6 (Core Profile))",
+      "tags": ["linux", "amd"],
+      "weight": 1
+    },
+    {
+      "id": "chrome-linux-swiftshader",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {"brand": "Not_A Brand", "version": "24"},
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"}
+      ],
+      "uach_full_version_list": [
+        {"brand": "Not_A Brand", "version": "24.0.0.0"},
+        {"brand": "Chromium", "version": "136.0.0.0"},
+        {"brand": "Google Chrome", "version": "136.0.0.0"}
+      ],
+      "platform": "Linux",
+      "platform_version": "6.1.0",
+      "architecture": "x86",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "en-US,en;q=0.9",
+      "navigator_langs": ["en-US"],
+      "locale": "en-US",
+      "timezone": "America/New_York",
+      "viewport": {"width": 1366, "height": 768},
+      "webgl_vendor": "Google Inc. (Google)",
+      "webgl_renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "tags": ["linux", "swiftshader", "headless"],
+      "weight": 1
+    },
+    {
+      "id": "chrome-linux-ru",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {"brand": "Not_A Brand", "version": "24"},
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"}
+      ],
+      "uach_full_version_list": [
+        {"brand": "Not_A Brand", "version": "24.0.0.0"},
+        {"brand": "Chromium", "version": "136.0.0.0"},
+        {"brand": "Google Chrome", "version": "136.0.0.0"}
+      ],
+      "platform": "Linux",
+      "platform_version": "6.0.0",
+      "architecture": "x86",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+      "navigator_langs": ["ru-RU"],
+      "locale": "ru-RU",
+      "timezone": "Europe/Moscow",
+      "viewport": {"width": 1920, "height": 1080},
+      "webgl_vendor": "Intel Inc.",
+      "webgl_renderer": "Mesa Intel(R) UHD Graphics 620 (KBL GT2)",
+      "tags": ["linux", "ru"],
+      "weight": 1
+    },
+    {
+      "id": "chrome-win-uhd620",
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {"brand": "Not_A Brand", "version": "24"},
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"}
+      ],
+      "uach_full_version_list": [
+        {"brand": "Not_A Brand", "version": "24.0.0.0"},
+        {"brand": "Chromium", "version": "136.0.0.0"},
+        {"brand": "Google Chrome", "version": "136.0.0.0"}
       ],
       "platform": "Windows",
       "platform_version": "15.0.0",
@@ -37,46 +187,111 @@
       "bitness": "64",
       "mobile": false,
       "accept_language": "en-US,en;q=0.9",
-      "navigator_langs": [
-        "en-US"
-      ],
+      "navigator_langs": ["en-US"],
       "locale": "en-US",
       "timezone": "America/New_York",
-      "viewport": {
-        "width": 1920,
-        "height": 1080
-      }
+      "viewport": {"width": 1920, "height": 1080},
+      "webgl_vendor": "Intel Inc.",
+      "webgl_renderer": "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "tags": ["windows"],
+      "weight": 2
+    },
+    {
+      "id": "chrome-win-nvidia",
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {"brand": "Not_A Brand", "version": "24"},
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"}
+      ],
+      "uach_full_version_list": [
+        {"brand": "Not_A Brand", "version": "24.0.0.0"},
+        {"brand": "Chromium", "version": "136.0.0.0"},
+        {"brand": "Google Chrome", "version": "136.0.0.0"}
+      ],
+      "platform": "Windows",
+      "platform_version": "15.0.0",
+      "architecture": "x86",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "en-US,en;q=0.9",
+      "navigator_langs": ["en-US"],
+      "locale": "en-US",
+      "timezone": "America/New_York",
+      "viewport": {"width": 1920, "height": 1080},
+      "webgl_vendor": "Google Inc. (NVIDIA)",
+      "webgl_renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "tags": ["windows", "nvidia"],
+      "weight": 2
+    },
+    {
+      "id": "chrome-win-iris-xe",
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {"brand": "Not_A Brand", "version": "24"},
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"}
+      ],
+      "uach_full_version_list": [
+        {"brand": "Not_A Brand", "version": "24.0.0.0"},
+        {"brand": "Chromium", "version": "136.0.0.0"},
+        {"brand": "Google Chrome", "version": "136.0.0.0"}
+      ],
+      "platform": "Windows",
+      "platform_version": "15.0.0",
+      "architecture": "x86",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "en-US,en;q=0.9",
+      "navigator_langs": ["en-US"],
+      "locale": "en-US",
+      "timezone": "America/New_York",
+      "viewport": {"width": 1536, "height": 864},
+      "webgl_vendor": "Google Inc. (Intel)",
+      "webgl_renderer": "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "tags": ["windows", "integrated"],
+      "weight": 1
+    },
+    {
+      "id": "chrome-win-amd",
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {"brand": "Not_A Brand", "version": "24"},
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"}
+      ],
+      "uach_full_version_list": [
+        {"brand": "Not_A Brand", "version": "24.0.0.0"},
+        {"brand": "Chromium", "version": "136.0.0.0"},
+        {"brand": "Google Chrome", "version": "136.0.0.0"}
+      ],
+      "platform": "Windows",
+      "platform_version": "15.0.0",
+      "architecture": "x86",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "en-US,en;q=0.9",
+      "navigator_langs": ["en-US"],
+      "locale": "en-US",
+      "timezone": "America/New_York",
+      "viewport": {"width": 1920, "height": 1080},
+      "webgl_vendor": "Google Inc. (AMD)",
+      "webgl_renderer": "ANGLE (AMD, AMD Radeon RX 6600 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "tags": ["windows", "amd"],
+      "weight": 1
     },
     {
       "id": "chrome-win-ru",
       "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
       "uach_brands": [
-        {
-          "brand": "Not_A Brand",
-          "version": "24"
-        },
-        {
-          "brand": "Chromium",
-          "version": "136"
-        },
-        {
-          "brand": "Google Chrome",
-          "version": "136"
-        }
+        {"brand": "Not_A Brand", "version": "24"},
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"}
       ],
       "uach_full_version_list": [
-        {
-          "brand": "Not_A Brand",
-          "version": "24.0.0.0"
-        },
-        {
-          "brand": "Chromium",
-          "version": "136.0.0.0"
-        },
-        {
-          "brand": "Google Chrome",
-          "version": "136.0.0.0"
-        }
+        {"brand": "Not_A Brand", "version": "24.0.0.0"},
+        {"brand": "Chromium", "version": "136.0.0.0"},
+        {"brand": "Google Chrome", "version": "136.0.0.0"}
       ],
       "platform": "Windows",
       "platform_version": "15.0.0",
@@ -84,46 +299,83 @@
       "bitness": "64",
       "mobile": false,
       "accept_language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-      "navigator_langs": [
-        "ru-RU"
-      ],
+      "navigator_langs": ["ru-RU"],
       "locale": "ru-RU",
       "timezone": "Europe/Moscow",
-      "viewport": {
-        "width": 1920,
-        "height": 1080
-      }
+      "viewport": {"width": 1920, "height": 1080},
+      "webgl_vendor": "Intel Inc.",
+      "webgl_renderer": "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "tags": ["windows", "ru"],
+      "weight": 1
     },
     {
-      "id": "chrome-macos-us",
+      "id": "chrome-macos-m1",
       "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
       "uach_brands": [
-        {
-          "brand": "Not_A Brand",
-          "version": "24"
-        },
-        {
-          "brand": "Chromium",
-          "version": "136"
-        },
-        {
-          "brand": "Google Chrome",
-          "version": "136"
-        }
+        {"brand": "Not_A Brand", "version": "24"},
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"}
       ],
       "uach_full_version_list": [
-        {
-          "brand": "Not_A Brand",
-          "version": "24.0.0.0"
-        },
-        {
-          "brand": "Chromium",
-          "version": "136.0.0.0"
-        },
-        {
-          "brand": "Google Chrome",
-          "version": "136.0.0.0"
-        }
+        {"brand": "Not_A Brand", "version": "24.0.0.0"},
+        {"brand": "Chromium", "version": "136.0.0.0"},
+        {"brand": "Google Chrome", "version": "136.0.0.0"}
+      ],
+      "platform": "macOS",
+      "platform_version": "13.0.0",
+      "architecture": "arm",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "en-US,en;q=0.9",
+      "navigator_langs": ["en-US"],
+      "locale": "en-US",
+      "timezone": "America/New_York",
+      "viewport": {"width": 1440, "height": 900},
+      "webgl_vendor": "Google Inc. (Apple)",
+      "webgl_renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)",
+      "tags": ["macos", "apple-silicon"],
+      "weight": 2
+    },
+    {
+      "id": "chrome-macos-m2",
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {"brand": "Not_A Brand", "version": "24"},
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"}
+      ],
+      "uach_full_version_list": [
+        {"brand": "Not_A Brand", "version": "24.0.0.0"},
+        {"brand": "Chromium", "version": "136.0.0.0"},
+        {"brand": "Google Chrome", "version": "136.0.0.0"}
+      ],
+      "platform": "macOS",
+      "platform_version": "14.0.0",
+      "architecture": "arm",
+      "bitness": "64",
+      "mobile": false,
+      "accept_language": "en-US,en;q=0.9",
+      "navigator_langs": ["en-US"],
+      "locale": "en-US",
+      "timezone": "America/New_York",
+      "viewport": {"width": 1512, "height": 982},
+      "webgl_vendor": "Google Inc. (Apple)",
+      "webgl_renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)",
+      "tags": ["macos", "apple-silicon"],
+      "weight": 2
+    },
+    {
+      "id": "chrome-macos-intel-iris",
+      "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "uach_brands": [
+        {"brand": "Not_A Brand", "version": "24"},
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"}
+      ],
+      "uach_full_version_list": [
+        {"brand": "Not_A Brand", "version": "24.0.0.0"},
+        {"brand": "Chromium", "version": "136.0.0.0"},
+        {"brand": "Google Chrome", "version": "136.0.0.0"}
       ],
       "platform": "macOS",
       "platform_version": "14.0.0",
@@ -131,109 +383,14 @@
       "bitness": "64",
       "mobile": false,
       "accept_language": "en-US,en;q=0.9",
-      "navigator_langs": [
-        "en-US"
-      ],
-      "locale": "en-US",
-      "timezone": "America/Los_Angeles",
-      "viewport": {
-        "width": 1680,
-        "height": 1050
-      }
-    },
-    {
-      "id": "chrome-linux-us",
-      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-      "uach_brands": [
-        {
-          "brand": "Not_A Brand",
-          "version": "24"
-        },
-        {
-          "brand": "Chromium",
-          "version": "136"
-        },
-        {
-          "brand": "Google Chrome",
-          "version": "136"
-        }
-      ],
-      "uach_full_version_list": [
-        {
-          "brand": "Not_A Brand",
-          "version": "24.0.0.0"
-        },
-        {
-          "brand": "Chromium",
-          "version": "136.0.0.0"
-        },
-        {
-          "brand": "Google Chrome",
-          "version": "136.0.0.0"
-        }
-      ],
-      "platform": "Linux",
-      "platform_version": "6.0.0",
-      "architecture": "x86",
-      "bitness": "64",
-      "mobile": false,
-      "accept_language": "en-US,en;q=0.9",
-      "navigator_langs": [
-        "en-US"
-      ],
+      "navigator_langs": ["en-US"],
       "locale": "en-US",
       "timezone": "America/New_York",
-      "viewport": {
-        "width": 1920,
-        "height": 1080
-      }
-    },
-    {
-      "id": "chrome-linux-ru",
-      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-      "uach_brands": [
-        {
-          "brand": "Not_A Brand",
-          "version": "24"
-        },
-        {
-          "brand": "Chromium",
-          "version": "136"
-        },
-        {
-          "brand": "Google Chrome",
-          "version": "136"
-        }
-      ],
-      "uach_full_version_list": [
-        {
-          "brand": "Not_A Brand",
-          "version": "24.0.0.0"
-        },
-        {
-          "brand": "Chromium",
-          "version": "136.0.0.0"
-        },
-        {
-          "brand": "Google Chrome",
-          "version": "136.0.0.0"
-        }
-      ],
-      "platform": "Linux",
-      "platform_version": "6.0.0",
-      "architecture": "x86",
-      "bitness": "64",
-      "mobile": false,
-      "accept_language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-      "navigator_langs": [
-        "ru-RU"
-      ],
-      "locale": "ru-RU",
-      "timezone": "Europe/Moscow",
-      "viewport": {
-        "width": 1920,
-        "height": 1080
-      }
+      "viewport": {"width": 1680, "height": 1050},
+      "webgl_vendor": "Intel Inc.",
+      "webgl_renderer": "Intel Iris OpenGL Engine",
+      "tags": ["macos", "integrated"],
+      "weight": 1
     }
   ],
   "lane_profile_ids": {},

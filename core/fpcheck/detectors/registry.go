@@ -28,13 +28,17 @@ func All() []fpcheck.Detector {
 }
 
 func Select(name string, customURL string) ([]fpcheck.Detector, error) {
+	return SelectWithCustomSelector(name, customURL, "")
+}
+
+func SelectWithCustomSelector(name string, customURL string, customSelector string) ([]fpcheck.Detector, error) {
 	trimmed := strings.ToLower(strings.TrimSpace(name))
 	if trimmed == "" || trimmed == "all" {
 		return All(), nil
 	}
 
 	if IsCustom(trimmed) {
-		customDetector, err := NewCustom(customURL)
+		customDetector, err := NewCustomWithSelector(customURL, customSelector)
 		if err != nil {
 			return nil, err
 		}

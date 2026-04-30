@@ -2472,3 +2472,52 @@ func TestResultIDIsStableAcrossRequests(t *testing.T) {
 		t.Fatalf("expected stable ID across requests, got %q vs %q", e1.Results[0].ID, e2.Results[0].ID)
 	}
 }
+
+func TestUseProfileHeaderRejectsUnknownID(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	srv := NewServerWithOptions("127.0.0.1", 7220, DefaultServerOptions(), engine)
+
+	resp := requestWithHeader(t, srv, "/google/search?text=test", "X-Use-Profile", "does-not-exist")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown profile id, got %d", resp.StatusCode)
+	}
+}
+
+func TestUseProfileHeaderAcceptsValidID(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	srv := NewServerWithOptions("127.0.0.1", 7221, DefaultServerOptions(), engine)
+
+	resp := requestWithHeader(t, srv, "/google/search?text=test", "X-Use-Profile", "chrome-linux-mesa-uhd620")
+	// The mock engine doesn't do a real browser search, so we just verify the
+	// request was not rejected at the profile-validation layer.
+	if resp.StatusCode == http.StatusBadRequest {
+		t.Fatalf("expected request with valid profile id to pass validation, got 400")
+	}
+}
+
+func TestUseProfileHeaderFingerprintCheckRejectsUnknownID(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.EnableDebugEndpoints = true
+	srv := NewServerWithOptions("127.0.0.1", 7222, opts, engine)
+
+	resp := requestWithHeader(t, srv, "/debug/fingerprint-check?detector=sannysoft", "X-Use-Profile", "does-not-exist")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown profile id on fingerprint endpoint, got %d", resp.StatusCode)
+	}
+}
+
+func TestUseProfileHeaderExposedInCORS(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	srv := NewServerWithOptions("127.0.0.1", 7223, DefaultServerOptions(), engine)
+
+	req := httptest.NewRequest(http.MethodOptions, "/google/search", nil)
+	resp, err := srv.app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("preflight request failed: %v", err)
+	}
+	allowHeaders := resp.Header.Get("Access-Control-Allow-Headers")
+	if !strings.Contains(allowHeaders, "X-Use-Profile") {
+		t.Fatalf("expected X-Use-Profile in Access-Control-Allow-Headers, got %q", allowHeaders)
+	}
+}

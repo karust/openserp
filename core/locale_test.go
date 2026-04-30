@@ -1,6 +1,8 @@
 package core
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestParseLocale(t *testing.T) {
 	tests := []struct {
@@ -51,6 +53,28 @@ func TestBuildAcceptLanguageHeader(t *testing.T) {
 			got := BuildAcceptLanguageHeader(tt.in)
 			if got != tt.want {
 				t.Fatalf("BuildAcceptLanguageHeader(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTimezoneForLocale(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "de-DE explicit country", in: "de-DE", want: "Europe/Berlin"},
+		{name: "pt-BR explicit country", in: "pt-BR", want: "America/Sao_Paulo"},
+		{name: "bare de via default country", in: "de", want: "Europe/Berlin"},
+		{name: "unknown locale", in: "xx-YY", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TimezoneForLocale(ParseLocale(tt.in))
+			if got != tt.want {
+				t.Fatalf("TimezoneForLocale(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}

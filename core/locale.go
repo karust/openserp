@@ -69,6 +69,37 @@ func PrimaryLanguageTag(langCode string) string {
 	return locale.Language + "-" + country
 }
 
+var defaultTimezoneByCountry = map[string]string{
+	"US": "America/New_York", "GB": "Europe/London", "DE": "Europe/Berlin",
+	"FR": "Europe/Paris", "ES": "Europe/Madrid", "IT": "Europe/Rome",
+	"RU": "Europe/Moscow", "BR": "America/Sao_Paulo", "JP": "Asia/Tokyo",
+	"CN": "Asia/Shanghai", "KR": "Asia/Seoul", "IN": "Asia/Kolkata",
+	"AU": "Australia/Sydney", "CA": "America/Toronto",
+	"MX": "America/Mexico_City", "PL": "Europe/Warsaw",
+	"NL": "Europe/Amsterdam", "TR": "Europe/Istanbul",
+	"AR": "America/Argentina/Buenos_Aires", "SA": "Asia/Riyadh",
+	"BE": "Europe/Brussels", "KZ": "Asia/Almaty", "UA": "Europe/Kyiv",
+}
+
+// TimezoneForLocale returns an IANA timezone for a locale's country, or for
+// the default country of the language when country is empty. Returns "" for
+// unknown locales — caller should retain the existing profile timezone.
+func TimezoneForLocale(loc Locale) string {
+	if loc.Country != "" {
+		if tz, ok := defaultTimezoneByCountry[loc.Country]; ok {
+			return tz
+		}
+	}
+	if loc.Language != "" {
+		if country, ok := defaultLocaleCountryByLanguage[loc.Language]; ok {
+			if tz, ok2 := defaultTimezoneByCountry[country]; ok2 {
+				return tz
+			}
+		}
+	}
+	return ""
+}
+
 // BuildAcceptLanguageHeader formats an Accept-Language value from a lang code.
 // Example: "de" -> "de-DE,de;q=0.9", "en-GB" -> "en-GB,en;q=0.9", "sw" -> "sw".
 func BuildAcceptLanguageHeader(langCode string) string {

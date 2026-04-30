@@ -15,8 +15,9 @@ import (
 
 // RunOptions controls detector run behavior.
 type RunOptions struct {
-	ArtifactDir     string
-	WaitBeforeClose time.Duration
+	ArtifactDir       string
+	WaitBeforeExtract time.Duration
+	WaitBeforeClose   time.Duration
 }
 
 // Run navigates the given browser to detector URL, extracts verdicts,
@@ -55,6 +56,10 @@ func RunWithOptions(ctx context.Context, browser BrowserNavigator, detector Dete
 		}
 		closePageWithTimeout(context.Background(), browser, page, time.Second)
 	}()
+
+	if options.WaitBeforeExtract > 0 {
+		_ = sleepWithContext(ctx, options.WaitBeforeExtract)
+	}
 
 	detections, rawNotes, err := detector.Extract(ctx, page)
 	if err != nil {

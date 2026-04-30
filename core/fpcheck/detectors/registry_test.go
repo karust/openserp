@@ -23,6 +23,28 @@ func TestSelectCustomAcceptsHTTPSURL(t *testing.T) {
 	if detectorList[0].URL() != "https://localhost:9000" {
 		t.Fatalf("expected normalized custom URL to be preserved, got %q", detectorList[0].URL())
 	}
+	custom, ok := detectorList[0].(Custom)
+	if !ok {
+		t.Fatalf("expected custom detector type, got %T", detectorList[0])
+	}
+	if custom.Selector() != "body" {
+		t.Fatalf("expected default custom selector body, got %q", custom.Selector())
+	}
+}
+
+func TestSelectCustomAcceptsSelector(t *testing.T) {
+	detectorList, err := SelectWithCustomSelector("custom", "https://localhost:9000", "pre")
+	if err != nil {
+		t.Fatalf("expected custom detector URL to be accepted, got %v", err)
+	}
+
+	custom, ok := detectorList[0].(Custom)
+	if !ok {
+		t.Fatalf("expected custom detector type, got %T", detectorList[0])
+	}
+	if custom.Selector() != "pre" {
+		t.Fatalf("expected custom selector pre, got %q", custom.Selector())
+	}
 }
 
 func TestNamesIncludesCustom(t *testing.T) {

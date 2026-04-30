@@ -2,7 +2,6 @@ package detectors
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -13,17 +12,37 @@ import (
 )
 
 const customDetectorName = "custom"
+const defaultCustomSelector = "body"
 
 type Custom struct {
 	targetURL string
+	selector  string
+}
+
+type customPayload struct {
+	Found        bool   `json:"found"`
+	Error        string `json:"error"`
+	Title        string `json:"title"`
+	URL          string `json:"url"`
+	ReadyState   string `json:"readyState"`
+	Selector     string `json:"selector"`
+	SelectedText string `json:"selectedText"`
+	SelectedHTML string `json:"selectedHTML"`
 }
 
 func NewCustom(rawURL string) (fpcheck.Detector, error) {
+	return NewCustomWithSelector(rawURL, "")
+}
+
+func NewCustomWithSelector(rawURL string, selector string) (fpcheck.Detector, error) {
 	normalized, err := normalizeCustomURL(rawURL)
 	if err != nil {
 		return nil, err
 	}
-	return Custom{targetURL: normalized}, nil
+	return Custom{
+		targetURL: normalized,
+		selector:  normalizeCustomSelector(selector),
+	}, nil
 }
 
 func (c Custom) Name() string {
@@ -34,57 +53,76 @@ func (c Custom) URL() string {
 	return c.targetURL
 }
 
+func (c Custom) Selector() string {
+	return normalizeCustomSelector(c.selector)
+}
+
 func (c Custom) Extract(ctx context.Context, page *rod.Page) (map[string]fpcheck.Detection, string, error) {
+	selector := c.Selector()
+	var payload customPayload
 	err := waitFor(ctx, 15*time.Second, 200*time.Millisecond, func() (bool, error) {
-		hasBody, _, err := page.Has("pre")
+		current, err := extractCustomPayload(page, selector)
 		if err != nil {
 			return false, err
 		}
-		return hasBody, nil
+		if !current.Found {
+			return false, nil
+		}
+		payload = current
+		return true, nil
 	})
 	if err != nil {
-		return nil, "", fmt.Errorf("custom page readiness: %w", err)
+		return nil, "", fmt.Errorf("custom page readiness for selector %q: %w", selector, err)
 	}
 
-	res, err := page.Eval(`() => {
-		const normalize = (value) => (value || "").replace(/\s+/g, " ").trim();
-		return {
-			title: document.title || "",
-			url: location.href || "",
-			readyState: document.readyState || "",
-			bodyText: normalize(document.body ? document.body.innerText || document.body.textContent || "" : ""),
-			html: document.documentElement ? document.documentElement.outerHTML || "" : "",
-		};
-	}`)
-	if err != nil {
-		return nil, "", err
-	}
-
-	var payload struct {
-		Title      string `json:"title"`
-		URL        string `json:"url"`
-		ReadyState string `json:"readyState"`
-		BodyText   string `json:"bodyText"`
-		HTML       string `json:"html"`
-	}
-	if err := res.Value.Unmarshal(&payload); err != nil {
-		return nil, "", fmt.Errorf("decode custom detector payload: %w", err)
-	}
-
-	payload.BodyText = strings.TrimSpace(payload.BodyText)
-	payload.HTML = strings.TrimSpace(payload.HTML)
-
-	rawOut, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return nil, "", fmt.Errorf("encode custom detector payload: %w", err)
+	rawOut := strings.TrimSpace(payload.SelectedText)
+	if rawOut == "" {
+		rawOut = strings.TrimSpace(payload.SelectedHTML)
 	}
 
 	return map[string]fpcheck.Detection{
-		"raw_page_output": {
+		"selected_page_output": {
 			Detected:    false,
-			Description: "raw page payload captured",
+			Description: fmt.Sprintf("captured selector %q", payload.Selector),
 		},
-	}, string(rawOut), nil
+	}, rawOut, nil
+}
+
+func extractCustomPayload(page *rod.Page, selector string) (customPayload, error) {
+	res, err := page.Timeout(2*time.Second).Eval(`(selector) => {
+		const normalize = (value) => (value || "").replace(/\s+/g, " ").trim();
+		let selected = null;
+		try {
+			selected = document.querySelector(selector);
+		 } catch (err) {
+			return {
+				found: false,
+				error: err && err.message ? err.message : String(err),
+				selector,
+			};
+		}
+		return {
+			found: !!selected,
+			title: document.title || "",
+			url: location.href || "",
+			readyState: document.readyState || "",
+			selector,
+			selectedText: normalize(selected ? selected.innerText || selected.textContent || "" : ""),
+			selectedHTML: selected ? selected.innerHTML || "" : "",
+		};
+	}`, selector)
+	if err != nil {
+		return customPayload{}, err
+	}
+
+	var payload customPayload
+	if err := res.Value.Unmarshal(&payload); err != nil {
+		return customPayload{}, fmt.Errorf("decode custom detector payload: %w", err)
+	}
+	if strings.TrimSpace(payload.Error) != "" {
+		return customPayload{}, fmt.Errorf("query selector %q: %s", selector, payload.Error)
+	}
+	return payload, nil
 }
 
 func normalizeCustomURL(rawURL string) (string, error) {
@@ -105,4 +143,12 @@ func normalizeCustomURL(rawURL string) (string, error) {
 	}
 
 	return parsed.String(), nil
+}
+
+func normalizeCustomSelector(selector string) string {
+	trimmed := strings.TrimSpace(selector)
+	if trimmed == "" {
+		return defaultCustomSelector
+	}
+	return trimmed
 }

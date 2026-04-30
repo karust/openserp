@@ -3,37 +3,30 @@ package browser
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
 func TestSelectProfile(t *testing.T) {
 	tests := []struct {
-		name         string
-		engine       string
-		region       string
-		wantLocale   string
-		wantTimezone string
+		name   string
+		engine string
+		region string
 	}{
 		{
-			name:         "google ru lane",
-			engine:       "google",
-			region:       "ru",
-			wantLocale:   "ru-RU",
-			wantTimezone: "Europe/Moscow",
+			name:   "google ru lane",
+			engine: "google",
+			region: "ru",
 		},
 		{
-			name:         "yandex defaults to ru",
-			engine:       "yandex",
-			region:       "",
-			wantLocale:   "ru-RU",
-			wantTimezone: "Europe/Moscow",
+			name:   "yandex defaults to ru",
+			engine: "yandex",
+			region: "",
 		},
 		{
-			name:         "google default lane uses us profile",
-			engine:       "google",
-			region:       "en",
-			wantLocale:   "en-US",
-			wantTimezone: "America/New_York",
+			name:   "google default lane uses us profile",
+			engine: "google",
+			region: "en",
 		},
 	}
 
@@ -43,17 +36,45 @@ func TestSelectProfile(t *testing.T) {
 			if profile.ID == "" {
 				t.Fatal("expected non-empty profile ID")
 			}
-			if profile.Locale != tt.wantLocale {
-				t.Fatalf("expected locale %q, got %q", tt.wantLocale, profile.Locale)
-			}
-			if profile.Timezone != tt.wantTimezone {
-				t.Fatalf("expected timezone %q, got %q", tt.wantTimezone, profile.Timezone)
-			}
 			if profile.Platform == "" {
 				t.Fatal("expected non-empty platform")
 			}
+			if profile.Viewport.Width <= 0 || profile.Viewport.Height <= 0 {
+				t.Fatalf("expected positive viewport, got %+v", profile.Viewport)
+			}
 		})
 	}
+}
+
+func TestSelectProfileForSession(t *testing.T) {
+	t.Run("same salt returns same profile", func(t *testing.T) {
+		first := SelectProfileForSession("google", "us", "session-abc")
+		for i := 0; i < 10; i++ {
+			got := SelectProfileForSession("google", "us", "session-abc")
+			if got.ID != first.ID {
+				t.Fatalf("iteration %d: expected %q, got %q", i, first.ID, got.ID)
+			}
+		}
+	})
+
+	t.Run("rotation produces multiple distinct profiles", func(t *testing.T) {
+		seen := map[string]bool{}
+		for i := 0; i < 100; i++ {
+			salt := "session-" + string(rune('a'+i%26)) + string(rune('0'+i/26%10))
+			p := SelectProfileForSession("google", "us", salt)
+			seen[p.ID] = true
+		}
+		if len(seen) < 3 {
+			t.Fatalf("expected at least 3 distinct profiles, got %d: %v", len(seen), seen)
+		}
+	})
+
+	t.Run("ru region returns ru-tagged profile", func(t *testing.T) {
+		p := SelectProfileForSession("yandex", "ru", "some-session")
+		if !slices.Contains(p.Tags, "ru") {
+			t.Fatalf("expected ru-tagged profile, got ID=%q tags=%v", p.ID, p.Tags)
+		}
+	})
 }
 
 func TestNormalizeRegion(t *testing.T) {
@@ -106,7 +127,9 @@ func TestLoadProfilesFromJSON(t *testing.T) {
 				"navigator_langs": ["ru-RU"],
 				"locale": "ru-RU",
 				"timezone": "Europe/Moscow",
-				"viewport": {"width": 1920, "height": 1080}
+				"viewport": {"width": 1920, "height": 1080},
+				"tags": ["linux", "ru"],
+				"weight": 2
 			}
 		],
 		"lane_profile_ids": {
@@ -134,6 +157,12 @@ func TestLoadProfilesFromJSON(t *testing.T) {
 	}
 	if profile.Timezone != "Europe/Moscow" {
 		t.Fatalf("expected timezone Europe/Moscow, got %q", profile.Timezone)
+	}
+	if !slices.Contains(profile.Tags, "ru") {
+		t.Fatalf("expected tags to contain 'ru', got %v", profile.Tags)
+	}
+	if profile.Weight != 2 {
+		t.Fatalf("expected weight 2, got %d", profile.Weight)
 	}
 }
 
