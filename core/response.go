@@ -11,12 +11,13 @@ type QueryEcho struct {
 
 // ResponseMeta carries request-level metadata for observability and debugging.
 type ResponseMeta struct {
-	RequestID     string              `json:"request_id"`
-	RequestedAt   string              `json:"requested_at"`
-	TookMs        int64               `json:"took_ms"`
-	EnginesFailed []string            `json:"engines_failed"`
-	EngineErrors  []EngineErrorDetail `json:"engine_errors,omitempty"`
-	Version       string              `json:"version"`
+	RequestID         string              `json:"request_id"`
+	RequestedAt       string              `json:"requested_at"`
+	TookMs            int64               `json:"took_ms"`
+	EnginesResponded  []string            `json:"engines_responded,omitempty"`
+	EnginesFailed     []string            `json:"engines_failed"`
+	EngineErrors      []EngineErrorDetail `json:"engine_errors,omitempty"`
+	Version           string              `json:"version"`
 }
 
 // EngineErrorDetail is a client-facing, sanitized per-engine failure summary.

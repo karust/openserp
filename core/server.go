@@ -804,15 +804,27 @@ type MegaSearchResult struct {
 	Engine string `json:"engine"`
 }
 
+const (
+	megaModeBalanced = "balanced"
+	megaModeAny      = "any"
+	megaModeFast     = "fast"
+)
+
+type megaRunConfig struct {
+	Mode   string
+	Dedupe bool
+	Merge  bool
+}
+
 func (s *Server) handleMegaSearch(c *fiber.Ctx) error {
-	return s.handleMegaEndpoint(c, "search", s.resilient.searchAllParallelDetailed)
+	return s.handleMegaEndpoint(c, "search")
 }
 
 func (s *Server) handleMegaImage(c *fiber.Ctx) error {
-	return s.handleMegaEndpoint(c, "image", s.resilient.searchAllImageParallelDetailed)
+	return s.handleMegaEndpoint(c, "image")
 }
 
-func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(context.Context, Query, []SearchEngine) ([]MegaSearchResult, []string, []EngineErrorDetail)) error {
+func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string) error {
 	startedAt := time.Now()
 	requestCtx := withRequestUsage(c.UserContext(), "mega")
 	c.SetUserContext(requestCtx)
@@ -838,8 +850,12 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 	c.SetUserContext(requestCtx)
 
 	requestID := RequestIDFromContext(requestCtx)
+	runCfg, err := parseMegaRunConfig(c)
+	if err != nil {
+		return err
+	}
 
-	enginesToUse := s.resolveEngines(c.Query("engines", ""))
+	enginesToUse := s.resolveEngines(requestCtx, c.Query("engines", ""))
 	if len(enginesToUse) == 0 {
 		return &APIError{HTTPStatus: 400, Reason: ReasonNoEngines, Message: "no valid search engines specified"}
 	}
@@ -853,22 +869,25 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 	WithRequest(requestCtx).WithFields(logrus.Fields{
 		"action":  action,
 		"engines": engineNamesJoined,
+		"mode":    runCfg.Mode,
 	}).Debugf("Starting mega %s request for query: %s", action, q.Text)
 
-	cacheHitCandidates := []cacheHitCandidate{
-		{
-			key:        s.buildMegaCacheKey(action, enginesToUse, q),
-			logMessage: fmt.Sprintf("Cache hit for mega %s: engines=%s query=%s", action, engineNamesJoined, q.Text),
-		},
-	}
-	cacheableEngines := s.megaCacheableEngines(enginesToUse)
-	if len(cacheableEngines) > 0 && len(cacheableEngines) < len(enginesToUse) {
-		cacheHitCandidates = append(cacheHitCandidates, cacheHitCandidate{
-			key:        s.buildMegaCacheKey(action, cacheableEngines, q),
-			logMessage: fmt.Sprintf("Cache hit for mega %s partial set: engines=%s query=%s", action, engineNamesJoined, q.Text),
-		})
-	}
-	if format == "json" && !ShouldBypassCacheForProxyMarket(q) {
+	if format == "json" && !ShouldBypassCacheForProxyMarket(q) && runCfg.Mode != megaModeFast {
+		cacheHitCandidates := []cacheHitCandidate{
+			{
+				key:        s.buildMegaCacheKey(action, enginesToUse, q, runCfg),
+				logMessage: fmt.Sprintf("Cache hit for mega %s: engines=%s query=%s mode=%s", action, engineNamesJoined, q.Text, runCfg.Mode),
+			},
+		}
+		if runCfg.Mode == megaModeBalanced {
+			cacheableEngines := s.megaCacheableEngines(enginesToUse)
+			if len(cacheableEngines) > 0 && len(cacheableEngines) < len(enginesToUse) {
+				cacheHitCandidates = append(cacheHitCandidates, cacheHitCandidate{
+					key:        s.buildMegaCacheKey(action, cacheableEngines, q, runCfg),
+					logMessage: fmt.Sprintf("Cache hit for mega %s partial set: engines=%s query=%s mode=%s", action, engineNamesJoined, q.Text, runCfg.Mode),
+				})
+			}
+		}
 		if hit, err := s.tryServeCacheHit(c, startedAt, cacheHitCandidates...); hit || err != nil {
 			return err
 		}
@@ -880,9 +899,29 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 		runCtx, cancel = context.WithTimeout(requestCtx, s.opts.MegaTimeout)
 		defer cancel()
 	}
-	rawResults, _, engineErrors := run(runCtx, q, enginesToUse)
+
+	var (
+		rawResults   []MegaSearchResult
+		responded    []string
+		engineErrors []EngineErrorDetail
+	)
+	switch runCfg.Mode {
+	case megaModeAny:
+		rawResults, responded, engineErrors = s.resilient.searchAnyDetailed(runCtx, q, enginesToUse, action == "image")
+	case megaModeFast:
+		rawResults, responded, engineErrors = s.resilient.searchFastestDetailed(runCtx, q, enginesToUse, action == "image")
+	default:
+		if action == "image" {
+			rawResults, responded, engineErrors = s.resilient.searchAllImageParallelDetailed(runCtx, q, enginesToUse)
+		} else {
+			rawResults, responded, engineErrors = s.resilient.searchAllParallelDetailed(runCtx, q, enginesToUse)
+		}
+	}
+
+	rawResults = s.applyMegaMergePolicy(rawResults, enginesToUse, runCfg)
+
 	enginesFailed := engineErrorNames(engineErrors)
-	if len(engineErrors) == len(enginesToUse) {
+	if len(responded) == 0 {
 		err := fmt.Errorf("%w: %s", ErrAllEnginesFailed, strings.Join(enginesFailed, ","))
 		apiErr := searchAPIError(err, "mega", q, ProxyExecutionMeta{})
 		apiErr.Meta["engine_errors"] = engineErrors
@@ -893,17 +932,22 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 	}
 
 	if action == "image" {
+		imageResults := rawResults
+		if runCfg.Dedupe {
+			imageResults = s.deduplicateMegaResults(imageResults)
+		}
 		env := NewImageEnvelope(q, requestID, startedAt, engineNames)
+		env.Meta.EnginesResponded = responded
 		env.Meta.EnginesFailed = enginesFailed
 		env.Meta.EngineErrors = engineErrors
-		for _, r := range rawResults {
+		for _, r := range imageResults {
 			ectx := EnrichContext{Engine: r.Engine, Query: q}
 			env.Results = append(env.Results, EnrichImageResult(r.SearchResult, ectx))
 		}
 		env.Finalize(startedAt, q)
 
-		if format == "json" && s.cache != nil {
-			c.Set("X-Cache", s.cacheMegaImageResults(action, enginesToUse, q, env))
+		if format == "json" && s.cache != nil && runCfg.Mode != megaModeFast {
+			c.Set("X-Cache", s.cacheMegaImageResults(action, enginesToUse, q, env, runCfg))
 		}
 		WithRequest(requestCtx).WithFields(logrus.Fields{
 			"action": action, "engines_count": len(enginesToUse), "results_count": len(env.Results),
@@ -911,32 +955,34 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string, run func(contex
 		return sendImageEnvelope(c, format, env)
 	}
 
-	// Web search: enrich all raw results, build clusters from full set, then dedup flat list.
-	allEnriched := make([]Result, 0, len(rawResults))
-	for _, r := range rawResults {
-		ectx := EnrichContext{Engine: r.Engine, Query: q}
-		allEnriched = append(allEnriched, EnrichResult(r.SearchResult, ectx))
+	webResults := rawResults
+	if runCfg.Dedupe {
+		webResults = s.deduplicateMegaResults(webResults)
 	}
-
-	clusters := BuildClusters(allEnriched, len(enginesToUse))
-
-	// Deduplicate the flat results list by normalized URL (keep best-ranked occurrence).
-	dedupedRaw := s.deduplicateMegaResults(rawResults)
 	env := NewEnvelope(q, requestID, startedAt, engineNames)
+	env.Meta.EnginesResponded = responded
 	env.Meta.EnginesFailed = enginesFailed
 	env.Meta.EngineErrors = engineErrors
-	for _, r := range dedupedRaw {
+	for _, r := range webResults {
 		ectx := EnrichContext{Engine: r.Engine, Query: q}
 		env.Results = append(env.Results, EnrichResult(r.SearchResult, ectx))
 	}
 	env.Finalize(startedAt, q)
 
-	if len(clusters) > 0 {
-		env.Clusters = &clusters
+	if runCfg.Merge {
+		allEnriched := make([]Result, 0, len(rawResults))
+		for _, r := range rawResults {
+			ectx := EnrichContext{Engine: r.Engine, Query: q}
+			allEnriched = append(allEnriched, EnrichResult(r.SearchResult, ectx))
+		}
+		clusters := BuildClusters(allEnriched, len(enginesToUse))
+		if len(clusters) > 0 {
+			env.Clusters = &clusters
+		}
 	}
 
-	if format == "json" && s.cache != nil {
-		c.Set("X-Cache", s.cacheMegaEnvelopeResults(action, enginesToUse, q, env))
+	if format == "json" && s.cache != nil && runCfg.Mode != megaModeFast {
+		c.Set("X-Cache", s.cacheMegaEnvelopeResults(action, enginesToUse, q, env, runCfg))
 	}
 
 	WithRequest(requestCtx).WithFields(logrus.Fields{
@@ -953,6 +999,74 @@ func engineErrorNames(details []EngineErrorDetail) []string {
 		names = append(names, d.Engine)
 	}
 	return names
+}
+
+func parseMegaRunConfig(c *fiber.Ctx) (megaRunConfig, error) {
+	cfg := megaRunConfig{
+		Mode:   megaModeBalanced,
+		Dedupe: true,
+		Merge:  true,
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(c.Query("mode", megaModeBalanced)))
+	switch mode {
+	case "", megaModeBalanced:
+		cfg.Mode = megaModeBalanced
+	case megaModeAny:
+		cfg.Mode = megaModeAny
+	case megaModeFast:
+		cfg.Mode = megaModeFast
+	default:
+		return megaRunConfig{}, errInvalidParam("mode: must be one of fast, any, balanced")
+	}
+
+	if raw := strings.TrimSpace(c.Query("dedupe", "")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return megaRunConfig{}, errInvalidParam(fmt.Sprintf("dedupe: %v", err))
+		}
+		cfg.Dedupe = value
+	}
+
+	if raw := strings.TrimSpace(c.Query("merge", "")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return megaRunConfig{}, errInvalidParam(fmt.Sprintf("merge: %v", err))
+		}
+		cfg.Merge = value
+	}
+
+	return cfg, nil
+}
+
+func (s *Server) applyMegaMergePolicy(results []MegaSearchResult, engines []SearchEngine, cfg megaRunConfig) []MegaSearchResult {
+	if cfg.Merge || len(results) == 0 {
+		return results
+	}
+
+	byEngine := make(map[string]struct{}, len(results))
+	for _, r := range results {
+		byEngine[r.Engine] = struct{}{}
+	}
+
+	selected := ""
+	for _, eng := range engines {
+		if _, ok := byEngine[eng.Name()]; ok {
+			selected = eng.Name()
+			break
+		}
+	}
+	if selected == "" {
+		return []MegaSearchResult{}
+	}
+
+	filtered := make([]MegaSearchResult, 0, len(results))
+	for _, r := range results {
+		if r.Engine == selected {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
 }
 
 func (s *Server) handleListEngines(c *fiber.Ctx) error {
@@ -981,7 +1095,7 @@ func (s *Server) handleListEngines(c *fiber.Ctx) error {
 	})
 }
 
-func (s *Server) resolveEngines(enginesParam string) []SearchEngine {
+func (s *Server) resolveEngines(ctx context.Context, enginesParam string) []SearchEngine {
 	if enginesParam == "" {
 		return s.searchEngines
 	}
@@ -989,20 +1103,35 @@ func (s *Server) resolveEngines(enginesParam string) []SearchEngine {
 	var enginesToUse []SearchEngine
 	seen := make(map[string]bool)
 	engineNames := strings.Split(enginesParam, ",")
-	for _, engineName := range engineNames {
-		engineName = strings.TrimSpace(strings.ToLower(engineName))
-		if engineName == "" || seen[engineName] {
+	for _, name := range engineNames {
+		name = strings.TrimSpace(strings.ToLower(name))
+		if name == "" || seen[name] {
 			continue
 		}
+		name = resolveEngineAlias(name)
+		matched := false
 		for _, engine := range s.searchEngines {
-			if strings.ToLower(engine.Name()) == engineName {
+			if strings.ToLower(engine.Name()) == name {
 				enginesToUse = append(enginesToUse, engine)
-				seen[engineName] = true
+				seen[name] = true
+				matched = true
 				break
 			}
 		}
+		if !matched {
+			WithRequest(ctx).Warnf("Unknown engine %q requested, skipping", name)
+		}
 	}
 	return enginesToUse
+}
+
+func resolveEngineAlias(name string) string {
+	switch name {
+	case "duck", "ddg":
+		return "duckduckgo"
+	default:
+		return name
+	}
 }
 
 func (s *Server) deduplicateMegaResults(results []MegaSearchResult) []MegaSearchResult {
@@ -1112,7 +1241,7 @@ func (s *Server) cacheJSON(cacheKey string, payload interface{}) bool {
 	return true
 }
 
-func (s *Server) cacheMegaEnvelopeResults(action string, enginesToUse []SearchEngine, q Query, env *Envelope) string {
+func (s *Server) cacheMegaEnvelopeResults(action string, enginesToUse []SearchEngine, q Query, env *Envelope, cfg megaRunConfig) string {
 	if s.cache == nil {
 		return ""
 	}
@@ -1129,13 +1258,13 @@ func (s *Server) cacheMegaEnvelopeResults(action string, enginesToUse []SearchEn
 		s.cache.RecordBypass()
 		return "BYPASS"
 	}
-	if s.cacheJSON(s.buildMegaCacheKey(action, cacheEngines, q), env) {
+	if s.cacheJSON(s.buildMegaCacheKey(action, cacheEngines, q, cfg), env) {
 		return "MISS"
 	}
 	return "BYPASS"
 }
 
-func (s *Server) cacheMegaImageResults(action string, enginesToUse []SearchEngine, q Query, env *ImageEnvelope) string {
+func (s *Server) cacheMegaImageResults(action string, enginesToUse []SearchEngine, q Query, env *ImageEnvelope, cfg megaRunConfig) string {
 	if s.cache == nil {
 		return ""
 	}
@@ -1152,13 +1281,13 @@ func (s *Server) cacheMegaImageResults(action string, enginesToUse []SearchEngin
 		s.cache.RecordBypass()
 		return "BYPASS"
 	}
-	if s.cacheJSON(s.buildMegaCacheKey(action, cacheEngines, q), env) {
+	if s.cacheJSON(s.buildMegaCacheKey(action, cacheEngines, q, cfg), env) {
 		return "MISS"
 	}
 	return "BYPASS"
 }
 
-func (s *Server) buildMegaCacheKey(action string, engines []SearchEngine, q Query) string {
+func (s *Server) buildMegaCacheKey(action string, engines []SearchEngine, q Query, cfg megaRunConfig) string {
 	names := make([]string, 0, len(engines))
 	for _, eng := range engines {
 		names = append(names, strings.ToLower(strings.TrimSpace(eng.Name())))
@@ -1177,7 +1306,8 @@ func (s *Server) buildMegaCacheKey(action string, engines []SearchEngine, q Quer
 		last = name
 	}
 
-	return BuildCacheKey("mega:"+strings.Join(uniq, ","), action, q)
+	prefix := fmt.Sprintf("mega:%s:%t:%t:%s", cfg.Mode, cfg.Merge, cfg.Dedupe, strings.Join(uniq, ","))
+	return BuildCacheKey(prefix, action, q)
 }
 
 func (s *Server) megaCacheableEngines(engines []SearchEngine) []SearchEngine {

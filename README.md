@@ -73,8 +73,14 @@ Megasearch:
 # Search all configured engines
 curl "http://127.0.0.1:7000/mega/search?text=golang&limit=10"
 
-# Search selected engines
-curl "http://127.0.0.1:7000/mega/search?text=golang&engines=duckduckgo,bing&limit=15"
+# Fast mode: only one fastest engine is queried
+curl "http://127.0.0.1:7000/mega/search?text=golang&mode=fast&engines=google,bing,yandex"
+
+# Any mode: sequential fallback in provided order (default orded if none provided)
+curl "http://127.0.0.1:7000/mega/search?text=golang&mode=any&engines=google,yandex,bing"
+
+# Balanced mode (default): parallel all engines with aggregation controls
+curl "http://127.0.0.1:7000/mega/search?text=golang&mode=balanced&dedupe=true&merge=true"
 
 # Advanced filtering
 curl "http://127.0.0.1:7000/mega/search?text=golang&engines=google,bing&limit=20&date=20250101..20251231&lang=EN"

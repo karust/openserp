@@ -50,6 +50,8 @@ type CircuitBreaker struct {
 	config          CircuitBreakerConfig
 	failureCount    int
 	successCount    int
+	successLatency  time.Duration
+	successSamples  int64
 	lastFailureTime time.Time
 	lastStateChange time.Time
 }
@@ -85,8 +87,17 @@ func (cb *CircuitBreaker) AllowRequest(ctx context.Context) bool {
 }
 
 func (cb *CircuitBreaker) RecordSuccess(ctx context.Context) {
+	cb.RecordSuccessDuration(ctx, 0)
+}
+
+func (cb *CircuitBreaker) RecordSuccessDuration(ctx context.Context, elapsed time.Duration) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
+
+	if elapsed > 0 {
+		cb.successLatency += elapsed
+		cb.successSamples++
+	}
 
 	switch cb.state {
 	case CircuitHalfOpen:
@@ -155,8 +166,20 @@ func (cb *CircuitBreaker) Stats() map[string]interface{} {
 		}
 		stats["retry_in"] = retryInSeconds
 	}
+	if cb.successSamples > 0 {
+		stats["avg_response_ms"] = int64((cb.successLatency / time.Duration(cb.successSamples)) / time.Millisecond)
+	}
 
 	return stats
+}
+
+func (cb *CircuitBreaker) AvgSuccessLatency() (time.Duration, bool) {
+	cb.mu.RLock()
+	defer cb.mu.RUnlock()
+	if cb.successSamples == 0 {
+		return 0, false
+	}
+	return cb.successLatency / time.Duration(cb.successSamples), true
 }
 
 func (cb *CircuitBreaker) setState(state CircuitState) {

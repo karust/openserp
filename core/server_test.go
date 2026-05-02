@@ -970,6 +970,176 @@ func TestMegaSearchDeduplicatesRepeatedEngineNames(t *testing.T) {
 	}
 }
 
+func TestMegaSearchInvalidModeReturnsBadRequest(t *testing.T) {
+	engine := &engineMock{name: "google", initialized: true}
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7181, opts, engine)
+
+	resp := request(t, srv, "/mega/search?text=golang&mode=turbo")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid mode, got %d", resp.StatusCode)
+	}
+
+	var payload JSONErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	if payload.Reason != ReasonInvalidParam {
+		t.Fatalf("expected reason=%q, got %q", ReasonInvalidParam, payload.Reason)
+	}
+}
+
+func TestMegaSearchAnyModeStopsAfterFirstSuccessInRequestedOrder(t *testing.T) {
+	google := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return nil, errors.New("google failed")
+		},
+	}
+	yandex := &engineMock{
+		name:        "yandex",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return []SearchResult{{Rank: 1, URL: "https://example.com/yandex", Title: "yandex"}}, nil
+		},
+	}
+	bing := &engineMock{
+		name:        "bing",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return []SearchResult{{Rank: 1, URL: "https://example.com/bing", Title: "bing"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.CacheTTL = 0
+	srv := NewServerWithOptions("127.0.0.1", 7182, opts, google, yandex, bing)
+
+	resp := request(t, srv, "/mega/search?text=golang&mode=any&engines=google,yandex,bing")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var env Envelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if len(env.Results) == 0 || env.Results[0].Engine != "yandex" {
+		t.Fatalf("expected yandex result in any mode, got %#v", env.Results)
+	}
+
+	if google.searchCalls != 1 || yandex.searchCalls != 1 || bing.searchCalls != 0 {
+		t.Fatalf("expected google=1 yandex=1 bing=0 calls, got google=%d yandex=%d bing=%d", google.searchCalls, yandex.searchCalls, bing.searchCalls)
+	}
+}
+
+func TestMegaSearchFastModeUsesFastestEngineFromCircuitStats(t *testing.T) {
+	google := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			time.Sleep(25 * time.Millisecond)
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+	yandex := &engineMock{
+		name:        "yandex",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			time.Sleep(1 * time.Millisecond)
+			return []SearchResult{{Rank: 1, URL: "https://example.com/yandex", Title: "yandex"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.CacheTTL = 0
+	srv := NewServerWithOptions("127.0.0.1", 7183, opts, google, yandex)
+
+	_ = request(t, srv, "/google/search?text=warm-google")
+	_ = request(t, srv, "/yandex/search?text=warm-yandex")
+
+	google.mu.Lock()
+	beforeGoogle := google.searchCalls
+	google.mu.Unlock()
+	yandex.mu.Lock()
+	beforeYandex := yandex.searchCalls
+	yandex.mu.Unlock()
+
+	resp := request(t, srv, "/mega/search?text=golang&mode=fast&engines=google,yandex")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var env Envelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if len(env.Results) == 0 || env.Results[0].Engine != "yandex" {
+		t.Fatalf("expected fast mode to use yandex, got %#v", env.Results)
+	}
+
+	google.mu.Lock()
+	afterGoogle := google.searchCalls
+	google.mu.Unlock()
+	yandex.mu.Lock()
+	afterYandex := yandex.searchCalls
+	yandex.mu.Unlock()
+
+	if afterGoogle-beforeGoogle != 0 || afterYandex-beforeYandex != 1 {
+		t.Fatalf("expected delta calls google=0 yandex=1, got google=%d yandex=%d", afterGoogle-beforeGoogle, afterYandex-beforeYandex)
+	}
+}
+
+func TestMegaSearchBalancedModeMergeAndDedupeFlags(t *testing.T) {
+	google := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return []SearchResult{{Rank: 1, URL: "https://example.com/shared", Title: "google"}}, nil
+		},
+	}
+	bing := &engineMock{
+		name:        "bing",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return []SearchResult{{Rank: 2, URL: "https://example.com/shared", Title: "bing"}}, nil
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.CacheTTL = 0
+	srv := NewServerWithOptions("127.0.0.1", 7184, opts, google, bing)
+
+	respNoDedupe := request(t, srv, "/mega/search?text=golang&mode=balanced&dedupe=false&engines=google,bing")
+	if respNoDedupe.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for dedupe=false, got %d", respNoDedupe.StatusCode)
+	}
+	var envNoDedupe Envelope
+	if err := json.NewDecoder(respNoDedupe.Body).Decode(&envNoDedupe); err != nil {
+		t.Fatalf("decode dedupe=false envelope: %v", err)
+	}
+	if len(envNoDedupe.Results) != 2 {
+		t.Fatalf("expected 2 results with dedupe=false, got %d", len(envNoDedupe.Results))
+	}
+
+	respNoMerge := request(t, srv, "/mega/search?text=golang&mode=balanced&merge=false&engines=google,bing")
+	if respNoMerge.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for merge=false, got %d", respNoMerge.StatusCode)
+	}
+	var envNoMerge Envelope
+	if err := json.NewDecoder(respNoMerge.Body).Decode(&envNoMerge); err != nil {
+		t.Fatalf("decode merge=false envelope: %v", err)
+	}
+	if len(envNoMerge.Results) != 1 || envNoMerge.Results[0].Engine != "google" {
+		t.Fatalf("expected merge=false to keep first requested engine results, got %#v", envNoMerge.Results)
+	}
+}
+
 func TestMegaSearchCachesForHealthySubsetWhenOneCircuitIsOpen(t *testing.T) {
 	google := &engineMock{name: "google", initialized: true}
 	bing := &engineMock{

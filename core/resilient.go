@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -169,6 +170,7 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 	policy := rs.effectivePolicyForQuery(engine.Name(), q)
 	attemptMeta := rs.baseProxyMeta(policy)
 
+	startedAt := time.Now()
 	result := RetryableSearch(ctx, rs.retryCfg, engine.Name(), func(callCtx context.Context) ([]SearchResult, error) {
 		limiter := engine.GetRateLimiter()
 		if limiter != nil {
@@ -234,7 +236,7 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 		return nil, attemptMeta, result.Err
 	}
 
-	cb.RecordSuccess(engineCtx)
+	cb.RecordSuccessDuration(engineCtx, time.Since(startedAt))
 	return result.Results, attemptMeta, nil
 }
 
@@ -258,6 +260,95 @@ func (rs *ResilientSearcher) searchAllParallelDetailed(ctx context.Context, q Qu
 func (rs *ResilientSearcher) searchAllImageParallelDetailed(ctx context.Context, q Query, engines []SearchEngine) ([]MegaSearchResult, []string, []EngineErrorDetail) {
 	results, responded, _, errors := rs.runParallelDetailed(ctx, q, engines, true)
 	return results, responded, errors
+}
+
+func (rs *ResilientSearcher) searchAnyDetailed(ctx context.Context, q Query, engines []SearchEngine, isImage bool) ([]MegaSearchResult, []string, []EngineErrorDetail) {
+	ctx = EnsureContext(ctx)
+
+	engineErrors := make([]EngineErrorDetail, 0, len(engines))
+	for _, engine := range engines {
+		if err := ctx.Err(); err != nil {
+			engineErrors = append(engineErrors, engineErrorDetail(engine.Name(), err, q))
+			break
+		}
+		if !engine.IsInitialized() {
+			engineErrors = append(engineErrors, engineErrorDetail(engine.Name(), fmt.Errorf("not initialized"), q))
+			continue
+		}
+
+		results, _, err := rs.searchWithProtection(ctx, engine, q, isImage)
+		if err != nil {
+			engineErrors = append(engineErrors, engineErrorDetail(engine.Name(), err, q))
+			continue
+		}
+
+		mega := make([]MegaSearchResult, len(results))
+		for i, r := range results {
+			mega[i] = MegaSearchResult{SearchResult: r, Engine: engine.Name()}
+		}
+		return mega, []string{engine.Name()}, engineErrors
+	}
+
+	if engineErrors == nil {
+		engineErrors = []EngineErrorDetail{}
+	}
+	return []MegaSearchResult{}, []string{}, engineErrors
+}
+
+func (rs *ResilientSearcher) searchFastestDetailed(ctx context.Context, q Query, engines []SearchEngine, isImage bool) ([]MegaSearchResult, []string, []EngineErrorDetail) {
+	ctx = EnsureContext(ctx)
+
+	var (
+		fastest      SearchEngine
+		bestLatency  = time.Duration(1<<63 - 1)
+		foundLatency bool
+		unavailable  []EngineErrorDetail
+		candidates   []SearchEngine
+	)
+
+	for _, engine := range engines {
+		cb := rs.cbManager.Get(engine.Name())
+		if !engine.IsInitialized() {
+			unavailable = append(unavailable, engineErrorDetail(engine.Name(), fmt.Errorf("not initialized"), q))
+			continue
+		}
+
+		engineCtx := WithEngine(ctx, engine.Name())
+		if !cb.AllowRequest(engineCtx) {
+			unavailable = append(unavailable, engineErrorDetail(engine.Name(), ErrCircuitOpen, q))
+			continue
+		}
+
+		candidates = append(candidates, engine)
+		if avg, ok := cb.AvgSuccessLatency(); ok {
+			if !foundLatency || avg < bestLatency {
+				bestLatency = avg
+				fastest = engine
+				foundLatency = true
+			}
+		}
+	}
+
+	if len(candidates) == 0 {
+		if unavailable == nil {
+			unavailable = []EngineErrorDetail{}
+		}
+		return []MegaSearchResult{}, []string{}, unavailable
+	}
+	if fastest == nil {
+		fastest = candidates[0]
+	}
+
+	results, _, err := rs.searchWithProtection(ctx, fastest, q, isImage)
+	if err != nil {
+		return []MegaSearchResult{}, []string{}, []EngineErrorDetail{engineErrorDetail(fastest.Name(), err, q)}
+	}
+
+	mega := make([]MegaSearchResult, len(results))
+	for i, r := range results {
+		mega[i] = MegaSearchResult{SearchResult: r, Engine: fastest.Name()}
+	}
+	return mega, []string{fastest.Name()}, []EngineErrorDetail{}
 }
 
 func (rs *ResilientSearcher) runParallelDetailed(ctx context.Context, q Query, engines []SearchEngine, isImage bool) ([]MegaSearchResult, []string, []string, []EngineErrorDetail) {

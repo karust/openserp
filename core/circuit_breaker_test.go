@@ -139,6 +139,13 @@ func TestCircuitBreaker_Stats(t *testing.T) {
 	if _, ok := stats["retry_in"]; ok {
 		t.Fatalf("did not expect retry_in in closed state, got: %v", stats["retry_in"])
 	}
+	latencyCB := NewCircuitBreaker("latency-engine", DefaultCircuitBreakerConfig())
+	latencyCB.RecordSuccessDuration(context.Background(), 25*time.Millisecond)
+	latencyStats := latencyCB.Stats()
+	avg, ok := latencyStats["avg_response_ms"].(int64)
+	if !ok || avg <= 0 {
+		t.Fatalf("expected avg_response_ms int64 > 0, got: %v (%T)", latencyStats["avg_response_ms"], latencyStats["avg_response_ms"])
+	}
 
 	openCfg := CircuitBreakerConfig{FailureThreshold: 1, RecoveryTimeout: time.Second, SuccessThreshold: 1}
 	openCB := NewCircuitBreaker("open-engine", openCfg)

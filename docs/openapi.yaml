@@ -217,10 +217,13 @@ paths:
     get:
       tags: [Mega]
       operationId: megaSearch
-      summary: Search across multiple engines in parallel
+      summary: Search across multiple engines with selectable execution mode
       description: >
-        Results are deduplicated by normalized URL. The `clusters` field groups
-        results that appeared in multiple engines, scored by cross-engine agreement.
+        Mode controls engine execution strategy: `balanced` (default) queries all
+        selected engines in parallel, `any` runs engines sequentially in requested
+        order until first success, and `fast` queries only the fastest engine based
+        on circuit-breaker average response time stats.
+        In `balanced` mode, `dedupe` and `merge` tune aggregation behavior.
         Partial failures are surfaced in `meta.engines_failed` and
         `meta.engine_errors`. If all selected engines fail, the endpoint returns
         a 502 with per-engine error details. Use `?format=markdown|text|ndjson`
@@ -236,6 +239,9 @@ paths:
         - $ref: "#/components/parameters/FilterQuery"
         - $ref: "#/components/parameters/AnswersQuery"
         - $ref: "#/components/parameters/EnginesQuery"
+        - $ref: "#/components/parameters/MegaModeQuery"
+        - $ref: "#/components/parameters/MegaDedupeQuery"
+        - $ref: "#/components/parameters/MegaMergeQuery"
         - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
         - $ref: "#/components/parameters/ProxyURLHeader"
@@ -293,7 +299,7 @@ paths:
     get:
       tags: [Mega]
       operationId: megaImageSearch
-      summary: Image search across multiple engines in parallel
+      summary: Image search across multiple engines with selectable execution mode
       parameters:
         - $ref: "#/components/parameters/TextQuery"
         - $ref: "#/components/parameters/LangQuery"
@@ -305,6 +311,9 @@ paths:
         - $ref: "#/components/parameters/FilterQuery"
         - $ref: "#/components/parameters/AnswersQuery"
         - $ref: "#/components/parameters/EnginesQuery"
+        - $ref: "#/components/parameters/MegaModeQuery"
+        - $ref: "#/components/parameters/MegaDedupeQuery"
+        - $ref: "#/components/parameters/MegaMergeQuery"
         - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
         - $ref: "#/components/parameters/ProxyURLHeader"
@@ -567,6 +576,37 @@ components:
       schema:
         type: string
       example: google,bing,duckduckgo
+    MegaModeQuery:
+      name: mode
+      in: query
+      required: false
+      description: >
+        Mega execution mode. `balanced` (default) runs all selected engines in parallel.
+        `any` runs selected engines sequentially in request order until first success.
+        `fast` runs only one engine: the fastest by circuit-breaker average response time.
+      schema:
+        type: string
+        enum: [balanced, any, fast]
+        default: balanced
+    MegaDedupeQuery:
+      name: dedupe
+      in: query
+      required: false
+      description: >
+        Enable deduplication by normalized URL. Default `true`.
+      schema:
+        type: boolean
+        default: true
+    MegaMergeQuery:
+      name: merge
+      in: query
+      required: false
+      description: >
+        Merge results from all successful engines into one flat list. Default `true`.
+        When `false`, only the first requested engine that returned results is kept.
+      schema:
+        type: boolean
+        default: true
     FormatQuery:
       name: format
       in: query
@@ -1507,6 +1547,9 @@ components:
         retry_in:
           type: integer
           description: Seconds until next half-open attempt (present when state is open).
+        avg_response_ms:
+          type: integer
+          description: Average successful engine response time in milliseconds.
     CircuitBreakerStatsResponse:
       type: object
       required: [circuit_breakers]

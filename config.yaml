@@ -14,7 +14,7 @@ app:
   head: false # Headful mode
   leakless: false # Force browser process cleanup after request
   leave_head: false # Keep tabs open after request
-  max_processes: 4 # Concurrent Chrome processes
+  max_processes: 5 # Concurrent Chrome processes
   idle_ttl: 5m # close a Chrome that has not served traffic for this long
   mega_timeout: 90s # max total wait for /mega/* requests; slow engines return partial results
 proxies:
