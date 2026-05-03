@@ -36,6 +36,7 @@ type Config struct {
 	BaiduConfig      EngineConfig         `mapstructure:"baidu"`
 	BingConfig       EngineConfig         `mapstructure:"bing"`
 	DuckDuckGoConfig EngineConfig         `mapstructure:"duckduckgo"`
+	EcosiaConfig     EngineConfig         `mapstructure:"ecosia"`
 }
 
 type Config2Captcha struct {
@@ -195,6 +196,7 @@ func sanitizedConfigForLog(cfg Config) map[string]interface{} {
 		"baidu":      cfg.BaiduConfig,
 		"bing":       cfg.BingConfig,
 		"duckduckgo": cfg.DuckDuckGoConfig,
+		"ecosia":     cfg.EcosiaConfig,
 	}
 }
 

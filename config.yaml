@@ -84,3 +84,8 @@ bing:
 duckduckgo:
   rate_requests: 4
   rate_burst: 2
+
+ecosia:
+  rate_requests: 4
+  rate_burst: 2
+  # No proxy tag means direct traffic

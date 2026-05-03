@@ -16,6 +16,7 @@ import (
 	"github.com/karust/openserp/bing"
 	"github.com/karust/openserp/core"
 	"github.com/karust/openserp/duckduckgo"
+	"github.com/karust/openserp/ecosia"
 	"github.com/karust/openserp/google"
 	"github.com/karust/openserp/yandex"
 	"github.com/sirupsen/logrus"
@@ -631,6 +632,13 @@ func browserEngineSpecs() []browserEngineSpec {
 			opts: config.DuckDuckGoConfig.SearchEngineOptions,
 			factory: func(browser core.Browser, opts core.SearchEngineOptions) core.SearchEngine {
 				return duckduckgo.New(browser, opts)
+			},
+		},
+		{
+			name: "ecosia",
+			opts: config.EcosiaConfig.SearchEngineOptions,
+			factory: func(browser core.Browser, opts core.SearchEngineOptions) core.SearchEngine {
+				return ecosia.New(browser, opts)
 			},
 		},
 	}
