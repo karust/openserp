@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	version               = "0.7.7"
+	version               = "0.7.8"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -317,7 +317,7 @@ func initializeConfig(cmd *cobra.Command) error {
 }
 
 func validateEngineProxyTags(v *viper.Viper) error {
-	for _, engineName := range []string{"google", "yandex", "baidu", "bing", "duckduckgo"} {
+	for _, engineName := range []string{"google", "yandex", "baidu", "bing", "duckduckgo", "ecosia"} {
 		key := engineName + ".proxy"
 		if !v.IsSet(key) {
 			continue

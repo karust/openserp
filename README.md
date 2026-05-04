@@ -8,7 +8,7 @@
 [![Docker Pulls](https://img.shields.io/docker/v/karust/openserp)](https://hub.docker.com/repository/docker/karust/openserp)
 [![CI](https://github.com/karust/openserp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/karust/openserp/actions/workflows/ci.yml)
 
-**OpenSERP** is an API and CLI for accessing search engine results from **Google, Yandex, Baidu, Bing, and DuckDuckGo**.
+**OpenSERP** is an API and CLI for accessing search engine results from **Google, Yandex, Baidu, Bing, DuckDuckGo, and Ecosia**.
 A developer-friendly alternative to paid SERP API services!
 
 **Official website:** [openserp.org](https://openserp.org)
@@ -53,7 +53,7 @@ go build -o openserp .
 
 ## Search Endpoints
 
-Available engine names: `google`, `yandex`, `baidu`, `bing`, `duckduckgo`.
+Available engine names: `google`, `yandex`, `baidu`, `bing`, `duckduckgo`, `ecosia`.
 
 Dedicated engine endpoints:
 

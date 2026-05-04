@@ -39,6 +39,8 @@ func (r *rawEngine) Search(ctx context.Context, q core.Query) ([]core.SearchResu
 		return yandex.Search(ctx, q)
 	case "baidu":
 		return baidu.Search(ctx, q)
+	case "ecosia":
+		return ecosia.Search(ctx, q)
 	default:
 		return nil, fmt.Errorf("unsupported engine: %s", r.name)
 	}
@@ -102,6 +104,7 @@ func serve(cmd *cobra.Command, args []string) {
 			&rawEngine{name: "google"},
 			&rawEngine{name: "yandex"},
 			&rawEngine{name: "baidu"},
+			&rawEngine{name: "ecosia"},
 		)
 		if err := listenWithGracefulShutdown(serv, nil); err != nil {
 			logrus.Error(err)
