@@ -33,15 +33,6 @@ type imageDataJson struct {
 	}
 }
 
-var sel = struct {
-	Captcha string
-	Timeout string
-	Results string
-}{
-	Captcha: "div.passMod_dialog-wrapper",
-	Timeout: "button.timeout-button",
-	Results: "div.c-container.new-pmd",
-}
 
 // Baidu implements core.SearchEngine for Baidu SERP pages.
 type Baidu struct {
@@ -71,12 +62,12 @@ func (baid *Baidu) GetRateLimiter() *rate.Limiter {
 }
 
 func (baid *Baidu) isCaptcha(page *rod.Page) bool {
-	has, _, _ := page.Has(sel.Captcha)
+	has, _, _ := page.Has(Selectors.Captcha)
 	return has
 }
 
 func (baid *Baidu) isTimeout(page *rod.Page) bool {
-	has, _, _ := page.Has(sel.Timeout)
+	has, _, _ := page.Has(Selectors.Timeout)
 	return has
 }
 
@@ -132,7 +123,7 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 		}
 	}
 
-	searchRes, err := page.Timeout(baid.Timeout).Search(sel.Results)
+	searchRes, err := page.Timeout(baid.Timeout).Search(Selectors.Results)
 	if err != nil {
 		if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
 			closePage()
@@ -161,7 +152,7 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 
 	for i, r := range resultElements {
 		// Get URL
-		link, err := r.Element("a")
+		link, err := r.Element(Selectors.Link)
 		if err != nil {
 			if core.IsRodObjectNotFound(err) {
 				break

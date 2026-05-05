@@ -1,0 +1,134 @@
+package ecosia
+
+import (
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/PuerkitoBio/goquery"
+	"github.com/karust/openserp/core"
+)
+
+// ParseHTML parses an Ecosia SERP HTML document and returns search results.
+// No network I/O.
+func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
+	doc, err := goquery.NewDocumentFromReader(r)
+	if err != nil {
+		return nil, err
+	}
+	return parseEcosiaDocument(doc), nil
+}
+
+func parseEcosiaDocument(doc *goquery.Document) []core.SearchResult {
+	var results []core.SearchResult
+	rank := 1
+
+	doc.Find(Selectors.Result).Each(func(_ int, item *goquery.Selection) {
+		res, ok := parseEcosiaItem(item, rank, false)
+		if !ok {
+			return
+		}
+		results = append(results, res)
+		rank++
+	})
+
+	doc.Find(Selectors.Ad).Each(func(_ int, item *goquery.Selection) {
+		res, ok := parseEcosiaItem(item, -1, true)
+		if !ok {
+			return
+		}
+		results = append(results, res)
+	})
+
+	return core.DeduplicateResults(results)
+}
+
+func parseEcosiaItem(item *goquery.Selection, rank int, ad bool) (core.SearchResult, bool) {
+	linkTag := item.Find(Selectors.ResultLink).First()
+	if linkTag.Length() == 0 {
+		linkTag = item.Find("a[href]").First()
+	}
+	if linkTag.Length() == 0 {
+		return core.SearchResult{}, false
+	}
+
+	href, exists := linkTag.Attr("href")
+	if !exists {
+		return core.SearchResult{}, false
+	}
+	href = strings.TrimSpace(href)
+	if href == "" || strings.HasPrefix(href, "javascript:") {
+		return core.SearchResult{}, false
+	}
+
+	title := ""
+	if t := item.Find(Selectors.Title).First(); t.Length() > 0 {
+		title = strings.TrimSpace(t.Text())
+	}
+	if title == "" {
+		if t := item.Find("h2, h3").First(); t.Length() > 0 {
+			title = strings.TrimSpace(t.Text())
+		}
+	}
+
+	desc := ""
+	if d := item.Find(Selectors.Desc).First(); d.Length() > 0 {
+		desc = strings.TrimSpace(d.Text())
+	}
+
+	return core.SearchResult{
+		Rank:        rank,
+		URL:         href,
+		Title:       title,
+		Description: desc,
+		Ad:          ad,
+	}, true
+}
+
+// parseEcosiaImageItem extracts a single image card from a goquery Selection.
+func parseEcosiaImageItem(item *goquery.Selection, rank int) (core.SearchResult, bool) {
+	linkTag := item.Find(Selectors.ImageLink).First()
+	if linkTag.Length() == 0 {
+		return core.SearchResult{}, false
+	}
+	href, exists := linkTag.Attr("href")
+	if !exists {
+		return core.SearchResult{}, false
+	}
+	imgURL := strings.TrimSpace(href)
+	if imgURL == "" {
+		return core.SearchResult{}, false
+	}
+
+	title := ""
+	if img := linkTag.Find("img").First(); img.Length() > 0 {
+		if alt, err := img.Attr("alt"); err {
+			title = strings.TrimSpace(alt)
+		}
+	}
+
+	source := ""
+	if s := item.Find(Selectors.ImageSource).First(); s.Length() > 0 {
+		source = strings.TrimSpace(s.Text())
+	}
+	dims := ""
+	if d := item.Find(Selectors.ImageDims).First(); d.Length() > 0 {
+		dims = strings.TrimSpace(d.Text())
+	}
+
+	desc := source
+	if dims != "" {
+		if source != "" {
+			desc = fmt.Sprintf("%s (%s)", source, dims)
+		} else {
+			desc = dims
+		}
+	}
+
+	return core.SearchResult{
+		Rank:        rank,
+		URL:         imgURL,
+		Title:       title,
+		Description: desc,
+	}, true
+}

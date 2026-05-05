@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/signal"
@@ -535,6 +536,17 @@ type pooledBrowserEngine struct {
 	reportLaneStats bool
 }
 
+// parsableEngine wraps pooledBrowserEngine and additionally satisfies
+// core.HTMLParser for engines that have a stateless HTML parse function.
+type parsableEngine struct {
+	*pooledBrowserEngine
+	parseHTMLFn func(io.Reader) ([]core.SearchResult, error)
+}
+
+func (e *parsableEngine) ParseHTML(r io.Reader) ([]core.SearchResult, error) {
+	return e.parseHTMLFn(r)
+}
+
 func (e *pooledBrowserEngine) Search(ctx context.Context, q core.Query) ([]core.SearchResult, error) {
 	engine, err := e.resolveEngine(q)
 	if err != nil {
@@ -595,9 +607,10 @@ func (e *pooledBrowserEngine) resolveEngine(q core.Query) (core.SearchEngine, er
 }
 
 type browserEngineSpec struct {
-	name    string
-	opts    core.SearchEngineOptions
-	factory func(core.Browser, core.SearchEngineOptions) core.SearchEngine
+	name        string
+	opts        core.SearchEngineOptions
+	factory     func(core.Browser, core.SearchEngineOptions) core.SearchEngine
+	parseHTMLFn func(io.Reader) ([]core.SearchResult, error)
 }
 
 func browserEngineSpecs() []browserEngineSpec {
@@ -608,6 +621,7 @@ func browserEngineSpecs() []browserEngineSpec {
 			factory: func(browser core.Browser, opts core.SearchEngineOptions) core.SearchEngine {
 				return google.New(browser, opts)
 			},
+			parseHTMLFn: google.ParseHTML,
 		},
 		{
 			name: "yandex",
@@ -615,6 +629,7 @@ func browserEngineSpecs() []browserEngineSpec {
 			factory: func(browser core.Browser, opts core.SearchEngineOptions) core.SearchEngine {
 				return yandex.New(browser, opts)
 			},
+			parseHTMLFn: yandex.ParseHTML,
 		},
 		{
 			name: "baidu",
@@ -622,6 +637,7 @@ func browserEngineSpecs() []browserEngineSpec {
 			factory: func(browser core.Browser, opts core.SearchEngineOptions) core.SearchEngine {
 				return baidu.New(browser, opts)
 			},
+			parseHTMLFn: baidu.ParseHTML,
 		},
 		{
 			name: "bing",
@@ -629,6 +645,7 @@ func browserEngineSpecs() []browserEngineSpec {
 			factory: func(browser core.Browser, opts core.SearchEngineOptions) core.SearchEngine {
 				return bing.New(browser, opts)
 			},
+			parseHTMLFn: bing.ParseHTML,
 		},
 		{
 			name: "duckduckgo",
@@ -636,6 +653,7 @@ func browserEngineSpecs() []browserEngineSpec {
 			factory: func(browser core.Browser, opts core.SearchEngineOptions) core.SearchEngine {
 				return duckduckgo.New(browser, opts)
 			},
+			parseHTMLFn: duckduckgo.ParseHTML,
 		},
 		{
 			name: "ecosia",
@@ -643,6 +661,7 @@ func browserEngineSpecs() []browserEngineSpec {
 			factory: func(browser core.Browser, opts core.SearchEngineOptions) core.SearchEngine {
 				return ecosia.New(browser, opts)
 			},
+			parseHTMLFn: ecosia.ParseHTML,
 		},
 	}
 }
@@ -676,14 +695,19 @@ func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) (
 
 		opts := spec.opts
 		opts.Init()
-		engines = append(engines, &pooledBrowserEngine{
+		base := &pooledBrowserEngine{
 			name:            spec.name,
 			limiter:         rate.NewLimiter(rate.Every(opts.GetRatelimit()), opts.RateBurst),
 			opts:            opts,
 			factory:         spec.factory,
 			pool:            pool,
 			reportLaneStats: idx == 0,
-		})
+		}
+		if spec.parseHTMLFn != nil {
+			engines = append(engines, &parsableEngine{pooledBrowserEngine: base, parseHTMLFn: spec.parseHTMLFn})
+		} else {
+			engines = append(engines, base)
+		}
 	}
 
 	return engines, pool.close, nil

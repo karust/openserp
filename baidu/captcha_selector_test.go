@@ -17,17 +17,17 @@ func TestBaiduPageTypeSelectors(t *testing.T) {
 		selector string
 		wantHit  bool
 	}{
-		{"search_captcha.html", sel.Captcha, true},
-		{"search_captcha.html", sel.Timeout, true},
-		{"search_captcha.html", sel.Results, false},
+		{"search_captcha.html", Selectors.Captcha, true},
+		{"search_captcha.html", Selectors.Timeout, true},
+		{"search_captcha.html", Selectors.Results, false},
 
-		{"search_results.html", sel.Results, true},
-		{"search_results.html", sel.Captcha, false},
-		{"search_results.html", sel.Timeout, false},
+		{"search_results.html", Selectors.Results, true},
+		{"search_results.html", Selectors.Captcha, false},
+		{"search_results.html", Selectors.Timeout, false},
 
-		{"search_no_results.html", sel.Captcha, false},
-		{"search_no_results.html", sel.Timeout, false},
-		{"search_no_results.html", sel.Results, false},
+		{"search_no_results.html", Selectors.Captcha, false},
+		{"search_no_results.html", Selectors.Timeout, false},
+		{"search_no_results.html", Selectors.Results, false},
 	}
 
 	for _, tt := range tests {

@@ -213,6 +213,84 @@ paths:
           $ref: "#/components/responses/NotFoundError"
         "500":
           $ref: "#/components/responses/InternalServerError"
+  /google/parse:
+    post:
+      tags: [Search]
+      operationId: parseGoogleHTML
+      summary: Parse a Google SERP HTML document into structured results
+      description: >
+        Accepts raw Google SERP HTML in the request body and returns a standard
+        search envelope. Useful when an upstream provider delivers raw HTML
+        rather than JSON. No browser is used; parsing is done with goquery.
+        The body size limit is 10 MB.
+      requestBody:
+        required: true
+        content:
+          text/html:
+            schema:
+              type: string
+              description: Raw Google SERP HTML page
+      parameters:
+        - $ref: "#/components/parameters/FormatQuery"
+      responses:
+        "200":
+          description: Parsed search results envelope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchEnvelope"
+            text/markdown:
+              schema:
+                type: string
+            text/plain:
+              schema:
+                type: string
+            application/x-ndjson:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /bing/parse:
+    post:
+      tags: [Search]
+      operationId: parseBingHTML
+      summary: Parse a Bing SERP HTML document into structured results
+      description: >
+        Accepts raw Bing SERP HTML in the request body and returns a standard
+        search envelope. Useful when an upstream provider delivers raw HTML
+        rather than JSON. No browser is used; parsing is done with goquery.
+        The body size limit is 10 MB.
+      requestBody:
+        required: true
+        content:
+          text/html:
+            schema:
+              type: string
+              description: Raw Bing SERP HTML page
+      parameters:
+        - $ref: "#/components/parameters/FormatQuery"
+      responses:
+        "200":
+          description: Parsed search results envelope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchEnvelope"
+            text/markdown:
+              schema:
+                type: string
+            text/plain:
+              schema:
+                type: string
+            application/x-ndjson:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
   /mega/search:
     get:
       tags: [Mega]

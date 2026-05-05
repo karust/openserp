@@ -14,20 +14,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-var sel = struct {
-	Captcha      []string
-	CookieBtn    string
-	Results      string
-	Ads          string
-	ImageResults string
-}{
-	Captcha:      []string{"div.captcha", "div.captcha_header"},
-	CookieBtn:    "button#bnp_btn_accept",
-	Results:      "li.b_algo",
-	Ads:          "li.b_ad",
-	ImageResults: "div.iuscp, div.isv",
-}
-
 // Bing implements core.SearchEngine for Bing SERP pages.
 type Bing struct {
 	core.Browser
@@ -56,7 +42,7 @@ func (bing *Bing) GetRateLimiter() *rate.Limiter {
 }
 
 func (bing *Bing) getTotalResults(page *rod.Page) (int, error) {
-	results, err := page.Timeout(bing.GetSelectorTimeout()).Elements(sel.Results)
+	results, err := page.Timeout(bing.GetSelectorTimeout()).Elements(Selectors.Results)
 	if err != nil {
 		return 0, errors.New("Cannot find result elements: " + err.Error())
 	}
@@ -75,7 +61,7 @@ func (bing *Bing) checkCaptcha(page *rod.Page) bool {
 		}
 	}
 
-	for _, selector := range sel.Captcha {
+	for _, selector := range Selectors.Captcha {
 		has, _, _ := page.Has(selector)
 		if has {
 			bing.logger.Debug("Captcha detected: %s", selector)
@@ -87,7 +73,7 @@ func (bing *Bing) checkCaptcha(page *rod.Page) bool {
 }
 
 func (bing *Bing) acceptCookies(ctx context.Context, page *rod.Page) error {
-	consentBtn, err := page.Timeout(bing.Timeout / 10).Element(sel.CookieBtn)
+	consentBtn, err := page.Timeout(bing.Timeout / 10).Element(Selectors.CookieBtn)
 	if err != nil {
 		return nil
 	}
@@ -154,13 +140,13 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 		return nil, core.ErrSearchTimeout
 	}
 
-	organicElements, err := page.Timeout(bing.Timeout).Elements(sel.Results)
+	organicElements, err := page.Timeout(bing.Timeout).Elements(Selectors.Results)
 	if err != nil {
 		bing.logger.Error("Cannot parse organic results: %s", err)
 		return nil, core.ErrParser
 	}
 
-	adElements, err := page.Timeout(bing.Timeout).Elements(sel.Ads)
+	adElements, err := page.Timeout(bing.Timeout).Elements(Selectors.Ads)
 	if err != nil {
 		bing.logger.Debug("No ads found")
 	}
@@ -175,7 +161,7 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 	for _, result := range organicElements {
 		srchRes := core.SearchResult{}
 
-		titleElem, err := result.Element("a")
+		titleElem, err := result.Element(Selectors.Title)
 		if err != nil {
 			bing.logger.Debug("Missing title")
 			continue
@@ -190,11 +176,11 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 		srchRes.URL = href.String()
 
 		var desc string
-		if descElem, err := result.Element("div.b_caption p"); err == nil {
+		if descElem, err := result.Element(Selectors.DescPrimary); err == nil {
 			desc, _ = descElem.Text()
-		} else if descElem, err := result.Element("div.b_caption div"); err == nil {
+		} else if descElem, err := result.Element(Selectors.DescFallback); err == nil {
 			desc, _ = descElem.Text()
-		} else if descElem, err := result.Element("p"); err == nil {
+		} else if descElem, err := result.Element(Selectors.DescLast); err == nil {
 			desc, _ = descElem.Text()
 		} else {
 			fullText, _ := result.Text()
@@ -212,7 +198,7 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 	for _, adResult := range adElements {
 		srchRes := core.SearchResult{Ad: true}
 
-		titleElem, err := adResult.Element("h2 a")
+		titleElem, err := adResult.Element(Selectors.AdTitle)
 		if err != nil {
 			bing.logger.Debug("Ad missing title")
 			continue
@@ -226,7 +212,7 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 		}
 		srchRes.URL = href.String()
 
-		if descElem, err := adResult.Element("p"); err == nil {
+		if descElem, err := adResult.Element(Selectors.AdDesc); err == nil {
 			srchRes.Description, _ = descElem.Text()
 		}
 
@@ -334,7 +320,7 @@ func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.Sea
 	}
 
 	// Find all image result containers using CSS selector
-	imageContainers, err := page.Timeout(bing.Timeout).Elements(sel.ImageResults)
+	imageContainers, err := page.Timeout(bing.Timeout).Elements(Selectors.ImageResults)
 	if err != nil {
 		bing.logger.Error("Cannot parse image results: %s", err)
 		return nil, core.ErrSearchTimeout

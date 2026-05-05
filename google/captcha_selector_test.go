@@ -17,14 +17,14 @@ func TestGooglePageTypeSelectors(t *testing.T) {
 		selector string
 		wantHit  bool
 	}{
-		{"search_captcha.html", sel.Captcha, true},
-		{"search_captcha.html", sel.ResultStats, false},
+		{"search_captcha.html", Selectors.Captcha, true},
+		{"search_captcha.html", Selectors.ResultStats, false},
 
-		{"search_results.html", sel.ResultStats, true},
-		{"search_results.html", sel.Captcha, false},
+		{"search_results.html", Selectors.ResultStats, true},
+		{"search_results.html", Selectors.Captcha, false},
 
-		{"search_no_results.html", sel.ResultStats, true},
-		{"search_no_results.html", sel.Captcha, false},
+		{"search_no_results.html", Selectors.ResultStats, true},
+		{"search_no_results.html", Selectors.Captcha, false},
 	}
 
 	for _, tt := range tests {

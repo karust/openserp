@@ -3,6 +3,7 @@ package google
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -32,31 +33,36 @@ func googleRequest(ctx context.Context, searchURL string, query core.Query) (*ht
 	return res, nil
 }
 
-func googleResultParser(response *http.Response) ([]core.SearchResult, error) {
-	doc, err := goquery.NewDocumentFromReader(response.Body)
+// ParseHTML parses a Google SERP HTML document and returns search results.
+// It is the pure parser used by both raw HTTP search and parse endpoints.
+func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
+	doc, err := goquery.NewDocumentFromReader(r)
 	if err != nil {
 		return nil, err
 	}
+	return parseGoogleDocument(doc), nil
+}
 
+func parseGoogleDocument(doc *goquery.Document) []core.SearchResult {
 	results := []core.SearchResult{}
 	rank := 1
 
 	// Use data attributes instead of class names to find results
 	// Both old and new DOM have data-hveid and data-ved attributes
-	sel := doc.Find("div[data-hveid][data-ved]")
+	sel := doc.Find(Selectors.Results)
 
 	for i := range sel.Nodes {
 		item := sel.Eq(i)
 
 		// Skip items without an h3 element (which indicates a search result)
-		if item.Find("h3").Length() == 0 {
+		if item.Find(Selectors.Title).Length() == 0 {
 			continue
 		}
 
 		// Find URL - look for the anchor that contains the h3 title
-		linkTag := item.Find("h3").Parent()
+		linkTag := item.Find(Selectors.Title).Parent()
 		if !linkTag.Is("a") {
-			linkTag = item.Find("h3").Closest("a")
+			linkTag = item.Find(Selectors.Title).Closest("a")
 		}
 
 		link, exists := linkTag.Attr("href")
@@ -66,15 +72,15 @@ func googleResultParser(response *http.Response) ([]core.SearchResult, error) {
 		link = strings.Trim(link, " ")
 
 		// Find title - this is inside the h3 element
-		titleTag := item.Find("h3")
+		titleTag := item.Find(Selectors.Title)
 		title := titleTag.Text()
 
 		// Find description - find div with text content after the heading
 		// Using attribute selectors that match the description container
-		descTag := item.Find("div[data-sncf='1']").Find("div").First()
+		descTag := item.Find(Selectors.DescPrimary).First()
 		if descTag.Length() == 0 {
 			// Try another selector approach if the first one fails
-			descTag = item.Find("div.VwiC3b")
+			descTag = item.Find(Selectors.DescFallback)
 			if descTag.Length() == 0 {
 				// As a last resort, look for any div after the title that might contain description
 				titleParent := titleTag.Parent()
@@ -102,7 +108,11 @@ func googleResultParser(response *http.Response) ([]core.SearchResult, error) {
 	logrus.WithField("document_size", len(doc.Text())).Trace(
 		fmt.Sprintf("Google search document size: %d", len(doc.Text())),
 	)
-	return core.DeduplicateResults(results), err
+	return core.DeduplicateResults(results)
+}
+
+func googleResultParser(response *http.Response) ([]core.SearchResult, error) {
+	return ParseHTML(response.Body)
 }
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {

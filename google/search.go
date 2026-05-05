@@ -15,18 +15,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-var sel = struct {
-	Captcha     string
-	ResultStats string
-	CookieBtn   string
-	Results     string
-}{
-	Captcha:     "div[data-sitekey]",
-	ResultStats: "div#result-stats",
-	CookieBtn:   "div[role='dialog'][aria-modal] button",
-	Results:     "div[data-hveid][data-ved]",
-}
-
 // Google implements core.SearchEngine for Google SERP pages.
 type Google struct {
 	core.Browser
@@ -61,7 +49,7 @@ func (gogl *Google) getTotalResults(page *rod.Page) (int, error) {
 		return 0, core.ErrParser
 	}
 
-	resultsStats, err := page.Timeout(gogl.GetSelectorTimeout()).Search(sel.ResultStats)
+	resultsStats, err := page.Timeout(gogl.GetSelectorTimeout()).Search(Selectors.ResultStats)
 	if err != nil {
 		return 0, errors.New("Result stats not found: " + err.Error())
 	}
@@ -124,12 +112,12 @@ func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas, proxyURL string
 }
 
 func (gogl *Google) checkCaptcha(page *rod.Page, queryProxyURL string) bool {
-	has, _, _ := page.Has(sel.Captcha)
+	has, _, _ := page.Has(Selectors.Captcha)
 	if !has {
 		return false
 	}
 
-	captchaDiv, err := page.Element(sel.Captcha)
+	captchaDiv, err := page.Element(Selectors.Captcha)
 	if err != nil {
 		return true
 	}
@@ -167,7 +155,7 @@ func (gogl *Google) preparePage(page *rod.Page) {
 }
 
 func (gogl *Google) acceptCookies(page *rod.Page) {
-	diaglogBtns, err := page.Timeout(gogl.Timeout / 10).Search(sel.CookieBtn)
+	diaglogBtns, err := page.Timeout(gogl.Timeout / 10).Search(Selectors.CookieBtn)
 	if err != nil {
 		gogl.logger.Debug("Cookie consent not found: %s", err)
 		return
@@ -233,7 +221,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 	}
 
 	// Find all results using stable attributes
-	searchRes, err := page.Timeout(gogl.Timeout).Search(sel.Results)
+	searchRes, err := page.Timeout(gogl.Timeout).Search(Selectors.Results)
 	if err != nil {
 		gogl.logger.Error("Cannot parse search results: %s", err)
 		return nil, core.ErrParser
@@ -310,7 +298,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 
 		} else if query.Answers && strings.Contains(attrs, "data-ulkwtsb") && !strings.Contains(attrs, "data-ispaa") {
 			// 2. Parse answer boxes
-			answerEls, err := resEl.Page().Search("div[data-hveid][data-ulkwtsb] div[data-q]")
+			answerEls, err := resEl.Page().Search(Selectors.AnswerBox)
 			if err != nil {
 				gogl.logger.Debug("Answer parsing failed: %s", err.Error())
 				continue
@@ -352,7 +340,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 				}
 
 				// Get URL
-				link, err := answ.Element("a")
+				link, err := answ.Element(Selectors.AnswerItem)
 				if err != nil {
 					gogl.logger.Debug("Missing answer link")
 					continue
@@ -376,7 +364,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 		} else if strings.Contains(attrs, "data-ved") {
 			// Parse regular search results
 			// Get title from h3
-			titleTag, err := resEl.Element("h3")
+			titleTag, err := resEl.Element(Selectors.Title)
 			if err != nil {
 				continue
 			}
@@ -402,9 +390,9 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 
 			// Get description using multiple fallback strategies
 			desc := ""
-			if descTag, err := resEl.Element("div[data-sncf='1'] div"); err == nil {
+			if descTag, err := resEl.Element(Selectors.DescPrimary); err == nil {
 				desc, _ = descTag.Text()
-			} else if descTag, err := resEl.Element("div.VwiC3b"); err == nil {
+			} else if descTag, err := resEl.Element(Selectors.DescFallback); err == nil {
 				desc, _ = descTag.Text()
 			} else {
 				// Structural fallback

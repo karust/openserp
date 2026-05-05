@@ -15,18 +15,6 @@ import (
 // a plain-text 202 rate-limit response rather than a structured captcha page.
 const captchaBodyText = "bots user"
 
-var sel = struct {
-	NoResults string
-	Results   []string
-}{
-	NoResults: "div[class*='no-results']",
-	Results: []string{
-		"article[data-testid='result']",
-		"div.result",
-		"div[data-testid='result']",
-	},
-}
-
 // DuckDuckGo implements core.SearchEngine for DuckDuckGo SERP pages.
 type DuckDuckGo struct {
 	core.Browser
@@ -66,7 +54,7 @@ func (ddg *DuckDuckGo) isCaptcha(page *rod.Page) bool {
 }
 
 func (ddg *DuckDuckGo) isNoResults(page *rod.Page) bool {
-	has, _, _ := page.Has(sel.NoResults)
+	has, _, _ := page.Has(Selectors.NoResults)
 	return has
 }
 
@@ -78,17 +66,7 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 		var link *rod.Element
 		var err error
 
-		linkSelectors := []string{
-			"a[data-testid='result-title-a']",
-			"a.result__a",
-			"a.result__url",
-			"h2 a",
-			"h3 a",
-			"a[href]",
-			"a",
-		}
-
-		for _, selector := range linkSelectors {
+		for _, selector := range Selectors.Link {
 			link, err = r.Element(selector)
 			if err == nil {
 				break
@@ -118,15 +96,7 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 
 		// Get title - try multiple selectors
 		var titleTag *rod.Element
-		titleSelectors := []string{
-			"h2",
-			".result__title",
-			".result__a",
-			"span",
-			"div",
-		}
-
-		for _, selector := range titleSelectors {
+		for _, selector := range Selectors.Title {
 			titleTag, err = r.Element(selector)
 			if err == nil {
 				break
@@ -140,16 +110,7 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 
 		// Get description - try multiple selectors
 		desc := ""
-		descSelectors := []string{
-			"div[data-result='snippet']",
-			".result__snippet",
-			".result__body",
-			"span[class*='snippet']",
-			"div[class*='snippet']",
-			"p",
-		}
-
-		for _, selector := range descSelectors {
+		for _, selector := range Selectors.Desc {
 			descTag, err := r.Element(selector)
 			if err == nil {
 				desc, _ = descTag.Text()
@@ -159,13 +120,7 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 
 		// Check if it's an ad
 		isAd := false
-		adSelectors := []string{
-			"[data-testid='ad-badge']",
-			".ad-badge",
-			".result--ad",
-		}
-
-		for _, selector := range adSelectors {
+		for _, selector := range Selectors.AdBadge {
 			adIndicator, err := r.Element(selector)
 			if err == nil && adIndicator != nil {
 				isAd = true
@@ -230,17 +185,7 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 		var searchRes *rod.SearchResult
 		var searchErr error
 
-		// Try different selectors for DuckDuckGo results
-		selectors := []string{
-			"article[data-testid='result']",
-			"div[data-testid='result']",
-			"div.result",
-			"div.web-result",
-			".result",
-			"[data-testid='result']",
-		}
-
-		for _, selector := range selectors {
+		for _, selector := range Selectors.Results {
 			searchRes, searchErr = page.Timeout(ddg.GetSelectorTimeout()).Search(selector)
 			if searchErr == nil && searchRes != nil {
 				ddg.logger.Debug("Found results with selector: %s", selector)
@@ -355,19 +300,7 @@ func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]cor
 	var searchRes *rod.SearchResult
 	var searchErr error
 
-	selectors := []string{
-		"figure",
-		// "figure.nsogf_Hpj9UUxfhcwQd5",
-		// "div[data-testid='result']",
-		// "div.tile--img",
-		// "div.tile.tile--img",
-		// "div.js-images-show-more",
-		// "div.img-result",
-	}
-
-	ddg.logger.Debug("Trying selectors: %v", selectors)
-
-	for _, selector := range selectors {
+	for _, selector := range Selectors.ImageResult {
 		searchRes, searchErr = page.Timeout(ddg.GetSelectorTimeout()).Search(selector)
 		if searchErr == nil && searchRes != nil {
 			ddg.logger.Debug("Found image results with selector: %s", selector)
@@ -406,13 +339,7 @@ func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]cor
 		var imgTag *rod.Element
 		var imgErr error
 
-		imgSelectors := []string{
-			"img",
-			"div.SZ76bwIlqO8BBoqOLqYV img",
-			"img[src*='duckduckgo.com']",
-		}
-
-		for _, selector := range imgSelectors {
+		for _, selector := range Selectors.ImageImg {
 			imgTag, imgErr = r.Element(selector)
 			if imgErr == nil {
 				break
@@ -434,17 +361,7 @@ func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]cor
 		var titleTag *rod.Element
 		var titleErr error
 
-		titleSelectors := []string{
-			"figcaption a p span",
-			"figcaption span",
-			"figcaption p span",
-			"span.EKtkFWMYpwzMKOYr0GYm",
-			"h3",
-			"span",
-			"p",
-		}
-
-		for _, selector := range titleSelectors {
+		for _, selector := range Selectors.ImageTitle {
 			titleTag, titleErr = r.Element(selector)
 			if titleErr == nil {
 				break
@@ -460,12 +377,7 @@ func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]cor
 		var linkTag *rod.Element
 		var linkErr error
 
-		linkSelectors := []string{
-			"figcaption a",
-			"a",
-		}
-
-		for _, selector := range linkSelectors {
+		for _, selector := range Selectors.ImageLink {
 			linkTag, linkErr = r.Element(selector)
 			if linkErr == nil {
 				break

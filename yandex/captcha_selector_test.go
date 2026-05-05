@@ -17,16 +17,16 @@ func TestYandexPageTypeSelectors(t *testing.T) {
 		selector string
 		wantHit  bool
 	}{
-		{"search_captcha.html", sel.Captcha, true},
-		{"search_captcha.html", sel.NoResults, false},
+		{"search_captcha.html", Selectors.Captcha, true},
+		{"search_captcha.html", Selectors.NoResults, false},
 		{"search_captcha.html", "li[data-fast]", false},
 
 		{"search_results.html", "li[data-fast]", true},
-		{"search_results.html", sel.Captcha, false},
-		{"search_results.html", sel.NoResults, false},
+		{"search_results.html", Selectors.Captcha, false},
+		{"search_results.html", Selectors.NoResults, false},
 
-		{"search_no_results.html", sel.NoResults, true},
-		{"search_no_results.html", sel.Captcha, false},
+		{"search_no_results.html", Selectors.NoResults, true},
+		{"search_no_results.html", Selectors.Captcha, false},
 		{"search_no_results.html", "li[data-fast]", false},
 	}
 

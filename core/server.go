@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -122,6 +123,7 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 	addr := fmt.Sprintf("%s:%d", host, port)
 	app := fiber.New(fiber.Config{
 		ErrorHandler: JSONErrorMiddleware(),
+		BodyLimit:    10 * 1024 * 1024,
 	})
 
 	serv := Server{
@@ -179,6 +181,18 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 		serv.app.Get(fmt.Sprintf("/%s/image", endpointName), func(c *fiber.Ctx) error {
 			return serv.handleDedicatedEndpoint(c, locEngine, true)
 		})
+	}
+
+	for _, engine := range searchEngines {
+		parser, ok := engine.(HTMLParser)
+		if !ok {
+			continue
+		}
+		locParser := parser
+		serv.app.Post(fmt.Sprintf("/%s/parse", strings.ToLower(parser.Name())),
+			func(c *fiber.Ctx) error {
+				return serv.handleParseEndpoint(c, locParser)
+			})
 	}
 
 	serv.app.Get("/mega/search", serv.handleMegaSearch)
@@ -330,6 +344,42 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		completionCtx = WithEngine(completionCtx, usedEngine)
 	}
 	WithRequest(completionCtx).WithFields(logrus.Fields{"action": action, "results_count": len(res)}).Info("Search completed")
+	return sendEnvelope(c, format, env)
+}
+
+func (s *Server) handleParseEndpoint(c *fiber.Ctx, parser HTMLParser) error {
+	startedAt := time.Now()
+	requestCtx := withRequestUsage(c.UserContext(), parser.Name())
+	c.SetUserContext(requestCtx)
+
+	body := c.Body()
+	if len(body) == 0 {
+		return errInvalidParam("request body is empty")
+	}
+
+	format, err := resolveFormat(c)
+	if err != nil {
+		return err
+	}
+
+	results, err := parser.ParseHTML(bytes.NewReader(body))
+	if err != nil {
+		return &APIError{
+			HTTPStatus: fiber.StatusBadRequest,
+			ErrorCode:  "parser_failure",
+			Message:    fmt.Sprintf("failed to parse HTML: %v", err),
+		}
+	}
+
+	requestID := RequestIDFromContext(requestCtx)
+	q := Query{}
+	env := NewEnvelope(q, requestID, startedAt, []string{parser.Name()})
+	ectx := EnrichContext{Engine: parser.Name(), Query: q}
+	for _, r := range results {
+		env.Results = append(env.Results, EnrichResult(r, ectx))
+	}
+	env.Finalize(startedAt, q)
+
 	return sendEnvelope(c, format, env)
 }
 

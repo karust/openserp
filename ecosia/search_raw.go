@@ -42,14 +42,14 @@ func resultParser(response *http.Response) ([]core.SearchResult, error) {
 		results []core.SearchResult
 		rank    = 1
 	)
-	doc.Find(sel.Result).Each(func(_ int, s *goquery.Selection) {
-		href, ok := s.Find(sel.ResultLink).Attr("href")
+	doc.Find(Selectors.Result).Each(func(_ int, s *goquery.Selection) {
+		href, ok := s.Find(Selectors.ResultLink).Attr("href")
 		if !ok || strings.TrimSpace(href) == "" {
 			return
 		}
 		var (
-			title = strings.TrimSpace(s.Find(sel.Title).Text())
-			desc  = strings.TrimSpace(s.Find(sel.Desc).Text())
+			title = strings.TrimSpace(s.Find(Selectors.Title).Text())
+			desc  = strings.TrimSpace(s.Find(Selectors.Desc).Text())
 		)
 		results = append(results, core.SearchResult{
 			Rank:        rank,
@@ -60,14 +60,14 @@ func resultParser(response *http.Response) ([]core.SearchResult, error) {
 		rank++
 	})
 	adRank := -1
-	doc.Find(sel.Ad).Each(func(_ int, s *goquery.Selection) {
-		href, ok := s.Find(sel.ResultLink).Attr("href")
+	doc.Find(Selectors.Ad).Each(func(_ int, s *goquery.Selection) {
+		href, ok := s.Find(Selectors.ResultLink).Attr("href")
 		if !ok || strings.TrimSpace(href) == "" {
 			return
 		}
 		var (
-			title = strings.TrimSpace(s.Find(sel.Title).Text())
-			desc  = strings.TrimSpace(s.Find(sel.Desc).Text())
+			title = strings.TrimSpace(s.Find(Selectors.Title).Text())
+			desc  = strings.TrimSpace(s.Find(Selectors.Desc).Text())
 		)
 		results = append(results, core.SearchResult{
 			Rank:        adRank,
@@ -92,16 +92,16 @@ func imageResultParser(response *http.Response) ([]core.SearchResult, error) {
 		results []core.SearchResult
 		rank    = 1
 	)
-	doc.Find(sel.ImageResult).Each(func(_ int, s *goquery.Selection) {
-		href, ok := s.Find(sel.ImageLink).Attr("href")
+	doc.Find(Selectors.ImageResult).Each(func(_ int, s *goquery.Selection) {
+		href, ok := s.Find(Selectors.ImageLink).Attr("href")
 		if !ok || strings.TrimSpace(href) == "" {
 			return
 		}
-		title, _ := s.Find(sel.ImageLink).Find("img").Attr("alt")
+		title, _ := s.Find(Selectors.ImageLink).Find("img").Attr("alt")
 		title = strings.TrimSpace(title)
 		var (
-			source = strings.TrimSpace(s.Find(sel.ImageSource).Text())
-			dims   = strings.TrimSpace(s.Find(sel.ImageDims).Text())
+			source = strings.TrimSpace(s.Find(Selectors.ImageSource).Text())
+			dims   = strings.TrimSpace(s.Find(Selectors.ImageDims).Text())
 			desc   = source
 		)
 		if dims != "" {

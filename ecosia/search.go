@@ -43,32 +43,6 @@ const (
 	cfBodyMarker = "not a bot"
 )
 
-// Ecosia's SERP DOM shape varies by the underlying provider chosen per market
-// (Bing, Google, or EUSP per Ecosia's search-features doc). The data-test-id
-// attributes are the most stable surface across providers; class names drift.
-var sel = struct {
-	Mainline    string
-	Result      string
-	Ad          string
-	ResultLink  string
-	Title       string
-	Desc        string
-	ImageResult string
-	ImageLink   string
-	ImageSource string
-	ImageDims   string
-}{
-	Mainline:    "[data-test-id='mainline']",
-	Result:      "[data-test-id='mainline-result-web']",
-	Ad:          "[data-test-id='mainline-result-ad']",
-	ResultLink:  "[data-test-id='result-link']",
-	Title:       "[data-test-id='result-title']",
-	Desc:        "[data-test-id='result-description']",
-	ImageResult: "[data-test-id='images-result']",
-	ImageLink:   "[data-test-id='image-result-link']",
-	ImageSource: "[data-test-id='image-result-source']",
-	ImageDims:   "[data-test-id='image-result-dimensions']",
-}
 
 // Ecosia implements core.SearchEngine for Ecosia SERP pages. Additional
 // documentation at https://support.ecosia.org/article/447-search-features.
@@ -117,7 +91,7 @@ func (e *Ecosia) isCaptcha(page *rod.Page) bool {
 }
 
 func (e *Ecosia) parseResult(elem *rod.Element, rank int, ad bool) (core.SearchResult, bool) {
-	link, err := elem.Element(sel.ResultLink)
+	link, err := elem.Element(Selectors.ResultLink)
 	if err != nil {
 		// Fall back to the first anchor when the test-id selector is absent.
 		link, err = elem.Element("a[href]")
@@ -135,14 +109,14 @@ func (e *Ecosia) parseResult(elem *rod.Element, rank int, ad bool) (core.SearchR
 	}
 
 	title := ""
-	if t, err := elem.Element(sel.Title); err == nil {
+	if t, err := elem.Element(Selectors.Title); err == nil {
 		title, _ = t.Text()
 	} else if t, err := elem.Element("h2, h3"); err == nil {
 		title, _ = t.Text()
 	}
 
 	desc := ""
-	if d, err := elem.Element(sel.Desc); err == nil {
+	if d, err := elem.Element(Selectors.Desc); err == nil {
 		desc, _ = d.Text()
 	}
 
@@ -206,7 +180,7 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 			return nil, core.ErrSearchTimeout
 		}
 
-		if _, err := page.Timeout(e.GetSelectorTimeout()).Element(sel.Mainline); err != nil {
+		if _, err := page.Timeout(e.GetSelectorTimeout()).Element(Selectors.Mainline); err != nil {
 			if e.isCaptcha(page) {
 				closePage()
 				e.logger.Error("Captcha detected: %s", u)
@@ -217,8 +191,8 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 			break
 		}
 
-		organic, _ := page.Elements(sel.Result)
-		ads, _ := page.Elements(sel.Ad)
+		organic, _ := page.Elements(Selectors.Result)
+		ads, _ := page.Elements(Selectors.Ad)
 		if len(organic) == 0 && len(ads) == 0 {
 			// Empty mainline = zero-result query or end of pagination, not
 			// a parser failure; don't trip the retry path.
@@ -266,7 +240,7 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 // parseImageResult extracts a single image card into a SearchResult,
 // returning (_, false) if the card lacks a usable image URL.
 func (e *Ecosia) parseImageResult(el *rod.Element, rank int) (core.SearchResult, bool) {
-	link, err := el.Element(sel.ImageLink)
+	link, err := el.Element(Selectors.ImageLink)
 	if err != nil {
 		return core.SearchResult{}, false
 	}
@@ -287,12 +261,12 @@ func (e *Ecosia) parseImageResult(el *rod.Element, rank int) (core.SearchResult,
 	}
 
 	source := ""
-	if s, err := el.Element(sel.ImageSource); err == nil {
+	if s, err := el.Element(Selectors.ImageSource); err == nil {
 		source, _ = s.Text()
 		source = strings.TrimSpace(source)
 	}
 	dims := ""
-	if d, err := el.Element(sel.ImageDims); err == nil {
+	if d, err := el.Element(Selectors.ImageDims); err == nil {
 		dims, _ = d.Text()
 		dims = strings.TrimSpace(dims)
 	}
@@ -362,7 +336,7 @@ func (e *Ecosia) SearchImage(ctx context.Context, query core.Query) (results []c
 			return nil, core.ErrSearchTimeout
 		}
 
-		if _, err := page.Timeout(e.GetSelectorTimeout()).Element(sel.ImageResult); err != nil {
+		if _, err := page.Timeout(e.GetSelectorTimeout()).Element(Selectors.ImageResult); err != nil {
 			if e.isCaptcha(page) {
 				closePage()
 				e.logger.Error("Captcha detected: %s", u)
@@ -373,7 +347,7 @@ func (e *Ecosia) SearchImage(ctx context.Context, query core.Query) (results []c
 			break
 		}
 
-		elements, err := page.Elements(sel.ImageResult)
+		elements, err := page.Elements(Selectors.ImageResult)
 		if err != nil {
 			closePage()
 			e.logger.Error("Cannot collect image results: %s", err)
