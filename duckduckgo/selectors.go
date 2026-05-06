@@ -1,23 +1,52 @@
 package duckduckgo
 
 // Selectors is the single source of truth for DuckDuckGo SERP CSS selectors.
+//
+// Order matters: WaitForElements / parseResults try selectors in declared order
+// and stop on the first hit. Put the most specific / current variants first;
+// keep older fallbacks last to absorb DOM rewrites without losing coverage.
 var Selectors = struct {
-	NoResults   string
-	Results     []string
-	Title       []string
-	Desc        []string
-	Link        []string
-	AdBadge     []string
-	ImageResult []string
-	ImageImg    []string
-	ImageTitle  []string
-	ImageLink   []string
+	NoResults        []string
+	CaptchaSelectors []string
+	CaptchaMarkers   []string
+	Results          []string
+	Title            []string
+	Desc             []string
+	Link             []string
+	AdBadge          []string
+	ImageResult      []string
+	ImageImg         []string
+	ImageTitle       []string
+	ImageLink        []string
 }{
-	NoResults: "div[class*='no-results']",
+	NoResults: []string{
+		"div[class*='no-results']",
+		"[data-testid='no-results']",
+		"div[data-result='no-results']",
+	},
+	// CaptchaSelectors detect DDG's anomaly/challenge interstitials via DOM.
+	CaptchaSelectors: []string{
+		"form[action*='anomaly']",
+		"input[name='challenge']",
+		"div[id*='anomaly']",
+		"div[class*='captcha']",
+	},
+	// CaptchaMarkers are case-insensitive substrings used for full-HTML scan
+	// fallback when the selectors above don't match. DDG sometimes returns a
+	// plain-text 202 rate-limit page rather than a structured form, so the
+	// HTML scan is the only reliable signal in those cases.
+	CaptchaMarkers: []string{
+		"bots user",
+		"bots use duckduckgo too",
+		"human verification",
+		"unusual traffic",
+		"anomaly",
+	},
 	Results: []string{
 		"article[data-testid='result']",
-		"div.result",
+		"li[data-layout='organic']",
 		"div[data-testid='result']",
+		"div.result",
 	},
 	Title: []string{
 		"h2",
@@ -41,11 +70,11 @@ var Selectors = struct {
 		".result--ad",
 	},
 	ImageResult: []string{
+		"figure[data-testid='image-result']",
 		"figure",
 	},
 	ImageImg: []string{
 		"img",
-		"img[src*='duckduckgo.com']",
 	},
 	ImageTitle: []string{
 		"figcaption a p span",

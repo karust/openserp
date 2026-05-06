@@ -36,7 +36,6 @@ type ImageData struct {
 	} `json:"initialState"`
 }
 
-
 // Yandex implements core.SearchEngine for Yandex SERP pages.
 type Yandex struct {
 	core.Browser
@@ -124,6 +123,26 @@ func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.Searc
 	return searchResults
 }
 
+func (yand *Yandex) parseImageEntities(items rod.Elements) map[string]ImageEntity {
+	entities := make(map[string]ImageEntity)
+	for _, item := range items {
+		state, err := item.Attribute("data-state")
+		if err != nil || state == nil || *state == "" {
+			continue
+		}
+
+		var imgData ImageData
+		if err := json.Unmarshal([]byte(*state), &imgData); err != nil {
+			continue
+		}
+
+		for id, entity := range imgData.InitalState.SerpList.Items.Entities {
+			entities[id] = entity
+		}
+	}
+	return entities
+}
+
 // Search executes a Yandex web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
@@ -172,32 +191,21 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 			}
 		}
 
-		// Get all search results in page
-		searchRes, err := page.Timeout(yand.Timeout).Search(Selectors.Results)
+		elements, _, err := core.WaitForElements(ctx, page, []string{Selectors.Results}, yand.GetSelectorTimeout())
 		if err != nil {
-			closePage()
-			yand.logger.Error("Cannot parse search results: %s", err)
-			return nil, core.ErrParser
-		}
-
-		// Check why no results, maybe captcha?
-		if searchRes == nil {
-			closePage()
-
-			if yand.isNoResults(page) {
-				yand.logger.Warn("No results found")
-			} else if yand.isCaptcha(page) {
+			if yand.isCaptcha(page) {
 				yand.logger.Error("Captcha detected: %s", url)
+				closePage()
 				return nil, core.ErrCaptcha
 			}
-			break
-		}
-
-		elements, err := searchRes.All()
-		if err != nil {
-			yand.logger.Error("Cannot get search elements: %s", err)
+			if yand.isNoResults(page) {
+				yand.logger.Warn("No results found")
+				closePage()
+				break
+			}
 			closePage()
-			break
+			yand.logger.Error("Cannot parse search results: %s", err)
+			return nil, core.ErrSearchTimeout
 		}
 
 		r := yand.parseResults(elements, searchPage)
@@ -237,6 +245,7 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 	yand.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}
+	allowPagination := query.Limit > 30
 
 	searchPage := 0
 	for len(searchResults) < query.Limit {
@@ -259,43 +268,45 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 			}
 		}
 
-		//page.Keyboard.Press(input.End)
-		//page.WaitLoad()
-		//time.Sleep(time.Duration(time.Second * 2))
-
-		results, err := page.Timeout(yand.Timeout).Search(Selectors.ImageItems)
+		results, _, err := core.WaitForElements(
+			ctx,
+			page,
+			append([]string{Selectors.ImageItems}, Selectors.ImageItemsAlt...),
+			yand.GetSelectorTimeout(),
+		)
 		if err != nil {
-			closePage()
-			yand.logger.Error("Cannot find search results: %s", err)
-			return searchResults, core.ErrParser
+			if allStateNodes, allErr := page.Elements(Selectors.ImageStateAll); allErr == nil && len(allStateNodes) > 0 {
+				results = allStateNodes
+				err = nil
+			}
 		}
-
-		// Check why no results
-		if results == nil {
-			closePage()
+		if err != nil {
 			if yand.isCaptcha(page) {
 				yand.logger.Error("Captcha detected: %s", url)
+				closePage()
 				return searchResults, core.ErrCaptcha
-			} else if yand.isNoResults(page) {
+			}
+			if yand.isNoResults(page) {
 				yand.logger.Warn("No results found")
 			}
+			closePage()
 			return searchResults, core.ErrSearchTimeout
 		}
 
-		data, err := results.First.Attribute("data-state")
-		if err != nil {
+		pageEntities := yand.parseImageEntities(results)
+		if len(pageEntities) == 0 {
+			allStateNodes, allErr := page.Elements(Selectors.ImageStateAll)
+			if allErr == nil && len(allStateNodes) > 0 {
+				pageEntities = yand.parseImageEntities(allStateNodes)
+			}
+		}
+		if len(pageEntities) == 0 {
 			closePage()
-			return nil, err
+			break
 		}
 
-		var imgData ImageData
-		if err := json.Unmarshal([]byte(*data), &imgData); err != nil {
-			closePage()
-			return nil, err
-		}
-
-		for id := range imgData.InitalState.SerpList.Items.Entities {
-			img := imgData.InitalState.SerpList.Items.Entities[id]
+		for id := range pageEntities {
+			img := pageEntities[id]
 			res := core.SearchResult{
 				Rank:        img.Rank + 1,
 				URL:         img.OrigURL,
@@ -304,6 +315,14 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 			}
 
 			searchResults = append(searchResults, res)
+		}
+		if len(searchResults) >= query.Limit {
+			closePage()
+			break
+		}
+		if searchPage == 1 && !allowPagination {
+			closePage()
+			break
 		}
 
 		closePage()

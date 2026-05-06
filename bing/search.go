@@ -122,11 +122,6 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 		}
 	}()
 
-	if err := page.WaitLoad(); err != nil {
-		bing.logger.Error("Initial page load wait failed: %s", err)
-		return nil, core.ErrSearchTimeout
-	}
-
 	if bing.checkCaptcha(page) {
 		bing.logger.Error("Captcha detected: %s", url)
 		return nil, core.ErrCaptcha
@@ -135,18 +130,19 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 	if err := bing.acceptCookies(ctx, page); err != nil {
 		return nil, err
 	}
-	if err := page.WaitLoad(); err != nil {
-		bing.logger.Error("Post-consent page load wait failed: %s", err)
+
+	organicElements, _, err := core.WaitForElements(ctx, page, []string{Selectors.Results}, bing.GetSelectorTimeout())
+	if err != nil {
+		// Re-check captcha on timeout - Bing interstitials can render after WaitLoad.
+		if bing.checkCaptcha(page) {
+			bing.logger.Error("Captcha detected: %s", url)
+			return nil, core.ErrCaptcha
+		}
+		bing.logger.Error("Cannot parse organic results: %s", err)
 		return nil, core.ErrSearchTimeout
 	}
 
-	organicElements, err := page.Timeout(bing.Timeout).Elements(Selectors.Results)
-	if err != nil {
-		bing.logger.Error("Cannot parse organic results: %s", err)
-		return nil, core.ErrParser
-	}
-
-	adElements, err := page.Timeout(bing.Timeout).Elements(Selectors.Ads)
+	adElements, err := page.Timeout(bing.GetSelectorTimeout()).Elements(Selectors.Ads)
 	if err != nil {
 		bing.logger.Debug("No ads found")
 	}
@@ -166,7 +162,6 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 			bing.logger.Debug("Missing title")
 			continue
 		}
-		srchRes.Title, _ = titleElem.Text()
 
 		href, err := titleElem.Property("href")
 		if err != nil {
@@ -174,13 +169,26 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 			continue
 		}
 		srchRes.URL = href.String()
+		if strings.TrimSpace(srchRes.URL) == "" || strings.HasPrefix(srchRes.URL, "javascript:") {
+			continue
+		}
+
+		srchRes.Title, _ = titleElem.Text()
+		srchRes.Title = strings.TrimSpace(srchRes.Title)
+		if srchRes.Title == "" {
+			srchRes.Title = core.FirstNonEmptyText(result, Selectors.TitleFallbacks...)
+		}
+		if srchRes.Title == "" {
+			bing.logger.Debug("Missing title text")
+			continue
+		}
 
 		var desc string
 		if descElem, err := result.Element(Selectors.DescPrimary); err == nil {
 			desc, _ = descElem.Text()
 		} else if descElem, err := result.Element(Selectors.DescFallback); err == nil {
 			desc, _ = descElem.Text()
-		} else if descElem, err := result.Element(Selectors.DescLast); err == nil {
+		} else if descElem, err := result.Element("p"); err == nil {
 			desc, _ = descElem.Text()
 		} else {
 			fullText, _ := result.Text()
@@ -204,6 +212,13 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 			continue
 		}
 		srchRes.Title, _ = titleElem.Text()
+		srchRes.Title = strings.TrimSpace(srchRes.Title)
+		if srchRes.Title == "" {
+			srchRes.Title = core.FirstNonEmptyText(adResult, "h2", "a[aria-label]")
+		}
+		if srchRes.Title == "" {
+			continue
+		}
 
 		href, err := titleElem.Property("href")
 		if err != nil {
@@ -212,7 +227,7 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 		}
 		srchRes.URL = href.String()
 
-		if descElem, err := adResult.Element(Selectors.AdDesc); err == nil {
+		if descElem, err := adResult.Element("p"); err == nil {
 			srchRes.Description, _ = descElem.Text()
 		}
 
@@ -261,6 +276,16 @@ type BingImageData struct {
 	MURL   string `json:"murl"`   // Image URL
 }
 
+func resolveImageLinkElement(container *rod.Element) (*rod.Element, error) {
+	if container == nil {
+		return nil, errors.New("nil image container")
+	}
+	if core.HasAttribute(container, "m") {
+		return container, nil
+	}
+	return container.Element("a")
+}
+
 // SearchImage executes a Bing image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
@@ -294,11 +319,6 @@ func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.Sea
 		}
 	}()
 
-	if err := page.WaitLoad(); err != nil {
-		bing.logger.Error("Initial image page load wait failed: %s", err)
-		return nil, core.ErrSearchTimeout
-	}
-
 	// Check for captcha
 	if bing.checkCaptcha(page) {
 		bing.logger.Error("Captcha detected during image search: %s", url)
@@ -310,18 +330,16 @@ func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.Sea
 		return nil, err
 	}
 
-	// Wait for image results to load
-	if err := page.WaitLoad(); err != nil {
-		bing.logger.Error("Image results load wait failed: %s", err)
-		return nil, core.ErrSearchTimeout
-	}
-	if err := core.SleepContext(ctx, 2*time.Second); err != nil {
-		return nil, err
-	}
-
-	// Find all image result containers using CSS selector
-	imageContainers, err := page.Timeout(bing.Timeout).Elements(Selectors.ImageResults)
+	imageContainers, _, err := core.WaitForElements(
+		ctx,
+		page,
+		[]string{Selectors.ImageResults},
+		bing.GetSelectorTimeout(),
+	)
 	if err != nil {
+		if bing.checkCaptcha(page) {
+			return nil, core.ErrCaptcha
+		}
 		bing.logger.Error("Cannot parse image results: %s", err)
 		return nil, core.ErrSearchTimeout
 	}
@@ -336,10 +354,9 @@ func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.Sea
 	for _, c := range imageContainers {
 		srchRes := core.SearchResult{}
 
-		// Get the <a> element inside the div
-		linkElem, err := c.Element("a")
+		linkElem, err := resolveImageLinkElement(c)
 		if err != nil {
-			bing.logger.Debug("Missing <a> element")
+			bing.logger.Debug("Missing image link element")
 			continue
 		}
 
@@ -386,6 +403,9 @@ func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.Sea
 		srchRes.Rank = rank
 
 		searchResults = append(searchResults, srchRes)
+		if query.Limit > 0 && len(searchResults) >= query.Limit {
+			break
+		}
 	}
 
 	return searchResults, nil

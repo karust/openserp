@@ -64,7 +64,7 @@ func parseBingDocument(doc *goquery.Document) []core.SearchResult {
 
 		title := titleTag.Text()
 		desc := ""
-		if descTag := item.Find(Selectors.AdDesc).First(); descTag.Length() > 0 {
+		if descTag := item.Find("p").First(); descTag.Length() > 0 {
 			desc = descTag.Text()
 		}
 
@@ -93,7 +93,7 @@ func descriptionFromItem(item *goquery.Selection, title string) string {
 			return text
 		}
 	}
-	if descTag := item.Find(Selectors.DescLast).First(); descTag.Length() > 0 {
+	if descTag := item.Find("p").First(); descTag.Length() > 0 {
 		if text := strings.TrimSpace(descTag.Text()); text != "" {
 			return text
 		}

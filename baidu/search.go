@@ -33,7 +33,6 @@ type imageDataJson struct {
 	}
 }
 
-
 // Baidu implements core.SearchEngine for Baidu SERP pages.
 type Baidu struct {
 	core.Browser
@@ -123,7 +122,12 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 		}
 	}
 
-	searchRes, err := page.Timeout(baid.Timeout).Search(Selectors.Results)
+	resultElements, _, err := core.WaitForElements(
+		ctx,
+		page,
+		append([]string{Selectors.Results}, Selectors.ResultsAlt...),
+		baid.GetSelectorTimeout(),
+	)
 	if err != nil {
 		if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
 			closePage()
@@ -131,11 +135,10 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 		}
 		closePage()
 		baid.logger.Error("Cannot parse search results: %s", err)
-		return nil, core.ErrParser
+		return nil, core.ErrSearchTimeout
 	}
 
-	// Check why no results, maybe captcha?
-	if searchRes == nil {
+	if len(resultElements) == 0 {
 		if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
 			closePage()
 			return nil, blockErr
@@ -144,16 +147,12 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 		return nil, nil
 	}
 
-	resultElements, err := searchRes.All()
-	if err != nil {
-		closePage()
-		return nil, err
-	}
-
 	for i, r := range resultElements {
 		// Get URL
 		link, err := r.Element(Selectors.Link)
 		if err != nil {
+			// Element detached mid-iteration (page navigated/refreshed): the rest
+			// of the slice is also stale, no point continuing.
 			if core.IsRodObjectNotFound(err) {
 				break
 			}
@@ -210,7 +209,8 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 			return nil, err
 		}
 
-		// Get anti-crawler cookies first, then reload page
+		// First load often seeds anti-crawler cookies; results tend to become
+		// available after one explicit reload.
 		page, err := baid.Navigate(ctx, url)
 		if err != nil {
 			return nil, err
@@ -223,18 +223,14 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 				baid.logger.Debug("Page close error: %v", closeErr)
 			}
 		}
-		if err := page.Reload(); err != nil {
+
+		jsonWaitTimeout := baid.GetSelectorTimeout()
+		if reloadErr := page.Reload(); reloadErr != nil {
 			closePage()
-			baid.logger.Error("Page reload failed: %s", err)
-			return nil, core.ErrSearchTimeout
-		}
-		if err := page.WaitLoad(); err != nil {
-			closePage()
-			baid.logger.Error("Page load wait failed: %s", err)
 			return nil, core.ErrSearchTimeout
 		}
 
-		result, err := page.Timeout(baid.Timeout).Search("body > pre")
+		preElements, _, err := core.WaitForElements(ctx, page, Selectors.ImageJSONRoot, jsonWaitTimeout)
 		if err != nil {
 			if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
 				closePage()
@@ -242,11 +238,10 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 			}
 			closePage()
 			baid.logger.Error("Cannot parse search results: %s", err)
-			return nil, core.ErrParser
+			return nil, core.ErrSearchTimeout
 		}
 
-		// Check why no results, maybe captcha?
-		if result == nil {
+		if len(preElements) == 0 {
 			if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
 				closePage()
 				return nil, blockErr
@@ -255,7 +250,7 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 			return nil, nil
 		}
 
-		jsonText, err := result.First.Text()
+		jsonText, err := preElements[0].Text()
 		if err != nil {
 			closePage()
 			return nil, err
@@ -286,6 +281,10 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 			baid.logger.Error("Failed to unmarshal JSON: %v", err)
 			return nil, core.ErrParser
 		}
+		if len(data.Data) == 0 {
+			closePage()
+			break
+		}
 
 		for i, img := range data.Data {
 			if len(img.URL) == 0 {
@@ -314,6 +313,9 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 				}(),
 			}
 			searchResults = append(searchResults, res)
+			if query.Limit > 0 && len(searchResults) >= query.Limit {
+				break
+			}
 		}
 
 		searchPage += 1
@@ -321,5 +323,9 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 		closePage()
 	}
 
-	return core.DeduplicateResults(searchResults), nil
+	deduped := core.DeduplicateResults(searchResults)
+	if query.Limit > 0 && len(deduped) > query.Limit {
+		deduped = deduped[:query.Limit]
+	}
+	return deduped, nil
 }

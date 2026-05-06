@@ -116,3 +116,13 @@ func TestParseEndpointMarkdownFormat(t *testing.T) {
 		t.Fatalf("expected markdown content type, got %s", ct)
 	}
 }
+
+func TestParseEndpointDuckAlias(t *testing.T) {
+	engine := &parserMock{engineMock: engineMock{name: "duckduckgo", initialized: true}}
+	srv := NewServerWithOptions("127.0.0.1", 7125, DefaultServerOptions(), engine)
+
+	resp := postHTML(t, srv, "/duck/parse", "<html><body>sample serp</body></html>")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}

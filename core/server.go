@@ -189,10 +189,16 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 			continue
 		}
 		locParser := parser
-		serv.app.Post(fmt.Sprintf("/%s/parse", strings.ToLower(parser.Name())),
+		parserEndpointName := strings.ToLower(parser.Name())
+		serv.app.Post(fmt.Sprintf("/%s/parse", parserEndpointName),
 			func(c *fiber.Ctx) error {
 				return serv.handleParseEndpoint(c, locParser)
 			})
+		if parserEndpointName == "duckduckgo" {
+			serv.app.Post("/duck/parse", func(c *fiber.Ctx) error {
+				return serv.handleParseEndpoint(c, locParser)
+			})
+		}
 	}
 
 	serv.app.Get("/mega/search", serv.handleMegaSearch)

@@ -220,15 +220,23 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 		gogl.acceptCookies(page)
 	}
 
-	// Find all results using stable attributes
-	searchRes, err := page.Timeout(gogl.Timeout).Search(Selectors.Results)
+	// Wait for result containers (data-hveid + data-ved) to hydrate. WaitLoad in
+	// Navigate fires before Google's right-rail/answers script attaches these
+	// attributes, so a one-shot Search races the DOM and frequently sees nothing.
+	searchResultElems, _, err := core.WaitForElements(ctx, page, []string{Selectors.Results}, gogl.GetSelectorTimeout())
 	if err != nil {
-		gogl.logger.Error("Cannot parse search results: %s", err)
-		return nil, core.ErrParser
-	}
-
-	if searchRes == nil {
-		return nil, nil
+		if gogl.checkCaptcha(page, query.ProxyURL) {
+			gogl.logger.Error("Captcha detected: %s", url)
+			return nil, core.ErrCaptcha
+		}
+		if core.IsContextDone(err) {
+			return nil, err
+		}
+		// Keep empty-SERP behavior for selector timeout only.
+		if errors.Is(err, core.ErrSearchTimeout) {
+			return nil, nil
+		}
+		return nil, core.ErrSearchTimeout
 	}
 
 	totalResults, err := gogl.getTotalResults(page)
@@ -237,26 +245,15 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 	}
 	gogl.logger.Info("Found %d total results", totalResults)
 
-	searchResultElems, err := searchRes.All()
-	if err != nil {
-		return nil, err
-	}
-
 	rank := query.Start
 	for _, resEl := range searchResultElems {
 		srchRes := core.SearchResult{}
 
-		describe, err := resEl.Describe(1, false)
-		if err != nil {
-			gogl.logger.Debug("Result describe failed: %s", err)
-			if core.IsRodObjectNotFound(err) {
-				break
-			}
-			continue
-		}
-		attrs := strings.Join(describe.Attributes, " ")
+		isAd := core.HasAttribute(resEl, "data-text-ad")
+		isAnswerBox := query.Answers && core.HasAttribute(resEl, "data-ulkwtsb") && !core.HasAttribute(resEl, "data-ispaa")
+		isResultCandidate := core.HasAttribute(resEl, "data-ved")
 
-		if strings.Contains(attrs, "data-text-ad") {
+		if isAd {
 			// 1. Parse ads
 
 			srchRes.Ad = true
@@ -293,10 +290,14 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 				continue
 			}
 			textSliced := strings.Split(text, "\n")
-			srchRes.Description = strings.Join(textSliced[4:], "\n")
+			if len(textSliced) > 4 {
+				srchRes.Description = strings.Join(textSliced[4:], "\n")
+			} else {
+				srchRes.Description = strings.TrimSpace(text)
+			}
 			rank += 1
 
-		} else if query.Answers && strings.Contains(attrs, "data-ulkwtsb") && !strings.Contains(attrs, "data-ispaa") {
+		} else if isAnswerBox {
 			// 2. Parse answer boxes
 			answerEls, err := resEl.Page().Search(Selectors.AnswerBox)
 			if err != nil {
@@ -321,7 +322,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 				if err := answ.Focus(); err != nil {
 					gogl.logger.Debug("Answer focus failed: %s", err)
 				}
-				//answ.Page().WaitRepaint()
+
 			}
 			if err := core.SleepContext(ctx, 2*time.Second); err != nil {
 				return nil, err
@@ -361,7 +362,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 				searchResults = append(searchResults, srchRes)
 			}
 			continue
-		} else if strings.Contains(attrs, "data-ved") {
+		} else if isResultCandidate {
 			// Parse regular search results
 			// Get title from h3
 			titleTag, err := resEl.Element(Selectors.Title)
@@ -419,7 +420,6 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			continue
 
 		} else {
-			//fmt.Println(i, attrs)
 			continue
 		}
 
@@ -427,7 +427,20 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 		searchResults = append(searchResults, srchRes)
 	}
 
-	return core.DeduplicateResults(searchResults), nil
+	deduped := core.DeduplicateResults(searchResults)
+	if len(deduped) == 0 {
+		if gogl.checkCaptcha(page, query.ProxyURL) {
+			return nil, core.ErrCaptcha
+		}
+		// Result candidates were found by Selectors.Results but none parsed
+		// into usable rows: treat as a genuine no-results SERP rather than a
+		// timeout, so callers don't retry pointlessly.
+		if len(searchResultElems) == 0 {
+			return nil, nil
+		}
+		return nil, core.ErrSearchTimeout
+	}
+	return deduped, nil
 }
 
 // SearchImage executes a Google image search and returns normalized image
@@ -456,109 +469,125 @@ func (gogl *Google) SearchImage(ctx context.Context, query core.Query) ([]core.S
 
 	defer gogl.close(ctx, page)
 
-	for len(searchResultsMap) < query.Limit {
-		if err := page.WaitLoad(); err != nil {
-			gogl.logger.Error("Image page load wait failed: %s", err)
-			return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrSearchTimeout
+	// Hard cap on outer scroll/parse passes. Google's image grid is virtualized
+	// and infinite-scroll: WaitLoad after scroll never settles and individual
+	// cells can hang on right-click. Cap iterations as a last-resort guard.
+	const maxImagePasses = 20
+	stagnant := 0
+	for pass := 0; pass < maxImagePasses && len(searchResultsMap) < query.Limit; pass++ {
+		if err := ctx.Err(); err != nil {
+			return *core.ConvertSearchResultsMap(searchResultsMap), err
 		}
-		if err := page.Mouse.Scroll(0, 1000000, 1); err != nil {
-			gogl.logger.Error("Image page scroll failed: %s", err)
-			return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrSearchTimeout
+		if _, err := page.Eval(`() => window.scrollBy(0, 1000000)`); err != nil {
+			gogl.logger.Debug("Image page scroll failed: %s", err)
 		}
-		if err := page.WaitLoad(); err != nil {
-			gogl.logger.Error("Image results load wait failed: %s", err)
-			return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrSearchTimeout
+		if err := core.SleepContext(ctx, 600*time.Millisecond); err != nil {
+			return *core.ConvertSearchResultsMap(searchResultsMap), err
 		}
 
-		results, err := page.Timeout(gogl.Timeout).Search("div[data-hveid][data-ved][jsaction]")
+		resultElements, _, err := core.WaitForElements(ctx, page, []string{Selectors.ImageResults}, gogl.GetSelectorTimeout())
 		if err != nil {
-			gogl.logger.Error("Cannot parse search results: %s", err)
-			return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrSearchTimeout
-		}
-
-		// Check why no results
-		if results == nil {
 			if gogl.checkCaptcha(page, query.ProxyURL) {
 				gogl.logger.Error("Captcha detected: %s", url)
 				return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrCaptcha
 			}
-			return *core.ConvertSearchResultsMap(searchResultsMap), err
+			break
 		}
 
-		resultElements, err := results.All()
-		if err != nil {
-			return *core.ConvertSearchResultsMap(searchResultsMap), err
-		}
-
-		if len(resultElements) < len(searchResultsMap) {
-			continue
-		}
-
-		for i, r := range resultElements {
-			// TODO: parse AF_initDataCallback to optimize instead of this?
-			err := r.Click(proto.InputMouseButtonRight, 1)
-			if err != nil {
-				gogl.logger.Error("Click failed")
-				continue
+		before := len(searchResultsMap)
+		for _, r := range resultElements {
+			if err := ctx.Err(); err != nil {
+				return *core.ConvertSearchResultsMap(searchResultsMap), err
 			}
-
-			dataVed, err := r.Attribute("data-ved")
-			if err != nil {
-				gogl.logger.Error("Missing data-ved attribute")
-				continue
-			}
-
-			// If already have image with this ID
-			if _, ok := searchResultsMap[*dataVed]; ok {
-				continue
-			}
-
-			// Get URLs
-			link, err := r.Element("a:not([ping])")
-			if err != nil {
-				continue
-			}
-
-			linkText, err := link.Property("href")
-			if err != nil {
-				gogl.logger.Debug("Missing href")
-				continue
-			}
-
-			imgSrc, err := parseSourceImageURL(linkText.String())
-			if err != nil {
-				gogl.logger.Error("Failed to parse image URL: %v", err)
-				continue
-			}
-
-			// Get title
-			titleTag, err := r.Element("h3")
-			if err != nil {
-				gogl.logger.Error("Missing h3 tag")
-				continue
-			}
-
-			title, err := titleTag.Text()
-			if err != nil {
-				gogl.logger.Error("Failed to extract title")
-				title = "No title"
-			}
-
-			gR := core.SearchResult{
-				Rank:        i + 1,
-				URL:         imgSrc.OriginalURL,
-				Title:       title,
-				Description: fmt.Sprintf("Height:%v, Width:%v, Source Page: %v", imgSrc.Height, imgSrc.Width, imgSrc.PageURL),
-			}
-			searchResultsMap[*dataVed] = gR
-
+			gogl.parseImageCell(r, searchResultsMap)
+			// Always remove the cell so the next outer iteration only sees
+			// freshly-scrolled elements. Without this we re-iterate the same
+			// already-parsed cells and the loop scales O(n²) — or worse,
+			// hangs entirely when right-click on a stale node never returns.
 			if err := r.Remove(); err != nil {
 				gogl.logger.Debug("Failed to remove parsed image element: %s", err)
 			}
+			if len(searchResultsMap) >= query.Limit {
+				break
+			}
+		}
+
+		if len(searchResultsMap) == before {
+			stagnant++
+			if stagnant >= 2 {
+				break
+			}
+		} else {
+			stagnant = 0
 		}
 	}
 
 	return *core.ConvertSearchResultsMap(searchResultsMap), nil
+}
+
+// parseImageCell extracts one image result from a Google image grid cell and
+// stores it in dst keyed by the cell's data-ved. Returns silently on any
+// failure — the surrounding loop calls r.Remove() unconditionally so a
+// problem cell can't stall the outer scroll loop.
+func (gogl *Google) parseImageCell(r *rod.Element, dst map[string]core.SearchResult) {
+	// Right-clicking a Google image cell forces it to materialize its
+	// `imgres` link (the grid is virtualized; href is absent until the
+	// cell is interacted with).
+	if err := r.Click(proto.InputMouseButtonRight, 1); err != nil {
+		gogl.logger.Debug("Right-click on image cell failed: %s", err)
+		return
+	}
+
+	dataVed, err := r.Attribute("data-ved")
+	if err != nil || dataVed == nil || strings.TrimSpace(*dataVed) == "" {
+		gogl.logger.Debug("Missing data-ved attribute")
+		return
+	}
+	resultKey := *dataVed
+	if _, ok := dst[resultKey]; ok {
+		return
+	}
+
+	link, err := r.Element(Selectors.ImageLink)
+	if err != nil {
+		link, err = r.Element(Selectors.ImageLinkFallback)
+		if err != nil {
+			return
+		}
+	}
+
+	linkText, err := link.Property("href")
+	if err != nil {
+		gogl.logger.Debug("Missing href")
+		return
+	}
+
+	imgSrc, err := parseSourceImageURL(linkText.String())
+	if err != nil {
+		gogl.logger.Error("Failed to parse image URL: %v", err)
+		return
+	}
+	if strings.TrimSpace(imgSrc.OriginalURL) == "" {
+		return
+	}
+
+	title := core.FirstNonEmptyText(r, Selectors.ImageTitle...)
+	if title == "" {
+		title = core.FirstNonEmptyAttribute(r, "alt", "img")
+	}
+	if title == "" {
+		title = core.FirstNonEmptyAttribute(r, "aria-label", "a")
+	}
+	if title == "" {
+		title = "No title"
+	}
+
+	dst[resultKey] = core.SearchResult{
+		Rank:        len(dst) + 1,
+		URL:         imgSrc.OriginalURL,
+		Title:       title,
+		Description: fmt.Sprintf("Height:%v, Width:%v, Source Page: %v", imgSrc.Height, imgSrc.Width, imgSrc.PageURL),
+	}
 }
 
 func (gogl *Google) close(ctx context.Context, page *rod.Page) {

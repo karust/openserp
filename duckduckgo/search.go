@@ -11,10 +11,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// captchaBodyText is matched against the raw page HTML because DDG returns
-// a plain-text 202 rate-limit response rather than a structured captcha page.
-const captchaBodyText = "bots user"
-
 // DuckDuckGo implements core.SearchEngine for DuckDuckGo SERP pages.
 type DuckDuckGo struct {
 	core.Browser
@@ -46,16 +42,36 @@ func (ddg *DuckDuckGo) GetRateLimiter() *rate.Limiter {
 }
 
 func (ddg *DuckDuckGo) isCaptcha(page *rod.Page) bool {
-	html, err := page.Timeout(ddg.GetSelectorTimeout()).HTML()
+	if core.HasAnySelector(page, Selectors.CaptchaSelectors) {
+		return true
+	}
+
+	if info, err := page.Info(); err == nil {
+		url := strings.ToLower(info.URL)
+		if strings.Contains(url, "anomaly") || strings.Contains(url, "captcha") || strings.Contains(url, "challenge") {
+			return true
+		}
+	}
+
+	htmlTimeout := ddg.GetSelectorTimeout() / 2
+	if htmlTimeout <= 0 || htmlTimeout > 1500*time.Millisecond {
+		htmlTimeout = 1500 * time.Millisecond
+	}
+	html, err := page.Timeout(htmlTimeout).HTML()
 	if err != nil {
 		return false
 	}
-	return strings.Contains(html, captchaBodyText)
+	html = strings.ToLower(html)
+	for _, marker := range Selectors.CaptchaMarkers {
+		if strings.Contains(html, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (ddg *DuckDuckGo) isNoResults(page *rod.Page) bool {
-	has, _, _ := page.Has(Selectors.NoResults)
-	return has
+	return core.HasAnySelector(page, Selectors.NoResults)
 }
 
 func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.SearchResult {
@@ -75,6 +91,8 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 
 		if err != nil {
 			ddg.logger.Debug("Missing link")
+			// If the result element itself was detached (page navigated mid-iteration),
+			// the rest of the slice is also stale and further work is wasted.
 			if core.IsRodObjectNotFound(err) {
 				break
 			}
@@ -94,29 +112,12 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 			continue
 		}
 
-		// Get title - try multiple selectors
-		var titleTag *rod.Element
-		for _, selector := range Selectors.Title {
-			titleTag, err = r.Element(selector)
-			if err == nil {
-				break
-			}
+		title := core.FirstNonEmptyText(r, Selectors.Title...)
+		if title == "" {
+			title = "No title"
 		}
 
-		title := "No title"
-		if titleTag != nil {
-			title, _ = titleTag.Text()
-		}
-
-		// Get description - try multiple selectors
-		desc := ""
-		for _, selector := range Selectors.Desc {
-			descTag, err := r.Element(selector)
-			if err == nil {
-				desc, _ = descTag.Text()
-				break
-			}
-		}
+		desc := core.FirstNonEmptyText(r, Selectors.Desc...)
 
 		// Check if it's an ad
 		isAd := false
@@ -181,50 +182,30 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 			}
 		}
 
-		// Get all search results in page - try multiple selectors
-		var searchRes *rod.SearchResult
-		var searchErr error
-
-		for _, selector := range Selectors.Results {
-			searchRes, searchErr = page.Timeout(ddg.GetSelectorTimeout()).Search(selector)
-			if searchErr == nil && searchRes != nil {
-				ddg.logger.Debug("Found results with selector: %s", selector)
-				break
-			}
-		}
-
-		if searchErr != nil {
-			closePage()
-			ddg.logger.Error("Cannot parse search results: %s", searchErr)
-			return nil, core.ErrParser
-		}
-
-		// Check why no results, maybe captcha?
-		if searchRes == nil {
-			closePage()
-
+		elements, selector, err := core.WaitForElements(ctx, page, Selectors.Results, ddg.GetSelectorTimeout())
+		if err != nil {
 			if ddg.isNoResults(page) {
 				ddg.logger.Warn("No results found")
-			} else if ddg.isCaptcha(page) {
+				closePage()
+				break
+			}
+			if ddg.isCaptcha(page) {
 				ddg.logger.Error("Captcha detected: %s", url)
+				closePage()
 				return nil, core.ErrCaptcha
 			}
-			break
-		}
-
-		elements, err := searchRes.All()
-		if err != nil {
-			ddg.logger.Error("Cannot get search elements: %s", err)
 			closePage()
-			break
+			ddg.logger.Error("Cannot parse search results: %s", err)
+			return nil, core.ErrSearchTimeout
 		}
+		ddg.logger.Debug("Found results with selector: %s", selector)
 
 		r := ddg.parseResults(elements, searchPage)
 
 		if len(r) == 0 {
 			ddg.logger.Debug("No valid results found on page %d", searchPage)
 			closePage()
-			return nil, core.ErrParser
+			return nil, core.ErrSearchTimeout
 		}
 
 		allResults = append(allResults, r...)
@@ -287,36 +268,8 @@ func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]cor
 		}()
 	}
 
-	// Wait for page to load
-	if err := page.WaitLoad(); err != nil {
-		ddg.logger.Error("Wait load failed: %s", err)
-		return searchResults, core.ErrSearchTimeout
-	}
-	if err := core.SleepContext(ctx, 2*time.Second); err != nil {
-		return searchResults, err
-	}
-
-	// Try multiple selectors for DuckDuckGo image results
-	var searchRes *rod.SearchResult
-	var searchErr error
-
-	for _, selector := range Selectors.ImageResult {
-		searchRes, searchErr = page.Timeout(ddg.GetSelectorTimeout()).Search(selector)
-		if searchErr == nil && searchRes != nil {
-			ddg.logger.Debug("Found image results with selector: %s", selector)
-			break
-		} else {
-			ddg.logger.Debug("Selector '%s' not found: %v", selector, searchErr)
-		}
-	}
-
-	if searchErr != nil {
-		ddg.logger.Error("Cannot find image results: %s", searchErr)
-		return searchResults, core.ErrSearchTimeout
-	}
-
-	// Check why no results
-	if searchRes == nil {
+	elements, selector, err := core.WaitForElements(ctx, page, Selectors.ImageResult, ddg.GetSelectorTimeout())
+	if err != nil {
 		if ddg.isCaptcha(page) {
 			ddg.logger.Error("Captcha detected: %s", url)
 			return searchResults, core.ErrCaptcha
@@ -325,12 +278,7 @@ func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]cor
 		}
 		return searchResults, core.ErrSearchTimeout
 	}
-
-	elements, err := searchRes.All()
-	if err != nil {
-		ddg.logger.Error("Cannot get search elements: %s", err)
-		return searchResults, err
-	}
+	ddg.logger.Debug("Found image results with selector: %s", selector)
 
 	ddg.logger.Info("Found %d image elements", len(elements))
 
@@ -357,20 +305,9 @@ func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]cor
 			continue
 		}
 
-		// Get title - try multiple selectors based on the HTML structure
-		var titleTag *rod.Element
-		var titleErr error
-
-		for _, selector := range Selectors.ImageTitle {
-			titleTag, titleErr = r.Element(selector)
-			if titleErr == nil {
-				break
-			}
-		}
-
-		title := "No title"
-		if titleTag != nil {
-			title, _ = titleTag.Text()
+		title := core.FirstNonEmptyText(r, Selectors.ImageTitle...)
+		if title == "" {
+			title = "No title"
 		}
 
 		// Get source page URL - try multiple selectors

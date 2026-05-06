@@ -41,7 +41,7 @@ cache:
   max_size: 1000 # Maximum cached dedicated responses before oldest-entry eviction
 
 resilience:
-  max_retries: 2 # Retry attempts per engine request (0 disables retries)
+  max_retries: 1 # Retry attempts per engine request (0 disables retries)
   allow_endpoint_fallback: false # Keep dedicated endpoints engine-pure by default
 
 # circuit_breaker:

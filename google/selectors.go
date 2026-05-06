@@ -13,6 +13,12 @@ var Selectors = struct {
 	DescFallback string
 	AnswerBox    string
 	AnswerItem   string
+
+	// Image search.
+	ImageResults      string
+	ImageLink         string
+	ImageLinkFallback string
+	ImageTitle        []string
 }{
 	Captcha:      "div[data-sitekey]",
 	ResultStats:  "div#result-stats",
@@ -23,4 +29,14 @@ var Selectors = struct {
 	DescFallback: "div.VwiC3b",
 	AnswerBox:    "div[data-hveid][data-ulkwtsb] div[data-q]",
 	AnswerItem:   "a",
+
+	// ImageResults selects each image cell in the image SERP grid.
+	ImageResults: "div[data-hveid][data-ved][jsaction]",
+	// ImageLink: the canonical href of an image cell. The :not([ping])
+	// variant excludes Google's click-tracking hops; the imgres fallback is
+	// only present after the cell has been right-clicked to materialize.
+	ImageLink:         "a:not([ping])",
+	ImageLinkFallback: "a[href*='imgres']",
+	// ImageTitle selectors are tried in order to recover a human-readable title.
+	ImageTitle: []string{"h3", "a"},
 }

@@ -1,6 +1,8 @@
 package ithelper
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -30,6 +32,12 @@ func HandleError(t *testing.T, operation string, err error) {
 		}
 		t.Skipf("skipping flaky live %s due to timeout: %v", operation, err)
 	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || core.IsContextDone(err) {
+		if testutil.IntegrationStrict() {
+			t.Fatalf("%s failed (strict mode): %v", operation, err)
+		}
+		t.Skipf("skipping flaky live %s due to context deadline: %v", operation, err)
+	}
 
 	t.Fatalf("%s failed: %v", operation, err)
 }
@@ -42,7 +50,7 @@ func CreateBrowser(t *testing.T) *core.Browser {
 	opts := core.BrowserOpts{
 		IsHeadless:    !headful,
 		IsLeakless:    false,
-		Timeout:       time.Second * 15,
+		Timeout:       time.Second * 30,
 		LeavePageOpen: headful,
 	}
 	b, err := core.NewBrowser(opts)
