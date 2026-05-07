@@ -1,12 +1,15 @@
 package google
 
 import (
+	"errors"
+	"io"
 	"testing"
 
+	"github.com/karust/openserp/core"
 	"github.com/karust/openserp/testutil"
 )
 
-func TestGoogleResultParserSnapshots(t *testing.T) {
+func TestGoogleParseHTMLFixtures(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -38,9 +41,9 @@ func TestGoogleResultParserSnapshots(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			results, err := googleResultParser(testutil.ResponseFromFixture(t, tt.fixture))
+			results, err := ParseHTML(testutil.ResponseFromFixture(t, tt.fixture).Body)
 			if err != nil {
-				t.Fatalf("googleResultParser() error = %v", err)
+				t.Fatalf("ParseHTML() error = %v", err)
 			}
 
 			if tt.wantZero {
@@ -63,14 +66,42 @@ func TestGoogleResultParserSnapshots(t *testing.T) {
 	}
 }
 
-func TestGoogleResultParserEmptyHTML(t *testing.T) {
+func TestGoogleParseHTMLEmptyHTML(t *testing.T) {
 	t.Parallel()
 
-	results, err := googleResultParser(testutil.ResponseFromString(""))
+	results, err := ParseHTML(testutil.ResponseFromString("").Body)
 	if err != nil {
-		t.Fatalf("googleResultParser() error = %v", err)
+		t.Fatalf("ParseHTML() error = %v", err)
 	}
 	if len(results) != 0 {
 		t.Fatalf("expected zero results for empty HTML, got %d", len(results))
+	}
+}
+
+func TestGoogleClassifyRawHTML(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		fixture string
+		want    error
+	}{
+		{name: "no results", fixture: "search_no_results.html", want: core.ErrEmptyResult},
+		{name: "captcha page", fixture: "search_captcha.html", want: core.ErrCaptcha},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			body, err := io.ReadAll(testutil.ResponseFromFixture(t, tt.fixture).Body)
+			if err != nil {
+				t.Fatalf("read fixture body: %v", err)
+			}
+			err = classifyGoogleRawHTML(body)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("expected %v for %s, got %v", tt.want, tt.fixture, err)
+			}
+		})
 	}
 }

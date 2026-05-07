@@ -55,3 +55,32 @@ func TestParseYandexHTMLEmpty(t *testing.T) {
 		t.Fatalf("expected zero results for empty HTML, got %d", len(results))
 	}
 }
+
+func TestParseYandexHTMLFallbackSelectors(t *testing.T) {
+	t.Parallel()
+
+	html := `
+<ul>
+  <li class="serp-item">
+    <h2><a href="https://example.com/result">Fallback Title</a></h2>
+    <div class="OrganicText">Fallback description</div>
+  </li>
+</ul>`
+
+	results, err := ParseHTML(bytes.NewReader([]byte(html)))
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].URL != "https://example.com/result" {
+		t.Fatalf("unexpected URL: %s", results[0].URL)
+	}
+	if results[0].Title != "Fallback Title" {
+		t.Fatalf("unexpected title: %s", results[0].Title)
+	}
+	if results[0].Description != "Fallback description" {
+		t.Fatalf("unexpected description: %s", results[0].Description)
+	}
+}

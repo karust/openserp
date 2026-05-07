@@ -1,84 +1,32 @@
 package ecosia
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/corpix/uarand"
 	"github.com/karust/openserp/core"
 )
 
-func ecosiaRequest(ctx context.Context, searchURL string, query core.Query) (*http.Response, error) {
-	baseClient, err := core.NewRawHTTPClient(query)
+func classifyEcosiaRawHTML(body []byte) error {
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
-	if err != nil {
-		return nil, err
+	if strings.Contains(strings.ToLower(doc.Text()), "captcha") {
+		return core.ErrCaptcha
 	}
-	req.Header.Set("User-Agent", uarand.GetRandom())
-	core.SetAcceptLanguageHeader(req, query.LangCode)
-
-	res, err := baseClient.Do(req)
-	if err != nil {
-		return nil, err
+	if doc.Find("[data-test-id='web-no-results']").Length() > 0 ||
+		(doc.Find(Selectors.Mainline).Length() > 0 &&
+			doc.Find(Selectors.Result).Length() == 0 &&
+			doc.Find(Selectors.Ad).Length() == 0) {
+		return core.ErrEmptyResult
 	}
-	return res, nil
-}
-
-// resultParser parses an Ecosia SERP HTML response into search results
-// using goquery (no browser required).
-func resultParser(response *http.Response) ([]core.SearchResult, error) {
-	doc, err := goquery.NewDocumentFromReader(response.Body)
-	if err != nil {
-		return nil, err
-	}
-	var (
-		results []core.SearchResult
-		rank    = 1
-	)
-	doc.Find(Selectors.Result).Each(func(_ int, s *goquery.Selection) {
-		href, ok := s.Find(Selectors.ResultLink).Attr("href")
-		if !ok || strings.TrimSpace(href) == "" {
-			return
-		}
-		var (
-			title = strings.TrimSpace(s.Find(Selectors.Title).Text())
-			desc  = strings.TrimSpace(s.Find(Selectors.Desc).Text())
-		)
-		results = append(results, core.SearchResult{
-			Rank:        rank,
-			URL:         href,
-			Title:       title,
-			Description: desc,
-		})
-		rank++
-	})
-	adRank := -1
-	doc.Find(Selectors.Ad).Each(func(_ int, s *goquery.Selection) {
-		href, ok := s.Find(Selectors.ResultLink).Attr("href")
-		if !ok || strings.TrimSpace(href) == "" {
-			return
-		}
-		var (
-			title = strings.TrimSpace(s.Find(Selectors.Title).Text())
-			desc  = strings.TrimSpace(s.Find(Selectors.Desc).Text())
-		)
-		results = append(results, core.SearchResult{
-			Rank:        adRank,
-			URL:         href,
-			Title:       title,
-			Description: desc,
-			Ad:          true,
-		})
-		adRank--
-	})
-	return results, nil
+	return nil
 }
 
 // imageResultParser parses an Ecosia image SERP HTML response into search
@@ -144,7 +92,7 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 	}
 	core.WithRequest(ctx).WithField("url", ecosiaURL).Debug(fmt.Sprintf("Ecosia URL built: %s", ecosiaURL))
 
-	res, err := ecosiaRequest(ctx, ecosiaURL, query)
+	res, err := core.RawSearchRequest(ctx, ecosiaURL, query)
 	if err != nil {
 		return nil, err
 	}
@@ -153,15 +101,36 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 		fmt.Sprintf("Ecosia Raw response: code=%d", res.StatusCode),
 	)
 
-	parsedResults, err := resultParser(res)
+	body, err := core.ReadRawSearchBody(res)
 	if err != nil {
 		return nil, err
+	}
+	htmlStatus := classifyEcosiaRawHTML(body)
+	if htmlStatus != nil && !errors.Is(htmlStatus, core.ErrEmptyResult) {
+		return nil, htmlStatus
+	}
+
+	parsedResults, err := ParseHTML(bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	if len(parsedResults) == 0 {
+		if errors.Is(htmlStatus, core.ErrEmptyResult) {
+			return []core.SearchResult{}, nil
+		}
+		return nil, fmt.Errorf("%w: ecosia raw search returned no parseable results", core.ErrParser)
 	}
 
 	// Ecosia paginates by page index, not result offset, so re-rank from
 	// the page boundary rather than query.Start (off-grid offsets round down).
+	// Skip ads (rank<0) so organic ranks stay sequential from startRank.
+	organicIdx := 0
 	for i := range parsedResults {
-		parsedResults[i].Rank = startRank + i
+		if parsedResults[i].Ad {
+			continue
+		}
+		parsedResults[i].Rank = startRank + organicIdx
+		organicIdx++
 	}
 
 	core.WithRequest(ctx).WithField("results_count", len(parsedResults)).Debug(

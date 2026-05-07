@@ -36,6 +36,36 @@ func TestDrainAndCloseResponseDrainsAndCloses(t *testing.T) {
 	}
 }
 
+func TestClassifySearchHTTPStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		want   error
+	}{
+		{name: "unknown browser status", status: 0, want: nil},
+		{name: "ok", status: http.StatusOK, want: nil},
+		{name: "blocked", status: http.StatusForbidden, want: ErrBlocked},
+		{name: "rate limited", status: http.StatusTooManyRequests, want: ErrRateLimited},
+		{name: "server error", status: http.StatusBadGateway, want: ErrBlocked},
+		{name: "unexpected status", status: http.StatusNotFound, want: ErrParser},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ClassifySearchHTTPStatus(tt.status)
+			if tt.want == nil {
+				if err != nil {
+					t.Fatalf("expected nil error, got %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("expected %v, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
 func TestDrainAndCloseResponseNilSafe(t *testing.T) {
 	DrainAndCloseResponse(nil)
 	DrainAndCloseResponse(&http.Response{})

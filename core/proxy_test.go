@@ -344,6 +344,34 @@ func TestNewRawHTTPClientSocks5hUsesProxyDNS(t *testing.T) {
 	}
 }
 
+func TestNewRawHTTPClientDirectTLSUsesHTTP1(t *testing.T) {
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(r.Proto))
+	}))
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	defer server.Close()
+
+	client, err := NewRawHTTPClient(Query{Insecure: true})
+	if err != nil {
+		t.Fatalf("new raw http client: %v", err)
+	}
+
+	resp, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("expected direct TLS request to succeed, got %v", err)
+	}
+	defer DrainAndCloseResponse(resp)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if string(body) != "HTTP/1.1" {
+		t.Fatalf("expected raw client to use HTTP/1.1, got %q", string(body))
+	}
+}
+
 func TestClassifyProxyNetworkError(t *testing.T) {
 	tests := []struct {
 		name string

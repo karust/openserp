@@ -91,6 +91,9 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
 	scoped := *baid
 	scoped.logger = baid.logger.WithRequest(ctx)
+	if scoped.Browser.WaitLoadTime == 0 || scoped.Browser.WaitLoadTime > 250*time.Millisecond {
+		scoped.Browser.WaitLoadTime = 250 * time.Millisecond
+	}
 	baid = &scoped
 
 	baid.logger.Debug("Starting search, query: %+v", query)
@@ -100,8 +103,6 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 			results = nil
 		}
 	}()
-
-	searchResults := []core.SearchResult{}
 
 	// Build URL from query struct to open in browser
 	url, err := BuildURL(query)
@@ -122,69 +123,63 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 		}
 	}
 
-	resultElements, _, err := core.WaitForElements(
-		ctx,
-		page,
-		append([]string{Selectors.Results}, Selectors.ResultsAlt...),
-		baid.GetSelectorTimeout(),
-	)
+	searchResults, err := baid.waitForParsedSearchResults(ctx, page, url)
 	if err != nil {
-		if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
-			closePage()
-			return nil, blockErr
-		}
 		closePage()
-		baid.logger.Error("Cannot parse search results: %s", err)
-		return nil, core.ErrSearchTimeout
+		return nil, err
 	}
-
-	if len(resultElements) == 0 {
-		if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
-			closePage()
-			return nil, blockErr
-		}
-		closePage()
-		return nil, nil
-	}
-
-	for i, r := range resultElements {
-		// Get URL
-		link, err := r.Element(Selectors.Link)
-		if err != nil {
-			// Element detached mid-iteration (page navigated/refreshed): the rest
-			// of the slice is also stale, no point continuing.
-			if core.IsRodObjectNotFound(err) {
-				break
-			}
-			continue
-		}
-		linkText, err := link.Property("href")
-		if err != nil {
-			baid.logger.Debug("Missing href tag")
-			continue
-		}
-
-		// Get title
-		title, err := link.Text()
-		if err != nil {
-			baid.logger.Debug("Failed to extract title")
-			title = "No title"
-		}
-
-		// Get description
-		desc, err := r.Text()
-		if err != nil {
-			desc = ""
-		}
-		desc = strings.ReplaceAll(desc, title, "")
-
-		gR := core.SearchResult{Rank: query.Start + i + 1, URL: linkText.String(), Title: title, Description: desc}
-		searchResults = append(searchResults, gR)
-	}
-
 	closePage()
 
-	return core.DeduplicateResults(searchResults), nil
+	for i := range searchResults {
+		searchResults[i].Rank = query.Start + i + 1
+	}
+	return searchResults, nil
+}
+
+func (baid *Baidu) waitForParsedSearchResults(ctx context.Context, page *rod.Page, url string) ([]core.SearchResult, error) {
+	timeout := baid.GetSelectorTimeout()
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	var sawResultContainer bool
+	var lastErr error
+
+	for {
+		html, err := page.HTML()
+		if err == nil {
+			results, parseErr := ParseHTML(strings.NewReader(html))
+			if parseErr == nil && len(results) > 0 {
+				return results, nil
+			}
+			lastErr = parseErr
+		} else {
+			lastErr = err
+		}
+
+		if core.HasAnySelector(page, baiduResultSelectors()) {
+			sawResultContainer = true
+		}
+		if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
+			return nil, blockErr
+		}
+		if !time.Now().Before(deadline) {
+			break
+		}
+		if err := core.SleepContext(ctx, 120*time.Millisecond); err != nil {
+			return nil, err
+		}
+	}
+
+	if sawResultContainer {
+		if lastErr != nil {
+			baid.logger.Debug("Baidu result containers found but HTML parsing failed: %v", lastErr)
+		} else {
+			baid.logger.Debug("Baidu result containers found but no parseable organic results")
+		}
+		return nil, core.ErrParser
+	}
+	return nil, nil
 }
 
 // SearchImage executes a Baidu image search and returns normalized image

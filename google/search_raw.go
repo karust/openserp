@@ -1,37 +1,17 @@
 package google
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/corpix/uarand"
 	"github.com/karust/openserp/core"
 	"github.com/sirupsen/logrus"
 )
-
-func googleRequest(ctx context.Context, searchURL string, query core.Query) (*http.Response, error) {
-	baseClient, err := core.NewRawHTTPClient(query)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", uarand.GetRandom())
-	core.SetAcceptLanguageHeader(req, query.LangCode)
-
-	res, err := baseClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
-}
 
 // ParseHTML parses a Google SERP HTML document and returns search results.
 // It is the pure parser used by both raw HTTP search and parse endpoints.
@@ -111,8 +91,21 @@ func parseGoogleDocument(doc *goquery.Document) []core.SearchResult {
 	return core.DeduplicateResults(results)
 }
 
-func googleResultParser(response *http.Response) ([]core.SearchResult, error) {
-	return ParseHTML(response.Body)
+func classifyGoogleRawHTML(body []byte) error {
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	if doc.Find(Selectors.Captcha).Length() > 0 {
+		return core.ErrCaptcha
+	}
+
+	text := strings.ToLower(doc.Text())
+	if strings.Contains(text, "did not match any documents") ||
+		strings.Contains(text, "about 0 results") {
+		return core.ErrEmptyResult
+	}
+	return nil
 }
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
@@ -132,7 +125,7 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 	}
 	core.WithRequest(ctx).WithField("url", googleURL).Debug(fmt.Sprintf("Google URL built: %s", googleURL))
 
-	res, err := googleRequest(ctx, googleURL, query)
+	res, err := core.RawSearchRequest(ctx, googleURL, query)
 	if err != nil {
 		return nil, err
 	}
@@ -141,9 +134,24 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 		fmt.Sprintf("Google Raw response: code=%d", res.StatusCode),
 	)
 
-	parsedResults, err := googleResultParser(res)
+	body, err := core.ReadRawSearchBody(res)
 	if err != nil {
 		return nil, err
+	}
+	htmlStatus := classifyGoogleRawHTML(body)
+	if htmlStatus != nil && !errors.Is(htmlStatus, core.ErrEmptyResult) {
+		return nil, htmlStatus
+	}
+
+	parsedResults, err := ParseHTML(bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	if len(parsedResults) == 0 {
+		if errors.Is(htmlStatus, core.ErrEmptyResult) {
+			return []core.SearchResult{}, nil
+		}
+		return nil, fmt.Errorf("%w: google raw search returned no parseable results", core.ErrParser)
 	}
 
 	if query.Start > 0 {
