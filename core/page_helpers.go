@@ -79,6 +79,19 @@ func HasAnySelector(page *rod.Page, selectors []string) bool {
 	return false
 }
 
+// DeferClosePage returns a cleanup function that closes page unless the browser
+// is configured to leave pages open for debugging.
+func DeferClosePage(ctx context.Context, page *rod.Page, browser *Browser) func() {
+	return func() {
+		if browser != nil && browser.LeavePageOpen {
+			return
+		}
+		if err := ClosePageWithTimeout(ctx, page, time.Second); err != nil {
+			WithRequest(ctx).WithError(err).Debug("Page close error")
+		}
+	}
+}
+
 // HasAttribute reports whether el carries attr (regardless of value).
 func HasAttribute(el *rod.Element, attr string) bool {
 	if el == nil {

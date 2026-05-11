@@ -21,9 +21,9 @@ A developer-friendly alternative to paid SERP API services!
 - 🌐 **Megasearch** - cross-engine aggregation with deduplication
 - 🖼 **Images** - image search is also available
 - 🎯 **Advanced filters** - language, date range, file type, and site queries
-- 🌍 **Configurable** - proxy, cache, and resilient mode support
+- 🌍 **Configurable** - proxy, cache, and resilient mode
 - 🐳 **Docker-ready** - local and container deployment
-- 📝 **Data Formats** - JSON, Markdown, Text, NdJSON response format types are supported
+- 📝 **Data Formats** - JSON, Markdown, Text, NdJSON response formats
 
 ## Quick Start⚡️
 
@@ -267,4 +267,4 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE).
 
 Contributions are welcome. See [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md).
 
-###### _"OpenSERP" is the name of this open-source project. Use of the name in a way that implies affiliation, endorsement, or official status is not permitted._
+###### _"OpenSERP" is the name of this open-source project. The official [website](https://openserp.org) and [hosted](https://openserp.org/cloud) solution. Use of the name in a way that implies affiliation, endorsement, or official status is not permitted._

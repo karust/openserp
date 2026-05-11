@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/karust/openserp/core"
-	"golang.org/x/time/rate"
 )
 
 // DuckDuckGo implements core.SearchEngine for DuckDuckGo SERP pages.
@@ -33,12 +32,6 @@ func New(browser core.Browser, opts core.SearchEngineOptions) *DuckDuckGo {
 // Name returns the stable engine identifier.
 func (ddg *DuckDuckGo) Name() string {
 	return "duckduckgo"
-}
-
-// GetRateLimiter returns a limiter configured from SearchEngineOptions.
-func (ddg *DuckDuckGo) GetRateLimiter() *rate.Limiter {
-	ratelimit := rate.Every(ddg.GetRatelimit())
-	return rate.NewLimiter(ratelimit, ddg.RateBurst)
 }
 
 func (ddg *DuckDuckGo) isCaptcha(page *rod.Page) bool {
@@ -145,9 +138,7 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 // Search executes a DuckDuckGo web search and returns normalized search
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.WithEngine(core.EnsureContext(ctx), ddg.Name())
-	ctx = core.WithProfileRegion(ctx, query.LangCode)
-	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	ctx = core.PrepareEngineContext(ctx, query, ddg.Name(), false)
 	scoped := *ddg
 	scoped.logger = ddg.logger.WithRequest(ctx)
 	ddg = &scoped
@@ -163,62 +154,54 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 	allResults := []core.SearchResult{}
 	searchPage := 0
 
-	for len(allResults) < query.Limit {
+	// fetchPage loads one SERP page and appends parsed results.
+	// Returns (done, error): done=true ends the outer loop without error.
+	fetchPage := func() (bool, error) {
 		url, err := BuildURL(query, searchPage)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
 
 		page, err := ddg.Navigate(ctx, url)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
-		closePage := func() {
-			if ddg.Browser.LeavePageOpen {
-				return
-			}
-			if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
-				ddg.logger.Debug("Page close error: %v", closeErr)
-			}
-		}
+		defer core.DeferClosePage(ctx, page, &ddg.Browser)()
 
 		elements, selector, err := core.WaitForElements(ctx, page, Selectors.Results, ddg.GetSelectorTimeout())
 		if err != nil {
 			if ddg.isNoResults(page) {
 				ddg.logger.Warn("No results found")
-				closePage()
-				break
+				return true, nil
 			}
 			if ddg.isCaptcha(page) {
 				ddg.logger.Error("Captcha detected: %s", url)
-				closePage()
-				return nil, core.ErrCaptcha
+				return false, core.ErrCaptcha
 			}
-			closePage()
 			ddg.logger.Error("Cannot parse search results: %s", err)
-			return nil, core.ErrSearchTimeout
+			return false, core.ErrSearchTimeout
 		}
 		ddg.logger.Debug("Found results with selector: %s", selector)
 
 		r := ddg.parseResults(elements, searchPage)
-
 		if len(r) == 0 {
 			ddg.logger.Debug("No valid results found on page %d", searchPage)
-			closePage()
-			return nil, core.ErrSearchTimeout
+			return false, core.ErrSearchTimeout
 		}
 
 		allResults = append(allResults, r...)
+		return false, nil
+	}
+
+	for len(allResults) < query.Limit {
+		done, err := fetchPage()
+		if err != nil {
+			return nil, err
+		}
 		searchPage++
-
-		// Close tab before opening new one during the cycle
-		closePage()
-
-		// Break if we've reached or exceeded the limit
-		if len(allResults) >= query.Limit {
+		if done || len(allResults) >= query.Limit {
 			break
 		}
-
 		if err := core.SleepContext(ctx, ddg.pageSleep); err != nil {
 			return nil, err
 		}
@@ -239,9 +222,7 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 // SearchImage executes a DuckDuckGo image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.WithEngine(core.EnsureContext(ctx), ddg.Name())
-	ctx = core.WithProfileRegion(ctx, query.LangCode)
-	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	ctx = core.PrepareEngineContext(ctx, query, ddg.Name(), false)
 	scoped := *ddg
 	scoped.logger = ddg.logger.WithRequest(ctx)
 	ddg = &scoped
@@ -260,13 +241,7 @@ func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]cor
 		return nil, err
 	}
 
-	if !ddg.Browser.LeavePageOpen {
-		defer func() {
-			if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
-				ddg.logger.Debug("Page close error: %v", closeErr)
-			}
-		}()
-	}
+	defer core.DeferClosePage(ctx, page, &ddg.Browser)()
 
 	elements, selector, err := core.WaitForElements(ctx, page, Selectors.ImageResult, ddg.GetSelectorTimeout())
 	if err != nil {

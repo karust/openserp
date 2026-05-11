@@ -36,3 +36,14 @@ func SleepContext(ctx context.Context, d time.Duration) error {
 func IsContextDone(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
+
+// PrepareEngineContext applies request-scoped metadata expected by all engine
+// search implementations.
+func PrepareEngineContext(ctx context.Context, query Query, engineName string, minimalBrowserProfile bool) context.Context {
+	ctx = WithEngine(EnsureContext(ctx), engineName)
+	ctx = WithProfileRegion(ctx, query.LangCode)
+	if minimalBrowserProfile {
+		ctx = WithMinimalBrowserProfile(ctx)
+	}
+	return WithQueryHash(ctx, QueryHashFromQuery(query))
+}

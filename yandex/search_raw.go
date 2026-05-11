@@ -25,9 +25,7 @@ func classifyYandexRawHTML(body []byte) error {
 }
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.EnsureContext(ctx)
-	ctx = core.WithEngine(ctx, "yandex")
-	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	ctx = core.PrepareEngineContext(ctx, query, "yandex", false)
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = core.RecoverEnginePanicWithContext(ctx, "yandex", recovered, nil)

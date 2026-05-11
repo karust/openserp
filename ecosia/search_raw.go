@@ -71,9 +71,7 @@ func imageResultParser(response *http.Response) ([]core.SearchResult, error) {
 }
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.EnsureContext(ctx)
-	ctx = core.WithEngine(ctx, "ecosia")
-	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	ctx = core.PrepareEngineContext(ctx, query, "ecosia", false)
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = core.RecoverEnginePanicWithContext(ctx, "ecosia", recovered, nil)

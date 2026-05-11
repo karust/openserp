@@ -206,10 +206,11 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 			results []SearchResult
 			err     error
 		)
+		requestCtx := proxyRequestContext(callCtx, engine.Name(), attemptQuery)
 		if isImage {
-			results, err = engine.SearchImage(proxyRequestContext(callCtx, engine.Name(), attemptQuery), attemptQuery)
+			results, err = engine.SearchImage(requestCtx, attemptQuery)
 		} else {
-			results, err = engine.Search(proxyRequestContext(callCtx, engine.Name(), attemptQuery), attemptQuery)
+			results, err = engine.Search(requestCtx, attemptQuery)
 		}
 
 		if reportToRegistry {

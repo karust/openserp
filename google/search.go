@@ -12,7 +12,6 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/karust/openserp/core"
-	"golang.org/x/time/rate"
 )
 
 // Google implements core.SearchEngine for Google SERP pages.
@@ -36,12 +35,6 @@ func New(browser core.Browser, opts core.SearchEngineOptions) *Google {
 // Name returns the stable engine identifier.
 func (gogl *Google) Name() string {
 	return "google"
-}
-
-// GetRateLimiter returns a limiter configured from SearchEngineOptions.
-func (gogl *Google) GetRateLimiter() *rate.Limiter {
-	ratelimit := rate.Every(gogl.GetRatelimit())
-	return rate.NewLimiter(ratelimit, gogl.RateBurst)
 }
 
 func (gogl *Google) getTotalResults(page *rod.Page) (int, error) {
@@ -178,10 +171,7 @@ func (gogl *Google) acceptCookies(page *rod.Page) {
 // Search executes a Google web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (gogl *Google) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.WithEngine(core.EnsureContext(ctx), gogl.Name())
-	ctx = core.WithProfileRegion(ctx, query.LangCode)
-	ctx = core.WithMinimalBrowserProfile(ctx)
-	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	ctx = core.PrepareEngineContext(ctx, query, gogl.Name(), true)
 	scoped := *gogl
 	scoped.logger = gogl.logger.WithRequest(ctx)
 	gogl = &scoped
@@ -446,10 +436,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 // SearchImage executes a Google image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (gogl *Google) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.WithEngine(core.EnsureContext(ctx), gogl.Name())
-	ctx = core.WithProfileRegion(ctx, query.LangCode)
-	ctx = core.WithMinimalBrowserProfile(ctx)
-	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	ctx = core.PrepareEngineContext(ctx, query, gogl.Name(), true)
 	scoped := *gogl
 	scoped.logger = gogl.logger.WithRequest(ctx)
 	gogl = &scoped
@@ -591,10 +578,5 @@ func (gogl *Google) parseImageCell(r *rod.Element, dst map[string]core.SearchRes
 }
 
 func (gogl *Google) close(ctx context.Context, page *rod.Page) {
-	if !gogl.Browser.LeavePageOpen {
-		err := core.ClosePageWithTimeout(ctx, page, time.Second)
-		if err != nil {
-			gogl.logger.Debug("Page close error: %v", err)
-		}
-	}
+	core.DeferClosePage(ctx, page, &gogl.Browser)()
 }

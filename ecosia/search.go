@@ -15,7 +15,6 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/karust/openserp/core"
-	"golang.org/x/time/rate"
 )
 
 // ecosiaPageSize is the organic-results-per-page count on Ecosia's web SERP.
@@ -43,7 +42,6 @@ const (
 	cfBodyMarker = "not a bot"
 )
 
-
 // Ecosia implements core.SearchEngine for Ecosia SERP pages. Additional
 // documentation at https://support.ecosia.org/article/447-search-features.
 type Ecosia struct {
@@ -65,11 +63,6 @@ func New(browser core.Browser, opts core.SearchEngineOptions) *Ecosia {
 
 // Name returns the stable engine identifier.
 func (e *Ecosia) Name() string { return "ecosia" }
-
-// GetRateLimiter returns a limiter configured from SearchEngineOptions.
-func (e *Ecosia) GetRateLimiter() *rate.Limiter {
-	return rate.NewLimiter(rate.Every(e.GetRatelimit()), e.RateBurst)
-}
 
 // isCaptcha reports whether the current page is a Cloudflare interstitial.
 // Checks the URL, title, then body text (cheapest first).
@@ -132,9 +125,7 @@ func (e *Ecosia) parseResult(elem *rod.Element, rank int, ad bool) (core.SearchR
 // Search executes an Ecosia web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.WithEngine(core.EnsureContext(ctx), e.Name())
-	ctx = core.WithProfileRegion(ctx, query.LangCode)
-	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	ctx = core.PrepareEngineContext(ctx, query, e.Name(), false)
 	scoped := *e
 	scoped.logger = e.logger.WithRequest(ctx)
 	e = &scoped
@@ -155,40 +146,32 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 		return nil, err
 	}
 	nextAdRank := -1
-	for query.Limit <= 0 || len(all) < query.Limit {
+	// fetchPage loads one SERP page and appends parsed results.
+	// Returns (done, error): done=true ends the outer loop without error.
+	fetchPage := func() (bool, error) {
 		u, err := BuildURL(query, pageNum)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
 
 		page, err := e.Navigate(ctx, u)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
-		closePage := func() {
-			if e.Browser.LeavePageOpen {
-				return
-			}
-			if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
-				e.logger.Debug("Page close error: %v", closeErr)
-			}
-		}
+		defer core.DeferClosePage(ctx, page, &e.Browser)()
 
 		if err := page.WaitLoad(); err != nil {
-			closePage()
 			e.logger.Error("Page load wait failed: %s", err)
-			return nil, core.ErrSearchTimeout
+			return false, core.ErrSearchTimeout
 		}
 
 		if _, err := page.Timeout(e.GetSelectorTimeout()).Element(Selectors.Mainline); err != nil {
 			if e.isCaptcha(page) {
-				closePage()
 				e.logger.Error("Captcha detected: %s", u)
-				return nil, core.ErrCaptcha
+				return false, core.ErrCaptcha
 			}
-			closePage()
 			e.logger.Warn("Mainline not found on page %d", pageNum)
-			break
+			return true, nil
 		}
 
 		organic, _ := page.Elements(Selectors.Result)
@@ -196,9 +179,8 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 		if len(organic) == 0 && len(ads) == 0 {
 			// Empty mainline = zero-result query or end of pagination, not
 			// a parser failure; don't trip the retry path.
-			closePage()
 			e.logger.Debug("No results on page %d", pageNum)
-			break
+			return true, nil
 		}
 
 		for _, r := range organic {
@@ -213,10 +195,18 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 				nextAdRank--
 			}
 		}
+		return false, nil
+	}
 
-		closePage()
+	for query.Limit <= 0 || len(all) < query.Limit {
+		done, err := fetchPage()
+		if err != nil {
+			return nil, err
+		}
 		pageNum++
-
+		if done {
+			break
+		}
 		if query.Limit > 0 && len(all) >= query.Limit {
 			break
 		}
@@ -293,9 +283,7 @@ func (e *Ecosia) parseImageResult(el *rod.Element, rank int) (core.SearchResult,
 // query.Start is ignored: per-page card count varies, so callers should
 // drive depth through query.Limit alone.
 func (e *Ecosia) SearchImage(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.WithEngine(core.EnsureContext(ctx), e.Name())
-	ctx = core.WithProfileRegion(ctx, query.LangCode)
-	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	ctx = core.PrepareEngineContext(ctx, query, e.Name(), false)
 	scoped := *e
 	scoped.logger = e.logger.WithRequest(ctx)
 	e = &scoped
@@ -311,47 +299,38 @@ func (e *Ecosia) SearchImage(ctx context.Context, query core.Query) (results []c
 	out := []core.SearchResult{}
 	pageNum := 0
 	nextRank := 1
-	for query.Limit <= 0 || len(out) < query.Limit {
+	// fetchPage loads one image page and appends parsed results.
+	// Returns (done, error): done=true ends the outer loop without error.
+	fetchPage := func() (bool, error) {
 		u, err := BuildImageURL(query, pageNum)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
 
 		page, err := e.Navigate(ctx, u)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
-		closePage := func() {
-			if e.Browser.LeavePageOpen {
-				return
-			}
-			if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
-				e.logger.Debug("Page close error: %v", closeErr)
-			}
-		}
+		defer core.DeferClosePage(ctx, page, &e.Browser)()
 
 		if err := page.WaitLoad(); err != nil {
-			closePage()
 			e.logger.Error("Page load wait failed: %s", err)
-			return nil, core.ErrSearchTimeout
+			return false, core.ErrSearchTimeout
 		}
 
 		if _, err := page.Timeout(e.GetSelectorTimeout()).Element(Selectors.ImageResult); err != nil {
 			if e.isCaptcha(page) {
-				closePage()
 				e.logger.Error("Captcha detected: %s", u)
-				return nil, core.ErrCaptcha
+				return false, core.ErrCaptcha
 			}
-			closePage()
 			e.logger.Debug("No image results on page %d", pageNum)
-			break
+			return true, nil
 		}
 
 		elements, err := page.Elements(Selectors.ImageResult)
 		if err != nil {
-			closePage()
 			e.logger.Error("Cannot collect image results: %s", err)
-			return nil, core.ErrParser
+			return false, core.ErrParser
 		}
 
 		for _, el := range elements {
@@ -363,10 +342,18 @@ func (e *Ecosia) SearchImage(ctx context.Context, query core.Query) (results []c
 				break
 			}
 		}
+		return false, nil
+	}
 
-		closePage()
+	for query.Limit <= 0 || len(out) < query.Limit {
+		done, err := fetchPage()
+		if err != nil {
+			return nil, err
+		}
 		pageNum++
-
+		if done {
+			break
+		}
 		if query.Limit > 0 && len(out) >= query.Limit {
 			break
 		}

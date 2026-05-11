@@ -1,94 +1,107 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" role="img" aria-labelledby="title desc">
-  <title id="title">OpenSERP – Multi‑Engine API Logo</title>
-  <desc id="desc">Professional banner-like logo with a unified search bar and chips for Google, Bing, DuckDuckGo, Yandex and Baidu, plus an API caption.</desc>
-
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" width="1280" height="400" role="img" aria-label="OpenSERP — One API for every search engine">
   <defs>
-    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#F5F7FB"/>
-      <stop offset="100%" stop-color="#FFFFFF"/>
-    </linearGradient>
-    <filter id="shadow" x="-10%" y="-30%" width="120%" height="160%">
-      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-opacity="0.18"/>
+    <filter id="barShadow" x="-10%" y="-50%" width="120%" height="260%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0E1116" flood-opacity="0.08"></feDropShadow>
+      <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#0E1116" flood-opacity="0.1"></feDropShadow>
     </filter>
-    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.18"/>
-    </filter>
-    <style>
-      .muted{fill:#5F6B7A}
-      .chip-label{font:700 14px Inter,Segoe UI,Arial,sans-serif;fill:#1F2937}
-      .api{font:800 44px "Segoe UI",Inter,Arial,sans-serif;fill:#EA4335}
-      .title{font:800 46px Inter,Segoe UI,Arial,sans-serif;letter-spacing:0.2px}
-    </style>
   </defs>
 
-  <!-- Top brand title similar to the provided mock but neutral -->
-  <g transform="translate(640,58)" text-anchor="middle">
-    <text class="title" x="0" y="0">
-      <tspan fill="#4285F4">O</tspan><tspan fill="#EA4335">p</tspan><tspan fill="#FBBC04">e</tspan><tspan fill="#4285F4">n</tspan><tspan fill="#34A853">S</tspan><tspan fill="#EA4335">E</tspan><tspan fill="#4285F4">R</tspan><tspan fill="#FBBC04">P</tspan>
-    </text>
-  </g>
+  
+  <text x="640" y="86" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="56" font-weight="900" letter-spacing="-2.5"><tspan fill="#E84B3C">O</tspan><tspan fill="#3D85F0">p</tspan><tspan fill="#E84B3C">e</tspan><tspan fill="#F2B22A">n</tspan><tspan fill="#2BB673">S</tspan><tspan fill="#E84B3C">E</tspan><tspan fill="#3D85F0">R</tspan><tspan fill="#E84B3C">P</tspan></text>
 
-  <!-- Main unified search bar -->
-  <g transform="translate(160,100)">
-    <rect x="0" y="0" rx="28" ry="28" width="960" height="60" fill="url(#bar)" filter="url(#shadow)"/>
-    <!-- left magnifier -->
-    <g class="muted" transform="translate(22,18)">
-      <circle cx="14" cy="14" r="10" fill="none" stroke="#98A2B3" stroke-width="3"/>
-      <rect x="22" y="22" width="12" height="4" rx="2" fill="#98A2B3" transform="rotate(45 28 24)"/>
-    </g>
-    <!-- placeholder text -->
-    <text x="70" y="37" font="500 18px Inter,Segoe UI,Arial" fill="#5F6B7A">Search across Google, Bing, DuckDuckGo, Yandex, Baidu…</text>
-    <!-- right icons -->
-    <g transform="translate(880,13)" class="muted">
-      <rect x="48" y="-2" width="1" height="36" fill="#E5E7EB"/>
-      <circle cx="18" cy="17" r="8" fill="#E5E7EB"/>
-      <rect x="12" y="8" width="12" height="6" rx="3" fill="#98A2B3"/>
-      <circle cx="18" cy="17" r="3" fill="#98A2B3"/>
-      <!-- microphone glyph -->
-      <rect x="62" y="6" width="8" height="16" rx="4" fill="#98A2B3"/>
-      <rect x="60" y="24" width="12" height="3" rx="1.5" fill="#98A2B3"/>
-    </g>
-  </g>
+  
+  <text x="640" y="116" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#0E1116" font-weight="500">One API · Every search engine · Free &amp; open-source</text>
 
-  <!-- Engine chips (brand colored, accessible, non-trademark glyphs) -->
-  <g transform="translate(640,88)" text-anchor="middle" dominant-baseline="middle">
-    <!-- layout positions -->
-    <g transform="translate(-420,-8)">
-      <rect rx="14" ry="14" width="120" height="28" fill="#FFFFFF" stroke="#E5E7EB" filter="url(#soft)"/>
-      <circle cx="16" cy="14" r="8" fill="#4285F4"/>
-      <text class="chip-label" x="78" y="17">Google</text>
+  
+  <g font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="500">
+    <g transform="translate(308, 148)">
+      <rect width="87" height="32" rx="16" fill="#FFFFFF" stroke="#E5E2D9"></rect>
+      <circle cx="16" cy="16" r="4" fill="#E84B3C"></circle>
+      <text x="28" y="20" fill="#0E1116">Google</text>
     </g>
-
-    <g transform="translate(-260,-8)">
-      <rect rx="14" ry="14" width="110" height="28" fill="#FFFFFF" stroke="#E5E7EB" filter="url(#soft)"/>
-      <circle cx="16" cy="14" r="8" fill="#008373"/>
-      <text class="chip-label" x="70" y="17">Bing</text>
+    <g transform="translate(405, 148)">
+      <rect width="72" height="32" rx="16" fill="#FFFFFF" stroke="#E5E2D9"></rect>
+      <circle cx="16" cy="16" r="4" fill="#3D85F0"></circle>
+      <text x="28" y="20" fill="#0E1116">Bing</text>
     </g>
-
-    <g transform="translate(-100,-8)">
-      <rect rx="14" ry="14" width="150" height="28" fill="#FFFFFF" stroke="#E5E7EB" filter="url(#soft)"/>
-      <circle cx="16" cy="14" r="8" fill="#DE5833"/>
-      <text class="chip-label" x="90" y="17">DuckDuckGo</text>
+    <g transform="translate(487, 148)">
+      <rect width="117" height="32" rx="16" fill="#FFFFFF" stroke="#E5E2D9"></rect>
+      <circle cx="16" cy="16" r="4" fill="#F2B22A"></circle>
+      <text x="28" y="20" fill="#0E1116">DuckDuckGo</text>
     </g>
-
-    <g transform="translate(90,-8)">
-      <rect rx="14" ry="14" width="120" height="28" fill="#FFFFFF" stroke="#E5E7EB" filter="url(#soft)"/>
-      <circle cx="16" cy="14" r="8" fill="#FC3F1D"/>
-      <text class="chip-label" x="78" y="17">Yandex</text>
+    <g transform="translate(614, 148)">
+      <rect width="87" height="32" rx="16" fill="#FFFFFF" stroke="#E5E2D9"></rect>
+      <circle cx="16" cy="16" r="4" fill="#E84B3C"></circle>
+      <text x="28" y="20" fill="#0E1116">Yandex</text>
     </g>
-
-    <g transform="translate(250,-8)">
-      <rect rx="14" ry="14" width="115" height="28" fill="#FFFFFF" stroke="#E5E7EB" filter="url(#soft)"/>
-      <circle cx="16" cy="14" r="8" fill="#2932E1"/>
-      <text class="chip-label" x="72" y="17">Baidu</text>
+    <g transform="translate(722, 148)">
+      <rect width="80" height="32" rx="16" fill="#FFFFFF" stroke="#E5E2D9"></rect>
+      <circle cx="16" cy="16" r="4" fill="#3D85F0"></circle>
+      <text x="28" y="20" fill="#0E1116">Baidu</text>
+    </g>
+    <g transform="translate(812, 148)">
+      <rect width="87" height="32" rx="16" fill="#FFFFFF" stroke="#E5E2D9"></rect>
+      <circle cx="16" cy="16" r="4" fill="#2BB673"></circle>
+      <text x="28" y="20" fill="#0E1116">Ecosia</text>
+    </g>
+    <g transform="translate(908, 148)">
+      <rect width="73" height="32" rx="16" fill="none" stroke="#3D85F0" stroke-dasharray="3 3"></rect>
+      <text x="36.5" y="20" text-anchor="middle" fill="#3D85F0">+ more</text>
     </g>
   </g>
 
-  <!-- API caption -->
-  <g transform="translate(640,232)" text-anchor="middle">
-    <text class="api">API</text>
+  
+  <g stroke="#C9C4B6" stroke-width="1.3" fill="none" stroke-linecap="round">
+    <line x1="351.5" y1="180" x2="351.5" y2="194"></line>
+    <line x1="441" y1="180" x2="441" y2="194"></line>
+    <line x1="545.5" y1="180" x2="545.5" y2="194"></line>
+    <line x1="657.5" y1="180" x2="657.5" y2="194"></line>
+    <line x1="762" y1="180" x2="762" y2="194"></line>
+    <line x1="855.5" y1="180" x2="855.5" y2="194"></line>
+    <line x1="944.5" y1="180" x2="944.5" y2="194"></line>
+    <line x1="345" y1="194" x2="952" y2="194"></line>
+    <line x1="640" y1="194" x2="640" y2="208"></line>
+  </g>
+
+  
+  <g transform="translate(280, 208)" filter="url(#barShadow)">
+    <rect width="720" height="60" rx="30" fill="#FFFFFF" stroke="#E5E2D9" stroke-width="1.5"></rect>
+    <circle cx="36" cy="30" r="9" fill="none" stroke="#0E1116" stroke-width="2"></circle>
+    <line x1="42.5" y1="36.5" x2="50" y2="44" stroke="#0E1116" stroke-width="2" stroke-linecap="round"></line>
+    <text x="62" y="35" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" fill="#0E1116">localhost:7000<tspan fill="#9A968A">/megasearch?q=</tspan><tspan fill="#3D85F0">…</tspan></text>
+    <g transform="translate(610, 14)">
+      <rect width="96" height="32" rx="16" fill="#3D85F0"></rect>
+      <text x="48" y="21" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#FFFFFF" letter-spacing="0.5">Search</text>
+    </g>
+  </g>
+
+  
+  <g stroke="#C9C4B6" stroke-width="1.3" fill="none" stroke-linecap="round">
+    <line x1="640" y1="268" x2="640" y2="282"></line>
+    <line x1="526" y1="282" x2="758" y2="282"></line>
+    <line x1="526" y1="282" x2="526" y2="296"></line>
+    <line x1="610" y1="282" x2="610" y2="296"></line>
+    <line x1="690" y1="282" x2="690" y2="296"></line>
+    <line x1="758" y1="282" x2="758" y2="296"></line>
+  </g>
+
+  
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" letter-spacing="0.5">
+    <g transform="translate(494, 296)">
+      <rect width="64" height="32" rx="16" fill="#E9F0FE" stroke="#3D85F0" stroke-width="1.4"></rect>
+      <text x="32" y="21" text-anchor="middle" fill="#3D85F0">JSON</text>
+    </g>
+    <g transform="translate(570, 296)">
+      <rect width="80" height="32" rx="16" fill="#E2F5EC" stroke="#2BB673" stroke-width="1.4"></rect>
+      <text x="40" y="21" text-anchor="middle" fill="#2BB673">NDJSON</text>
+    </g>
+    <g transform="translate(662, 296)">
+      <rect width="56" height="32" rx="16" fill="#FDF4E0" stroke="#F2B22A" stroke-width="1.4"></rect>
+      <text x="28" y="21" text-anchor="middle" fill="#F2B22A">MD</text>
+    </g>
+    <g transform="translate(730, 296)">
+      <rect width="56" height="32" rx="16" fill="#FDEBE9" stroke="#E84B3C" stroke-width="1.4"></rect>
+      <text x="28" y="21" text-anchor="middle" fill="#E84B3C">TXT</text>
+    </g>
   </g>
 </svg>
-
-

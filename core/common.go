@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"golang.org/x/time/rate"
 )
 
 // ErrCaptcha is returned when the engine detects a captcha challenge page.
@@ -322,8 +323,15 @@ func (o *SearchEngineOptions) Init() {
 }
 
 // GetRatelimit returns the interval between two allowed requests.
+// Call Init() first so RateRequests / RateTime are non-zero.
 func (o *SearchEngineOptions) GetRatelimit() time.Duration {
 	return (time.Duration(o.RateTime) * time.Second) / time.Duration(o.RateRequests)
+}
+
+// GetRateLimiter returns a limiter configured from SearchEngineOptions.
+// Call Init() first so RateBurst is non-zero.
+func (o *SearchEngineOptions) GetRateLimiter() *rate.Limiter {
+	return rate.NewLimiter(rate.Every(o.GetRatelimit()), o.RateBurst)
 }
 
 // GetSelectorTimeout returns the selector wait timeout as time.Duration.

@@ -11,7 +11,6 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/karust/openserp/core"
-	"golang.org/x/time/rate"
 )
 
 // Bing implements core.SearchEngine for Bing SERP pages.
@@ -33,12 +32,6 @@ func New(browser core.Browser, opts core.SearchEngineOptions) *Bing {
 // Name returns the stable engine identifier.
 func (bing *Bing) Name() string {
 	return "bing"
-}
-
-// GetRateLimiter returns a limiter configured from SearchEngineOptions.
-func (bing *Bing) GetRateLimiter() *rate.Limiter {
-	ratelimit := rate.Every(bing.GetRatelimit())
-	return rate.NewLimiter(ratelimit, bing.RateBurst)
 }
 
 func (bing *Bing) getTotalResults(page *rod.Page) (int, error) {
@@ -87,9 +80,7 @@ func (bing *Bing) acceptCookies(ctx context.Context, page *rod.Page) error {
 // Search executes a Bing web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.WithEngine(core.EnsureContext(ctx), bing.Name())
-	ctx = core.WithProfileRegion(ctx, query.LangCode)
-	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	ctx = core.PrepareEngineContext(ctx, query, bing.Name(), false)
 	scoped := *bing
 	scoped.logger = bing.logger.WithRequest(ctx)
 	bing = &scoped
@@ -113,14 +104,7 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if bing.Browser.LeavePageOpen {
-			return
-		}
-		if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
-			bing.logger.Debug("Page close error: %v", closeErr)
-		}
-	}()
+	defer core.DeferClosePage(ctx, page, &bing.Browser)()
 
 	if bing.checkCaptcha(page) {
 		bing.logger.Error("Captcha detected: %s", url)
@@ -289,9 +273,7 @@ func resolveImageLinkElement(container *rod.Element) (*rod.Element, error) {
 // SearchImage executes a Bing image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.WithEngine(core.EnsureContext(ctx), bing.Name())
-	ctx = core.WithProfileRegion(ctx, query.LangCode)
-	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	ctx = core.PrepareEngineContext(ctx, query, bing.Name(), false)
 	scoped := *bing
 	scoped.logger = bing.logger.WithRequest(ctx)
 	bing = &scoped
@@ -310,14 +292,7 @@ func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.Sea
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if bing.Browser.LeavePageOpen {
-			return
-		}
-		if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
-			bing.logger.Debug("Page close error: %v", closeErr)
-		}
-	}()
+	defer core.DeferClosePage(ctx, page, &bing.Browser)()
 
 	// Check for captcha
 	if bing.checkCaptcha(page) {

@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/karust/openserp/core"
-	"golang.org/x/time/rate"
 )
 
 type imageDataJson struct {
@@ -54,12 +53,6 @@ func (baid *Baidu) Name() string {
 	return "baidu"
 }
 
-// GetRateLimiter returns a limiter configured from SearchEngineOptions.
-func (baid *Baidu) GetRateLimiter() *rate.Limiter {
-	ratelimit := rate.Every(baid.GetRatelimit())
-	return rate.NewLimiter(ratelimit, baid.RateBurst)
-}
-
 func (baid *Baidu) isCaptcha(page *rod.Page) bool {
 	has, _, _ := page.Has(Selectors.Captcha)
 	return has
@@ -85,10 +78,7 @@ func (baid *Baidu) classifyBlockPage(page *rod.Page, url string) error {
 // Search executes a Baidu web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.WithEngine(core.EnsureContext(ctx), baid.Name())
-	ctx = core.WithProfileRegion(ctx, query.LangCode)
-	ctx = core.WithMinimalBrowserProfile(ctx)
-	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	ctx = core.PrepareEngineContext(ctx, query, baid.Name(), true)
 	scoped := *baid
 	scoped.logger = baid.logger.WithRequest(ctx)
 	if scoped.Browser.WaitLoadTime == 0 || scoped.Browser.WaitLoadTime > 250*time.Millisecond {
@@ -114,21 +104,12 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 	if err != nil {
 		return nil, err
 	}
-	closePage := func() {
-		if baid.Browser.LeavePageOpen {
-			return
-		}
-		if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
-			baid.logger.Debug("Page close error: %v", closeErr)
-		}
-	}
+	defer core.DeferClosePage(ctx, page, &baid.Browser)()
 
 	searchResults, err := baid.waitForParsedSearchResults(ctx, page, url)
 	if err != nil {
-		closePage()
 		return nil, err
 	}
-	closePage()
 
 	for i := range searchResults {
 		searchResults[i].Rank = query.Start + i + 1
@@ -185,10 +166,7 @@ func (baid *Baidu) waitForParsedSearchResults(ctx context.Context, page *rod.Pag
 // SearchImage executes a Baidu image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.WithEngine(core.EnsureContext(ctx), baid.Name())
-	ctx = core.WithProfileRegion(ctx, query.LangCode)
-	ctx = core.WithMinimalBrowserProfile(ctx)
-	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	ctx = core.PrepareEngineContext(ctx, query, baid.Name(), true)
 	scoped := *baid
 	scoped.logger = baid.logger.WithRequest(ctx)
 	baid = &scoped
@@ -198,57 +176,46 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 	searchResults := []core.SearchResult{}
 	searchPage := 0
 
-	for len(searchResults) < query.Limit {
+	// fetchPage loads one image-results page and appends parsed results.
+	// Returns (done, error): done=true ends the outer loop without error.
+	fetchPage := func() (bool, error) {
 		url, err := BuildImageURL(query, searchPage)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
 
 		// First load often seeds anti-crawler cookies; results tend to become
 		// available after one explicit reload.
 		page, err := baid.Navigate(ctx, url)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
-		closePage := func() {
-			if baid.Browser.LeavePageOpen {
-				return
-			}
-			if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
-				baid.logger.Debug("Page close error: %v", closeErr)
-			}
-		}
+		defer core.DeferClosePage(ctx, page, &baid.Browser)()
 
 		jsonWaitTimeout := baid.GetSelectorTimeout()
 		if reloadErr := page.Reload(); reloadErr != nil {
-			closePage()
-			return nil, core.ErrSearchTimeout
+			return false, core.ErrSearchTimeout
 		}
 
 		preElements, _, err := core.WaitForElements(ctx, page, Selectors.ImageJSONRoot, jsonWaitTimeout)
 		if err != nil {
 			if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
-				closePage()
-				return nil, blockErr
+				return false, blockErr
 			}
-			closePage()
 			baid.logger.Error("Cannot parse search results: %s", err)
-			return nil, core.ErrSearchTimeout
+			return false, core.ErrSearchTimeout
 		}
 
 		if len(preElements) == 0 {
 			if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
-				closePage()
-				return nil, blockErr
+				return false, blockErr
 			}
-			closePage()
-			return nil, nil
+			return true, nil
 		}
 
 		jsonText, err := preElements[0].Text()
 		if err != nil {
-			closePage()
-			return nil, err
+			return false, err
 		}
 
 		var data imageDataJson
@@ -257,28 +224,23 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 		jsonText = strings.ReplaceAll(jsonText, `\'`, "'")
 		matchNewlines, err := regexp.Compile(`[\r\n\t]`)
 		if err != nil {
-			closePage()
-			return nil, core.ErrParser
+			return false, core.ErrParser
 		}
 		escapeNewlines := func(s string) string {
 			return matchNewlines.ReplaceAllString(s, "\\n")
 		}
 		re, err := regexp.Compile(`"[^"\\]*(?:\\[\s\S][^"\\]*)*"`)
 		if err != nil {
-			closePage()
-			return nil, core.ErrParser
+			return false, core.ErrParser
 		}
 		fixedJson := re.ReplaceAllStringFunc(jsonText, escapeNewlines)
 
-		err = json.Unmarshal([]byte(fixedJson), &data)
-		if err != nil {
-			closePage()
+		if err := json.Unmarshal([]byte(fixedJson), &data); err != nil {
 			baid.logger.Error("Failed to unmarshal JSON: %v", err)
-			return nil, core.ErrParser
+			return false, core.ErrParser
 		}
 		if len(data.Data) == 0 {
-			closePage()
-			break
+			return true, nil
 		}
 
 		for i, img := range data.Data {
@@ -299,23 +261,26 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 					img.Type,
 					img.IsCopyright,
 				),
-				Ad: func() bool {
-					if img.AdType != "0" {
-						return true
-					} else {
-						return false
-					}
-				}(),
+				Ad: img.AdType != "0",
 			}
 			searchResults = append(searchResults, res)
 			if query.Limit > 0 && len(searchResults) >= query.Limit {
-				break
+				return true, nil
 			}
 		}
 
-		searchPage += 1
+		return false, nil
+	}
 
-		closePage()
+	for len(searchResults) < query.Limit {
+		done, err := fetchPage()
+		if err != nil {
+			return nil, err
+		}
+		searchPage++
+		if done {
+			break
+		}
 	}
 
 	deduped := core.DeduplicateResults(searchResults)

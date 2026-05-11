@@ -9,7 +9,6 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/karust/openserp/core"
-	"golang.org/x/time/rate"
 )
 
 // ImageEntity contains one image record from Yandex image search state JSON.
@@ -58,12 +57,6 @@ func New(browser core.Browser, opts core.SearchEngineOptions) *Yandex {
 // Name returns the stable engine identifier.
 func (yand *Yandex) Name() string {
 	return "yandex"
-}
-
-// GetRateLimiter returns a limiter configured from SearchEngineOptions.
-func (yand *Yandex) GetRateLimiter() *rate.Limiter {
-	ratelimit := rate.Every(yand.GetRatelimit())
-	return rate.NewLimiter(ratelimit, yand.RateBurst)
 }
 
 func (yand *Yandex) isCaptcha(page *rod.Page) bool {
@@ -146,9 +139,7 @@ func (yand *Yandex) parseImageEntities(items rod.Elements) map[string]ImageEntit
 // Search executes a Yandex web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
-	ctx = core.WithEngine(core.EnsureContext(ctx), yand.Name())
-	ctx = core.WithProfileRegion(ctx, query.LangCode)
-	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	ctx = core.PrepareEngineContext(ctx, query, yand.Name(), false)
 	scoped := *yand
 	scoped.logger = yand.logger.WithRequest(ctx)
 	yand = &scoped
@@ -172,40 +163,32 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 	}
 	startPage := searchPage
 
-	for len(allResults) < query.Limit {
+	// fetchPage loads one SERP page and appends parsed results.
+	// Returns (done, error): done=true ends the outer loop without error.
+	fetchPage := func() (bool, error) {
 		url, err := BuildURL(query, searchPage)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
 
 		page, err := yand.Navigate(ctx, url)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
-		closePage := func() {
-			if yand.Browser.LeavePageOpen {
-				return
-			}
-			if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
-				yand.logger.Debug("Page close error: %v", closeErr)
-			}
-		}
+		defer core.DeferClosePage(ctx, page, &yand.Browser)()
 
 		elements, _, err := core.WaitForElements(ctx, page, []string{Selectors.Results}, yand.GetSelectorTimeout())
 		if err != nil {
 			if yand.isCaptcha(page) {
 				yand.logger.Error("Captcha detected: %s", url)
-				closePage()
-				return nil, core.ErrCaptcha
+				return false, core.ErrCaptcha
 			}
 			if yand.isNoResults(page) {
 				yand.logger.Warn("No results found")
-				closePage()
-				break
+				return true, nil
 			}
-			closePage()
 			yand.logger.Error("Cannot parse search results: %s", err)
-			return nil, core.ErrSearchTimeout
+			return false, core.ErrSearchTimeout
 		}
 
 		r := yand.parseResults(elements, searchPage)
@@ -217,12 +200,18 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 			}
 		}
 		allResults = append(allResults, r...)
+		return false, nil
+	}
 
+	for len(allResults) < query.Limit {
+		done, err := fetchPage()
+		if err != nil {
+			return nil, err
+		}
 		searchPage++
-
-		// Close tab before opening new one during the cycle
-		closePage()
-
+		if done {
+			break
+		}
 		if err := core.SleepContext(ctx, yand.pageSleep); err != nil {
 			return nil, err
 		}
@@ -235,9 +224,7 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 // SearchImage executes a Yandex image search and returns normalized image
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.SearchResult, error) {
-	ctx = core.WithEngine(core.EnsureContext(ctx), yand.Name())
-	ctx = core.WithProfileRegion(ctx, query.LangCode)
-	ctx = core.WithQueryHash(ctx, core.QueryHashFromQuery(query))
+	ctx = core.PrepareEngineContext(ctx, query, yand.Name(), false)
 	scoped := *yand
 	scoped.logger = yand.logger.WithRequest(ctx)
 	yand = &scoped
@@ -248,25 +235,20 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 	allowPagination := query.Limit > 30
 
 	searchPage := 0
-	for len(searchResults) < query.Limit {
+	// fetchPage loads one image page and appends parsed results.
+	// Returns (done, error): done=true ends the outer loop.
+	fetchPage := func() (bool, error) {
 		url, err := BuildImageURL(query, searchPage)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
 		searchPage += 1
 
 		page, err := yand.Navigate(ctx, url)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
-		closePage := func() {
-			if yand.Browser.LeavePageOpen {
-				return
-			}
-			if closeErr := core.ClosePageWithTimeout(ctx, page, time.Second); closeErr != nil {
-				yand.logger.Debug("Page close error: %v", closeErr)
-			}
-		}
+		defer core.DeferClosePage(ctx, page, &yand.Browser)()
 
 		results, _, err := core.WaitForElements(
 			ctx,
@@ -283,14 +265,12 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 		if err != nil {
 			if yand.isCaptcha(page) {
 				yand.logger.Error("Captcha detected: %s", url)
-				closePage()
-				return searchResults, core.ErrCaptcha
+				return false, core.ErrCaptcha
 			}
 			if yand.isNoResults(page) {
 				yand.logger.Warn("No results found")
 			}
-			closePage()
-			return searchResults, core.ErrSearchTimeout
+			return false, core.ErrSearchTimeout
 		}
 
 		pageEntities := yand.parseImageEntities(results)
@@ -301,8 +281,7 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 			}
 		}
 		if len(pageEntities) == 0 {
-			closePage()
-			break
+			return true, nil
 		}
 
 		for id := range pageEntities {
@@ -317,15 +296,22 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 			searchResults = append(searchResults, res)
 		}
 		if len(searchResults) >= query.Limit {
-			closePage()
-			break
+			return true, nil
 		}
 		if searchPage == 1 && !allowPagination {
-			closePage()
+			return true, nil
+		}
+		return false, nil
+	}
+
+	for len(searchResults) < query.Limit {
+		done, err := fetchPage()
+		if err != nil {
+			return searchResults, err
+		}
+		if done {
 			break
 		}
-
-		closePage()
 	}
 
 	sort.Slice(searchResults, func(i, j int) bool {
