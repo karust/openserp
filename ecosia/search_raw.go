@@ -121,7 +121,7 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 
 	// Ecosia paginates by page index, not result offset, so re-rank from
 	// the page boundary rather than query.Start (off-grid offsets round down).
-	// Skip ads (rank<0) so organic ranks stay sequential from startRank.
+	// Skip ads so organic ranks stay sequential from startRank.
 	organicIdx := 0
 	for i := range parsedResults {
 		if parsedResults[i].Ad {
@@ -130,6 +130,7 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 		parsedResults[i].Rank = startRank + organicIdx
 		organicIdx++
 	}
+	setSeparatedAdAbsoluteRanks(parsedResults, pageNum*10)
 
 	core.WithRequest(ctx).WithField("results_count", len(parsedResults)).Debug(
 		fmt.Sprintf("Ecosia Raw results : %v", parsedResults),

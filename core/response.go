@@ -11,13 +11,13 @@ type QueryEcho struct {
 
 // ResponseMeta carries request-level metadata for observability and debugging.
 type ResponseMeta struct {
-	RequestID         string              `json:"request_id"`
-	RequestedAt       string              `json:"requested_at"`
-	TookMs            int64               `json:"took_ms"`
-	EnginesResponded  []string            `json:"engines_responded,omitempty"`
-	EnginesFailed     []string            `json:"engines_failed"`
-	EngineErrors      []EngineErrorDetail `json:"engine_errors,omitempty"`
-	Version           string              `json:"version"`
+	RequestID        string              `json:"request_id"`
+	RequestedAt      string              `json:"requested_at"`
+	TookMs           int64               `json:"took_ms"`
+	EnginesResponded []string            `json:"engines_responded,omitempty"`
+	EnginesFailed    []string            `json:"engines_failed"`
+	EngineErrors     []EngineErrorDetail `json:"engine_errors,omitempty"`
+	Version          string              `json:"version"`
 }
 
 // EngineErrorDetail is a client-facing, sanitized per-engine failure summary.
@@ -34,7 +34,7 @@ type Pagination struct {
 	NextStart int  `json:"next_start"`
 }
 
-// Envelope is the top-level v1 response wrapper for all search endpoints.
+// Envelope is the top-level v2 response wrapper for all search endpoints.
 type Envelope struct {
 	Query      QueryEcho    `json:"query"`
 	Meta       ResponseMeta `json:"meta"`
@@ -64,7 +64,7 @@ type ClusterOccurrence struct {
 	ResultID string `json:"result_id"`
 }
 
-// ImageEnvelope is the top-level v1 response wrapper for image search endpoints.
+// ImageEnvelope is the top-level v2 response wrapper for image search endpoints.
 type ImageEnvelope struct {
 	Query      QueryEcho     `json:"query"`
 	Meta       ResponseMeta  `json:"meta"`
@@ -72,7 +72,7 @@ type ImageEnvelope struct {
 	Pagination Pagination    `json:"pagination"`
 }
 
-const apiVersion = "1.0"
+const apiVersion = "2.0"
 
 // NewEnvelope builds a fresh Envelope pre-filled with query echo and an open
 // meta block. Call Finalize before serializing.
@@ -124,9 +124,19 @@ func (e *Envelope) Finalize(startedAt time.Time, q Query) {
 	page := q.Start/limit + 1
 	e.Pagination = Pagination{
 		Page:      page,
-		HasMore:   len(e.Results) >= limit,
+		HasMore:   countNonAdResults(e.Results) >= limit,
 		NextStart: q.Start + limit,
 	}
+}
+
+func countNonAdResults(results []Result) int {
+	count := 0
+	for _, result := range results {
+		if result.Type != ResultTypeAd {
+			count++
+		}
+	}
+	return count
 }
 
 // Finalize stamps the elapsed time and computes pagination fields.

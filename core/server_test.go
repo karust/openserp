@@ -2208,7 +2208,7 @@ func TestServerOptions_DisableCORSMiddleware(t *testing.T) {
 	}
 }
 
-func TestDedicatedEndpointReturnsV1Envelope(t *testing.T) {
+func TestDedicatedEndpointReturnsV2Envelope(t *testing.T) {
 	engine := &engineMock{name: "google", initialized: true}
 	opts := DefaultServerOptions()
 	opts.Resilience.Retry.MaxRetries = 0
@@ -2223,8 +2223,8 @@ func TestDedicatedEndpointReturnsV1Envelope(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatalf("decode envelope: %v", err)
 	}
-	if env.Meta.Version != "1.0" {
-		t.Fatalf("expected meta.version=1.0, got %q", env.Meta.Version)
+	if env.Meta.Version != "2.0" {
+		t.Fatalf("expected meta.version=2.0, got %q", env.Meta.Version)
 	}
 	if env.Meta.RequestID == "" {
 		t.Fatal("expected non-empty meta.request_id")
@@ -2248,15 +2248,12 @@ func TestDedicatedEndpointReturnsV1Envelope(t *testing.T) {
 	if r.Snippet == "" && r.Title == "" {
 		t.Fatal("expected result to have title or snippet")
 	}
-	if r.Position.Page < 1 {
-		t.Fatalf("expected position.page >= 1, got %d", r.Position.Page)
-	}
 	if env.Pagination.Page < 1 {
 		t.Fatalf("expected pagination.page >= 1, got %d", env.Pagination.Page)
 	}
 }
 
-func TestMegaSearchReturnsV1EnvelopeWithEnginesFailed(t *testing.T) {
+func TestMegaSearchReturnsV2EnvelopeWithEnginesFailed(t *testing.T) {
 	good := &engineMock{name: "google", initialized: true}
 	bad := &engineMock{
 		name:        "bing",
@@ -2279,8 +2276,8 @@ func TestMegaSearchReturnsV1EnvelopeWithEnginesFailed(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatalf("decode envelope: %v", err)
 	}
-	if env.Meta.Version != "1.0" {
-		t.Fatalf("expected meta.version=1.0, got %q", env.Meta.Version)
+	if env.Meta.Version != "2.0" {
+		t.Fatalf("expected meta.version=2.0, got %q", env.Meta.Version)
 	}
 	if len(env.Meta.EnginesFailed) == 0 {
 		t.Fatal("expected engines_failed to contain bing")
@@ -2446,6 +2443,49 @@ func TestFormatParamReturnsCorrectContentType(t *testing.T) {
 	}
 }
 
+func TestJSONOmitsRedundantResultFields(t *testing.T) {
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, _ Query) ([]SearchResult, error) {
+			return []SearchResult{{
+				Rank:         1,
+				AbsoluteRank: 2,
+				URL:          "https://example.gov/page",
+				Title:        "Gov Result",
+				Description:  "Snippet",
+			}}, nil
+		},
+	}
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7210, opts, engine)
+
+	resp := request(t, srv, "/google/search?text=clean-json")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	payload := string(body)
+	for _, omitted := range []string{`"is_ad"`, `"on_page"`, `"is_gov"`} {
+		if strings.Contains(payload, omitted) {
+			t.Fatalf("json payload should not contain %s: %s", omitted, payload)
+		}
+	}
+	if strings.Contains(payload, `"position":{"absolute":2,"page"`) {
+		t.Fatalf("json payload should not contain per-result page: %s", payload)
+	}
+	if !strings.Contains(payload, `"type":"organic"`) {
+		t.Fatalf("json payload should keep result type: %s", payload)
+	}
+	if !strings.Contains(payload, `"category":"gov"`) {
+		t.Fatalf("json payload should collapse domain category: %s", payload)
+	}
+	if !strings.Contains(payload, `"absolute":2`) {
+		t.Fatalf("json payload should keep meaningful absolute position: %s", payload)
+	}
+}
+
 func TestFormatParamBypassesJSONCache(t *testing.T) {
 	engine := &engineMock{name: "google", initialized: true}
 	opts := DefaultServerOptions()
@@ -2531,9 +2571,8 @@ func TestPaginatedPositionUsesAbsoluteRank(t *testing.T) {
 	if len(env.Results) != 1 {
 		t.Fatalf("expected one result, got %d", len(env.Results))
 	}
-	pos := env.Results[0].Position
-	if pos.Absolute != 11 || pos.OnPage != 1 || pos.Page != 2 {
-		t.Fatalf("unexpected position: %+v", pos)
+	if env.Results[0].Position == nil || env.Results[0].Position.Absolute != 11 {
+		t.Fatalf("expected absolute position 11, got %+v", env.Results[0].Position)
 	}
 }
 

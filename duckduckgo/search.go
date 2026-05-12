@@ -69,8 +69,11 @@ func (ddg *DuckDuckGo) isNoResults(page *rod.Page) bool {
 
 func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.SearchResult {
 	searchResults := []core.SearchResult{}
+	organicRank := pageNum * 10
+	adRank := 1
+	absoluteRank := pageNum*10 + 1
 
-	for i, r := range results {
+	for _, r := range results {
 		// Get URL - try multiple selectors
 		var link *rod.Element
 		var err error
@@ -113,26 +116,45 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 		desc := core.FirstNonEmptyText(r, Selectors.Desc...)
 
 		// Check if it's an ad
-		isAd := false
-		for _, selector := range Selectors.AdBadge {
-			adIndicator, err := r.Element(selector)
-			if err == nil && adIndicator != nil {
-				isAd = true
-				break
-			}
+		isAd := duckduckgoElementHasAdMarker(r)
+		resultRank := 0
+		if isAd {
+			resultRank = adRank
+			adRank++
+		} else {
+			organicRank++
+			resultRank = organicRank
 		}
 
 		result := core.SearchResult{
-			Rank:        (pageNum * 10) + (i + 1),
-			URL:         hrefStr,
-			Title:       title,
-			Description: desc,
-			Ad:          isAd,
+			Rank:         resultRank,
+			AbsoluteRank: absoluteRank,
+			URL:          hrefStr,
+			Title:        title,
+			Description:  desc,
+			Ad:           isAd,
 		}
 		searchResults = append(searchResults, result)
+		absoluteRank++
 	}
 
 	return searchResults
+}
+
+func duckduckgoElementHasAdMarker(el *rod.Element) bool {
+	if el == nil {
+		return false
+	}
+	for _, selector := range Selectors.AdBadge {
+		matches, err := el.Matches(selector)
+		if err == nil && matches {
+			return true
+		}
+		if adIndicator, err := el.Element(selector); err == nil && adIndicator != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Search executes a DuckDuckGo web search and returns normalized search
@@ -193,13 +215,13 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 		return false, nil
 	}
 
-	for len(allResults) < query.Limit {
+	for query.Limit <= 0 || core.CountOrganicResults(allResults) < query.Limit {
 		done, err := fetchPage()
 		if err != nil {
 			return nil, err
 		}
 		searchPage++
-		if done || len(allResults) >= query.Limit {
+		if done || (query.Limit > 0 && core.CountOrganicResults(allResults) >= query.Limit) {
 			break
 		}
 		if err := core.SleepContext(ctx, ddg.pageSleep); err != nil {
@@ -211,9 +233,7 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 	deduped := core.DeduplicateResults(allResults)
 
 	// Trim to exact limit if necessary
-	if len(deduped) > query.Limit {
-		deduped = deduped[:query.Limit]
-	}
+	deduped = core.LimitOrganicResults(deduped, query.Limit)
 
 	ddg.logger.Info("Search completed: %d results", len(deduped))
 	return deduped, nil

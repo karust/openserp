@@ -71,8 +71,11 @@ func (yand *Yandex) isNoResults(page *rod.Page) bool {
 
 func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.SearchResult {
 	searchResults := []core.SearchResult{}
+	organicRank := pageNum * 10
+	adRank := 1
+	absoluteRank := pageNum*10 + 1
 
-	for i, r := range results {
+	for _, r := range results {
 		// Get URL
 		link, err := r.Element(Selectors.Link)
 		if err != nil {
@@ -109,11 +112,46 @@ func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.Searc
 			desc, _ = descTag.Text()
 		}
 
-		r := core.SearchResult{Rank: (pageNum * 10) + (i + 1), URL: linkText.String(), Title: title, Description: desc}
-		searchResults = append(searchResults, r)
+		hrefStr := linkText.String()
+		isAd := yandexElementHasAdMarker(r) || yandexURLLooksAd(hrefStr)
+		resultRank := 0
+		if isAd {
+			resultRank = adRank
+			adRank++
+		} else {
+			organicRank++
+			resultRank = organicRank
+		}
+
+		res := core.SearchResult{
+			Rank:         resultRank,
+			AbsoluteRank: absoluteRank,
+			URL:          hrefStr,
+			Title:        title,
+			Description:  desc,
+			Ad:           isAd,
+		}
+		searchResults = append(searchResults, res)
+		absoluteRank++
 	}
 
 	return searchResults
+}
+
+func yandexElementHasAdMarker(el *rod.Element) bool {
+	if el == nil {
+		return false
+	}
+	for _, selector := range Selectors.AdMarkers {
+		matches, err := el.Matches(selector)
+		if err == nil && matches {
+			return true
+		}
+		if child, err := el.Element(selector); err == nil && child != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (yand *Yandex) parseImageEntities(items rod.Elements) map[string]ImageEntity {
@@ -193,17 +231,13 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 
 		r := yand.parseResults(elements, searchPage)
 		if searchPage == startPage && skipOnFirstPage > 0 {
-			if skipOnFirstPage >= len(r) {
-				r = []core.SearchResult{}
-			} else {
-				r = r[skipOnFirstPage:]
-			}
+			r = skipOrganicResults(r, skipOnFirstPage)
 		}
 		allResults = append(allResults, r...)
 		return false, nil
 	}
 
-	for len(allResults) < query.Limit {
+	for query.Limit <= 0 || core.CountOrganicResults(allResults) < query.Limit {
 		done, err := fetchPage()
 		if err != nil {
 			return nil, err
@@ -212,13 +246,16 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 		if done {
 			break
 		}
+		if query.Limit > 0 && core.CountOrganicResults(allResults) >= query.Limit {
+			break
+		}
 		if err := core.SleepContext(ctx, yand.pageSleep); err != nil {
 			return nil, err
 		}
 	}
 
 	yand.logger.Info("Search completed: %d results", len(allResults))
-	return core.DeduplicateResults(allResults), nil
+	return core.LimitOrganicResults(core.DeduplicateResults(allResults), query.Limit), nil
 }
 
 // SearchImage executes a Yandex image search and returns normalized image

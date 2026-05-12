@@ -2,6 +2,7 @@ package yandex
 
 import (
 	"io"
+	"net/url"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -21,6 +22,8 @@ func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
 func parseYandexDocument(doc *goquery.Document) []core.SearchResult {
 	var results []core.SearchResult
 	rank := 1
+	adRank := 1
+	absoluteRank := 1
 
 	doc.Find(Selectors.Results).Each(func(_ int, item *goquery.Selection) {
 		// Skip blocks without a result heading (filters out non-organic blocks
@@ -51,6 +54,7 @@ func parseYandexDocument(doc *goquery.Document) []core.SearchResult {
 		if href == "" || href == "#" || strings.HasPrefix(href, "javascript:") {
 			return
 		}
+		isAd := yandexSelectionHasAdMarker(item) || yandexURLLooksAd(href)
 
 		title := strings.TrimSpace(titleTag.Text())
 		if title == "" {
@@ -67,14 +71,84 @@ func parseYandexDocument(doc *goquery.Document) []core.SearchResult {
 			}
 		}
 
+		resultRank := rank
+		if isAd {
+			resultRank = adRank
+			adRank++
+		} else {
+			rank++
+		}
+
 		results = append(results, core.SearchResult{
-			Rank:        rank,
-			URL:         href,
-			Title:       title,
-			Description: desc,
+			Rank:         resultRank,
+			AbsoluteRank: absoluteRank,
+			URL:          href,
+			Title:        title,
+			Description:  desc,
+			Ad:           isAd,
 		})
-		rank++
+		absoluteRank++
 	})
 
 	return core.DeduplicateResults(results)
+}
+
+func yandexSelectionHasAdMarker(item *goquery.Selection) bool {
+	for _, selector := range Selectors.AdMarkers {
+		if item.Is(selector) || item.Find(selector).Length() > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func yandexURLLooksAd(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
+	return strings.HasPrefix(host, "yabs.yandex.") ||
+		host == "an.yandex.ru" ||
+		strings.HasSuffix(host, ".yandexadexchange.net")
+}
+
+func skipOrganicResults(results []core.SearchResult, skip int) []core.SearchResult {
+	if skip <= 0 {
+		return results
+	}
+	out := results[:0]
+	for _, result := range results {
+		if !result.Ad && skip > 0 {
+			skip--
+			continue
+		}
+		out = append(out, result)
+	}
+	return out
+}
+
+func rebaseOrganicRanks(results []core.SearchResult, start int) {
+	if start <= 0 {
+		return
+	}
+	organicIdx := 0
+	for i := range results {
+		if results[i].Ad {
+			continue
+		}
+		organicIdx++
+		results[i].Rank = start + organicIdx
+	}
+}
+
+func offsetAbsoluteRanks(results []core.SearchResult, start int) {
+	if start <= 0 {
+		return
+	}
+	for i := range results {
+		if results[i].AbsoluteRank > 0 {
+			results[i].AbsoluteRank += start
+		}
+	}
 }

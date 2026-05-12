@@ -24,7 +24,7 @@ type EnrichContext struct {
 	Query  Query
 }
 
-// EnrichResult converts a raw engine result into the v1 Result shape.
+// EnrichResult converts a raw engine result into the v2 Result shape.
 func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 	normalizedURL := normalizeURL(raw.URL)
 	domain := extractDomain(normalizedURL)
@@ -42,17 +42,23 @@ func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 	if raw.Rank <= 0 && !raw.Ad {
 		resultType = ResultTypeAnswerBox
 	}
-
-	limit := ctx.Query.Limit
-	if limit <= 0 {
-		limit = 25
+	rank := raw.Rank
+	if rank < 0 {
+		if raw.Ad {
+			rank = -rank
+		} else {
+			rank = 0
+		}
 	}
-	page := ctx.Query.Start/limit + 1
-	absolute, onPage := computeResultPosition(raw.Rank, ctx.Query.Start)
+
+	absolute := computeResultPosition(raw, ctx.Query.Start)
+	if absolute <= 0 {
+		absolute = rank
+	}
 
 	result := Result{
 		ID:         buildResultID(ctx.Engine, normalizedURL),
-		Rank:       raw.Rank,
+		Rank:       rank,
 		Type:       resultType,
 		Title:      raw.Title,
 		URL:        normalizedURL,
@@ -60,13 +66,10 @@ func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 		Snippet:    raw.Description,
 		Domain:     domain,
 		Favicon:    favicon,
-		IsAd:       raw.Ad,
-		Position: Position{
-			Absolute: absolute,
-			Page:     page,
-			OnPage:   onPage,
-		},
-		Engine: ctx.Engine,
+		Engine:     ctx.Engine,
+	}
+	if absolute > 0 {
+		result.Position = &Position{Absolute: absolute}
 	}
 
 	result.DomainInfo = EnrichDomainInfo(domain)
@@ -75,7 +78,7 @@ func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 	return result
 }
 
-// EnrichImageResult converts a raw engine result into the v1 ImageResult shape.
+// EnrichImageResult converts a raw engine result into the v2 ImageResult shape.
 func EnrichImageResult(raw SearchResult, ctx EnrichContext) ImageResult {
 	imageURL := normalizeURL(raw.URL)
 	meta := parseImageDescription(raw.Description)
@@ -122,14 +125,22 @@ func shortMD5(value string) string {
 	return hex.EncodeToString(h[:responseIDBytes])
 }
 
-func computeResultPosition(rank, start int) (absolute, onPage int) {
-	if rank <= 0 {
-		return 0, 0
+func computeResultPosition(raw SearchResult, start int) int {
+	if raw.AbsoluteRank > 0 {
+		return raw.AbsoluteRank
+	}
+
+	rank := raw.Rank
+	if rank < 0 {
+		rank = -rank
+	}
+	if rank == 0 {
+		return 0
 	}
 	if start > 0 && rank > start {
-		return rank, rank - start
+		return rank
 	}
-	return start + rank, rank
+	return start + rank
 }
 
 // normalizeURL lowercases scheme+host, strips trailing slash, and removes

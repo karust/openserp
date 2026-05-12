@@ -1198,10 +1198,11 @@ func (s *Server) deduplicateMegaResults(results []MegaSearchResult) []MegaSearch
 		if result.URL == "" {
 			continue
 		}
-		key := NormalizeURLForClustering(result.URL)
-		if key == "" {
+		normalizedURL := NormalizeURLForClustering(result.URL)
+		if normalizedURL == "" {
 			continue
 		}
+		key := resultDedupKey(SearchResult{URL: normalizedURL, Ad: result.Ad})
 		existing, exists := urlMap[key]
 		if !exists {
 			urlMap[key] = result
@@ -1219,8 +1220,11 @@ func (s *Server) deduplicateMegaResults(results []MegaSearchResult) []MegaSearch
 	}
 
 	sort.Slice(deduped, func(i, j int) bool {
-		if deduped[i].Rank != deduped[j].Rank {
-			return deduped[i].Rank < deduped[j].Rank
+		if resultLess(deduped[i].SearchResult, deduped[j].SearchResult) {
+			return true
+		}
+		if resultLess(deduped[j].SearchResult, deduped[i].SearchResult) {
+			return false
 		}
 		if deduped[i].Engine != deduped[j].Engine {
 			return deduped[i].Engine < deduped[j].Engine

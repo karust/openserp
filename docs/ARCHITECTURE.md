@@ -83,7 +83,7 @@ Engine parsers return the older internal shape:
 - `Description`
 - `Ad`
 
-HTTP handlers convert this into the public v1 response through `core/response_builder.go`.
+HTTP handlers convert this into the public v2 response through `core/response_builder.go`.
 
 ## HTTP Request Flow
 
@@ -118,7 +118,7 @@ HTTP request
 
 ## Public API Response
 
-JSON endpoints return a v1 envelope.
+JSON endpoints return a v2 envelope.
 
 Top-level fields:
 
@@ -192,7 +192,7 @@ Only JSON responses use the response cache. Cached JSON refreshes request-scoped
 
 `core/enrichment_domain.go` derives:
 
-- `domain_info`: public suffix, SLD, and category booleans
+- `domain_info`: public suffix, SLD, and collapsed category
 - `classification`: content type and known source hint
 
 Public suffix parsing uses `golang.org/x/net/publicsuffix`.

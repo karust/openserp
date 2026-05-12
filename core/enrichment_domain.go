@@ -45,15 +45,9 @@ func EnrichDomainInfo(domain string) *DomainInfo {
 	cfg := loadEnrichmentDomains()
 
 	info := &DomainInfo{
-		TLD:           tld,
-		SLD:           sld,
-		IsGov:         isGovTLD(domain, tld),
-		IsEdu:         isEduTLD(domain, tld),
-		IsMil:         isMilTLD(tld),
-		IsNews:        cfg.NewsDomains[domain],
-		IsForum:       cfg.ForumDomains[domain],
-		IsMarketplace: cfg.MarketplaceDomains[domain],
-		IsSocial:      cfg.SocialDomains[domain],
+		TLD:      tld,
+		SLD:      sld,
+		Category: domainCategory(domain, tld, cfg),
 	}
 	return info
 }
@@ -67,10 +61,34 @@ func ClassifyURL(rawURL, domain string) *Classification {
 
 	contentType := classifyContentType(rawURL)
 	sourceHint := classifySourceHint(domain)
+	if contentType == "webpage" && sourceHint == "" {
+		return nil
+	}
 
 	return &Classification{
 		ContentType: contentType,
 		SourceHint:  sourceHint,
+	}
+}
+
+func domainCategory(domain, tld string, cfg enrichmentDomainsConfig) string {
+	switch {
+	case isGovTLD(domain, tld):
+		return "gov"
+	case isEduTLD(domain, tld):
+		return "edu"
+	case isMilTLD(tld):
+		return "mil"
+	case cfg.NewsDomains[domain]:
+		return "news"
+	case cfg.ForumDomains[domain]:
+		return "forum"
+	case cfg.MarketplaceDomains[domain]:
+		return "marketplace"
+	case cfg.SocialDomains[domain]:
+		return "social"
+	default:
+		return ""
 	}
 }
 

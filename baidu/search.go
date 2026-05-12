@@ -112,7 +112,13 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 	}
 
 	for i := range searchResults {
-		searchResults[i].Rank = query.Start + i + 1
+		if searchResults[i].AbsoluteRank > 0 {
+			searchResults[i].AbsoluteRank += query.Start
+		}
+		if searchResults[i].Ad {
+			continue
+		}
+		searchResults[i].Rank = query.Start + searchResults[i].Rank
 	}
 	return searchResults, nil
 }

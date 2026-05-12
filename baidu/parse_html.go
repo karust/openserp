@@ -37,8 +37,12 @@ func baiduResultSelectors() []string {
 func parseBaiduSelection(sel *goquery.Selection) []core.SearchResult {
 	var results []core.SearchResult
 	rank := 1
+	adRank := 1
+	absoluteRank := 1
 
 	sel.Each(func(_ int, item *goquery.Selection) {
+		isAd := baiduSelectionHasAdMarker(item)
+
 		// h3-first: organic results always carry a heading; this filters out
 		// non-result blocks that may share the wrapper class.
 		titleTag := item.Find("h3").First()
@@ -96,21 +100,55 @@ func parseBaiduSelection(sel *goquery.Selection) []core.SearchResult {
 			desc = strings.TrimSpace(strings.Replace(full, title, "", 1))
 		}
 
+		resultRank := rank
+		if isAd {
+			resultRank = adRank
+			adRank++
+		} else {
+			rank++
+		}
+
 		results = append(results, core.SearchResult{
-			Rank:        rank,
-			URL:         href,
-			Title:       title,
-			Description: desc,
+			Rank:         resultRank,
+			AbsoluteRank: absoluteRank,
+			URL:          href,
+			Title:        title,
+			Description:  desc,
+			Ad:           isAd,
 		})
-		rank++
+		absoluteRank++
 	})
 
 	// Re-rank sequentially after dedup so callers get a clean 1..N sequence
 	// (dedup may drop intermediate ranks when the same URL appears in
 	// multiple Baidu result-card variants on the same SERP).
 	deduped := core.DeduplicateResults(results)
+	organicIdx := 0
 	for i := range deduped {
-		deduped[i].Rank = i + 1
+		if deduped[i].Ad {
+			continue
+		}
+		organicIdx++
+		deduped[i].Rank = organicIdx
 	}
 	return deduped
+}
+
+func baiduSelectionHasAdMarker(item *goquery.Selection) bool {
+	for _, selector := range Selectors.AdMarkers {
+		if item.Is(selector) || item.Find(selector).Length() > 0 {
+			return true
+		}
+	}
+
+	isAd := false
+	item.Find("span, i, em").EachWithBreak(func(_ int, marker *goquery.Selection) bool {
+		text := strings.TrimSpace(marker.Text())
+		if text == "广告" || text == "推广" || text == "商业推广" {
+			isAd = true
+			return false
+		}
+		return true
+	})
+	return isAd
 }

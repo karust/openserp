@@ -6,6 +6,7 @@ var Selectors = struct {
 	Timeout       string
 	Results       string
 	ResultsAlt    []string
+	AdMarkers     []string
 	ImageJSONRoot []string
 	Link          string
 	Desc          string
@@ -17,6 +18,7 @@ var Selectors = struct {
 	Timeout:       "button.timeout-button",
 	Results:       "#content_left div.result.c-container",
 	ResultsAlt:    []string{"#content_left div.result-op.c-container", "div.c-container.new-pmd"},
+	AdMarkers:     []string{"[data-tuiguang]", "[data-click*='tuiguang']", ".ec-tuiguang", ".c-icon-bear-p"},
 	ImageJSONRoot: []string{"body > pre", "pre"},
 	Link:          "a",
 	Desc:          "div.c-abstract",

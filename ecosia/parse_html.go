@@ -21,6 +21,7 @@ func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
 func parseEcosiaDocument(doc *goquery.Document) []core.SearchResult {
 	var results []core.SearchResult
 	rank := 1
+	adRank := 1
 
 	doc.Find(Selectors.Result).Each(func(_ int, item *goquery.Selection) {
 		res, ok := parseEcosiaItem(item, rank, false)
@@ -32,13 +33,15 @@ func parseEcosiaDocument(doc *goquery.Document) []core.SearchResult {
 	})
 
 	doc.Find(Selectors.Ad).Each(func(_ int, item *goquery.Selection) {
-		res, ok := parseEcosiaItem(item, -1, true)
+		res, ok := parseEcosiaItem(item, adRank, true)
 		if !ok {
 			return
 		}
 		results = append(results, res)
+		adRank++
 	})
 
+	setSeparatedAdAbsoluteRanks(results, 0)
 	return core.DeduplicateResults(results)
 }
 
@@ -82,6 +85,24 @@ func parseEcosiaItem(item *goquery.Selection, rank int, ad bool) (core.SearchRes
 		Description: desc,
 		Ad:          ad,
 	}, true
+}
+
+func setSeparatedAdAbsoluteRanks(results []core.SearchResult, start int) {
+	adCount := 0
+	for i := range results {
+		if results[i].Ad {
+			adCount++
+			results[i].AbsoluteRank = start + results[i].Rank
+		}
+	}
+	organicAbsoluteRank := start + adCount + 1
+	for i := range results {
+		if results[i].Ad {
+			continue
+		}
+		results[i].AbsoluteRank = organicAbsoluteRank
+		organicAbsoluteRank++
+	}
 }
 
 // // parseEcosiaImageItem extracts a single image card from a goquery Selection.

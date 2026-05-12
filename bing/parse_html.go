@@ -22,6 +22,7 @@ func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
 func parseBingDocument(doc *goquery.Document) []core.SearchResult {
 	var results []core.SearchResult
 	rank := 1
+	adRank := 1
 
 	doc.Find(Selectors.Results).Each(func(_ int, item *goquery.Selection) {
 		titleTag := item.Find(Selectors.Title).First()
@@ -69,15 +70,35 @@ func parseBingDocument(doc *goquery.Document) []core.SearchResult {
 		}
 
 		results = append(results, core.SearchResult{
-			Rank:        -1,
+			Rank:        adRank,
 			URL:         link,
 			Title:       title,
 			Description: desc,
 			Ad:          true,
 		})
+		adRank++
 	})
 
+	setSeparatedAdAbsoluteRanks(results, 0)
 	return core.DeduplicateResults(results)
+}
+
+func setSeparatedAdAbsoluteRanks(results []core.SearchResult, start int) {
+	adCount := 0
+	for i := range results {
+		if results[i].Ad {
+			adCount++
+			results[i].AbsoluteRank = start + results[i].Rank
+		}
+	}
+	organicAbsoluteRank := start + adCount + 1
+	for i := range results {
+		if results[i].Ad {
+			continue
+		}
+		results[i].AbsoluteRank = organicAbsoluteRank
+		organicAbsoluteRank++
+	}
 }
 
 // descriptionFromItem extracts a description using the same 4-step fallback

@@ -55,3 +55,51 @@ func TestParseDDGHTMLEmpty(t *testing.T) {
 		t.Fatalf("expected zero results for empty HTML, got %d", len(results))
 	}
 }
+
+func TestParseDDGHTMLAdsDoNotConsumeOrganicRank(t *testing.T) {
+	t.Parallel()
+
+	html := `
+<article data-testid="ad">
+  <h2><a data-testid="result-title-a" href="https://ads.example.com">Sponsored Result</a></h2>
+  <div data-result="snippet">Paid snippet</div>
+</article>
+<article data-testid="result">
+  <h2><a data-testid="result-title-a" href="https://organic.example.com/one">Organic One</a></h2>
+  <div data-result="snippet">Organic snippet one</div>
+</article>
+<article data-testid="result">
+  <h2><a data-testid="result-title-a" href="https://organic.example.com/two">Organic Two</a></h2>
+  <div data-result="snippet">Organic snippet two</div>
+</article>`
+
+	results, err := ParseHTML(bytes.NewReader([]byte(html)))
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+
+	organicRank := 0
+	adRank := 0
+	for _, r := range results {
+		if r.Ad {
+			adRank++
+			if r.Rank != adRank {
+				t.Fatalf("ad rank = %d, want %d", r.Rank, adRank)
+			}
+			continue
+		}
+		organicRank++
+		if r.Rank != organicRank {
+			t.Fatalf("organic rank = %d, want %d", r.Rank, organicRank)
+		}
+	}
+	if organicRank != 2 {
+		t.Fatalf("organic count = %d, want 2", organicRank)
+	}
+	if results[0].AbsoluteRank != 1 || results[1].AbsoluteRank != 2 || results[2].AbsoluteRank != 3 {
+		t.Fatalf("unexpected absolute ranks: %d, %d, %d", results[0].AbsoluteRank, results[1].AbsoluteRank, results[2].AbsoluteRank)
+	}
+}

@@ -104,3 +104,53 @@ func TestParseBaiduHTMLFallsBackWhenEarlierSelectorHasNoResult(t *testing.T) {
 		t.Fatalf("unexpected URL: %s", results[0].URL)
 	}
 }
+
+func TestParseBaiduHTMLAdsDoNotConsumeOrganicRank(t *testing.T) {
+	t.Parallel()
+
+	html := `
+<div id="content_left">
+  <div class="result c-container" data-tuiguang="1">
+    <h3><a href="https://ads.example.com">Sponsored Result</a></h3>
+    <div class="c-abstract">Paid snippet</div>
+  </div>
+  <div class="result c-container">
+    <h3><a href="https://organic.example.com/one">Organic One</a></h3>
+    <div class="c-abstract">Organic snippet one</div>
+  </div>
+  <div class="result c-container">
+    <h3><a href="https://organic.example.com/two">Organic Two</a></h3>
+    <div class="c-abstract">Organic snippet two</div>
+  </div>
+</div>`
+
+	results, err := ParseHTML(bytes.NewReader([]byte(html)))
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+
+	organicRank := 0
+	adRank := 0
+	for _, r := range results {
+		if r.Ad {
+			adRank++
+			if r.Rank != adRank {
+				t.Fatalf("ad rank = %d, want %d", r.Rank, adRank)
+			}
+			continue
+		}
+		organicRank++
+		if r.Rank != organicRank {
+			t.Fatalf("organic rank = %d, want %d", r.Rank, organicRank)
+		}
+	}
+	if organicRank != 2 {
+		t.Fatalf("organic count = %d, want 2", organicRank)
+	}
+	if results[0].AbsoluteRank != 1 || results[1].AbsoluteRank != 2 || results[2].AbsoluteRank != 3 {
+		t.Fatalf("unexpected absolute ranks: %d, %d, %d", results[0].AbsoluteRank, results[1].AbsoluteRank, results[2].AbsoluteRank)
+	}
+}

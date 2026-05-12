@@ -1,10 +1,10 @@
 openapi: 3.0.3
 info:
   title: OpenSERP API
-  version: 1.0.0
+  version: 2.0.0
   description: >
     OpenSERP provides dedicated and multi-engine search endpoints for Google, Yandex,
-    Baidu, Bing, and DuckDuckGo. All responses are wrapped in a v1 envelope with
+    Baidu, Bing, and DuckDuckGo. Search responses are wrapped in a v2 envelope with
     query echo, metadata, normalized results, and pagination. Invalid client input
     returns 400 with a machine-readable `reason` code.
   license:
@@ -90,7 +90,7 @@ paths:
                       requested_at: "2026-04-24T12:00:00Z"
                       took_ms: 842
                       engines_failed: []
-                      version: "1.0"
+                      version: "2.0"
                     results:
                       - id: s_a1b2c3d4e5f6a1b2
                         rank: 1
@@ -101,25 +101,13 @@ paths:
                         snippet: Go is an open source programming language...
                         domain: go.dev
                         favicon: https://go.dev/favicon.ico
-                        is_ad: false
                         position:
                           absolute: 1
-                          page: 1
-                          on_page: 1
                         engine: google
                         domain_info:
                           tld: dev
                           sld: go
-                          is_gov: false
-                          is_edu: false
-                          is_mil: false
-                          is_news: false
-                          is_forum: false
-                          is_marketplace: false
-                          is_social: false
-                        classification:
-                          content_type: webpage
-                          source_hint: ""
+                          category: ""
                     pagination:
                       page: 1
                       has_more: true
@@ -612,7 +600,7 @@ components:
       name: limit
       in: query
       required: false
-      description: Maximum results to return (1–100).
+      description: Maximum organic results to return (1–100). Ads may be returned in addition.
       schema:
         type: integer
         minimum: 1
@@ -690,7 +678,7 @@ components:
       in: query
       required: false
       description: >
-        Output format. `json` (default) returns the full envelope. `markdown` returns a
+        Output format. `json` (default) returns the envelope. `markdown` returns a
         Markdown document suitable for Slack/email. `text` returns a minimal plain-text
         block optimised for LLM context windows. `ndjson` returns one result object per
         line with no envelope. The `Accept` header is also checked
@@ -993,7 +981,7 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
-    # ── v1 envelope ──────────────────────────────────────────────────
+    # ── v2 envelope ──────────────────────────────────────────────────
     QueryEcho:
       type: object
       required: [text, engines_requested]
@@ -1035,7 +1023,7 @@ components:
             $ref: "#/components/schemas/EngineErrorDetail"
         version:
           type: string
-          example: "1.0"
+          example: "2.0"
     EngineErrorDetail:
       type: object
       required: [engine, error]
@@ -1067,21 +1055,18 @@ components:
     # ── Result ───────────────────────────────────────────────────────
     Position:
       type: object
-      required: [absolute, page, on_page]
+      required: [absolute]
       properties:
         absolute:
           type: integer
-          description: 1-based rank counting from the first result of the first page.
-          example: 1
-        page:
-          type: integer
-          example: 1
-        on_page:
-          type: integer
-          example: 1
+          description: >
+            1-based rank in the mixed SERP stream, across both organic and ad blocks.
+            Always present so SEO callers can plot rank vs. on-page position without
+            inferring it from result order.
+          example: 2
     DomainInfo:
       type: object
-      required: [tld, sld, is_gov, is_edu, is_mil, is_news, is_forum, is_marketplace, is_social]
+      required: [category]
       properties:
         tld:
           type: string
@@ -1089,23 +1074,12 @@ components:
         sld:
           type: string
           example: wikipedia
-        is_gov:
-          type: boolean
-        is_edu:
-          type: boolean
-        is_mil:
-          type: boolean
-        is_news:
-          type: boolean
-        is_forum:
-          type: boolean
-        is_marketplace:
-          type: boolean
-        is_social:
-          type: boolean
+        category:
+          type: string
+          description: Empty string when the domain matches no known category.
+          enum: ["", gov, edu, mil, news, forum, marketplace, social]
     Classification:
       type: object
-      required: [content_type, source_hint]
       properties:
         content_type:
           type: string
@@ -1117,8 +1091,8 @@ components:
     ResultType:
       type: string
       description: >
-        SERP block type. New values require a minor version bump (`meta.version: "1.1"`).
-        In v1.0, engines emit `organic`, `ad`, or `answer_box`; other enum values are
+        SERP block type. New values require a minor version bump (`meta.version: "2.1"`).
+        In v2.0, engines emit `organic`, `ad`, or `answer_box`; other enum values are
         reserved for future parser upgrades.
       enum:
         - organic
@@ -1144,7 +1118,6 @@ components:
         - snippet
         - domain
         - favicon
-        - is_ad
         - position
         - engine
       properties:
@@ -1181,9 +1154,6 @@ components:
           type: string
           description: Constructed as `https://{domain}/favicon.ico`. Not probed.
           example: https://go.dev/favicon.ico
-        is_ad:
-          type: boolean
-          example: false
         position:
           $ref: "#/components/schemas/Position"
         engine:

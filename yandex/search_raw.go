@@ -74,17 +74,10 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 	}
 
 	if skipOnFirstPage > 0 {
-		if skipOnFirstPage >= len(parsedResults) {
-			parsedResults = []core.SearchResult{}
-		} else {
-			parsedResults = parsedResults[skipOnFirstPage:]
-		}
+		parsedResults = skipOrganicResults(parsedResults, skipOnFirstPage)
 	}
-	if query.Start > 0 {
-		for i := range parsedResults {
-			parsedResults[i].Rank = query.Start + i + 1
-		}
-	}
+	rebaseOrganicRanks(parsedResults, query.Start)
+	offsetAbsoluteRanks(parsedResults, startPage*10)
 	core.WithRequest(ctx).WithField("results_count", len(parsedResults)).Debug(
 		fmt.Sprintf("Yandex Raw results : %v", parsedResults),
 	)

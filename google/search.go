@@ -236,6 +236,8 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 	gogl.logger.Info("Found %d total results", totalResults)
 
 	rank := query.Start
+	adRank := 1
+	absoluteRank := query.Start + 1
 	for _, resEl := range searchResultElems {
 		srchRes := core.SearchResult{}
 
@@ -285,7 +287,10 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			} else {
 				srchRes.Description = strings.TrimSpace(text)
 			}
-			rank += 1
+			srchRes.Rank = adRank
+			srchRes.AbsoluteRank = absoluteRank
+			adRank++
+			absoluteRank++
 
 		} else if isAnswerBox {
 			// 2. Parse answer boxes
@@ -406,6 +411,8 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 
 			rank += 1
 			srchRes.Rank = rank
+			srchRes.AbsoluteRank = absoluteRank
+			absoluteRank++
 			searchResults = append(searchResults, srchRes)
 			continue
 
@@ -413,7 +420,16 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			continue
 		}
 
-		srchRes.Rank = rank
+		if srchRes.Ad && srchRes.Rank == 0 {
+			srchRes.Rank = adRank
+			adRank++
+		} else if !srchRes.Ad {
+			srchRes.Rank = rank
+		}
+		if srchRes.AbsoluteRank == 0 {
+			srchRes.AbsoluteRank = absoluteRank
+			absoluteRank++
+		}
 		searchResults = append(searchResults, srchRes)
 	}
 

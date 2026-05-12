@@ -43,9 +43,13 @@ var Selectors = struct {
 		"anomaly",
 	},
 	Results: []string{
+		"article[data-testid='result'], article[data-testid='ad'], li[data-layout='organic'], li[data-layout='ad'], div[data-testid='result'], div[data-testid='ad']",
 		"article[data-testid='result']",
+		"article[data-testid='ad']",
 		"li[data-layout='organic']",
+		"li[data-layout='ad']",
 		"div[data-testid='result']",
+		"div[data-testid='ad']",
 		"div.result",
 	},
 	Title: []string{
@@ -65,6 +69,9 @@ var Selectors = struct {
 		"h3 a",
 	},
 	AdBadge: []string{
+		"article[data-testid='ad']",
+		"li[data-layout='ad']",
+		"div[data-testid='ad']",
 		"[data-testid='ad-badge']",
 		".ad-badge",
 		".result--ad",

@@ -22,9 +22,6 @@ func RenderMarkdown(env *Envelope) []byte {
 	for i, r := range env.Results {
 		fmt.Fprintf(&b, "## %d. %s\n\n", i+1, escapeMarkdown(r.Title))
 		typeLabel := string(r.Type)
-		if r.IsAd {
-			typeLabel = "ad"
-		}
 		fmt.Fprintf(&b, "**%s** · %s\n\n", r.DisplayURL, typeLabel)
 		if r.Snippet != "" {
 			fmt.Fprintf(&b, "%s\n\n", r.Snippet)

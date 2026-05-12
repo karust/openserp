@@ -19,34 +19,29 @@ const (
 
 // Position describes where a result sits in the overall result stream.
 type Position struct {
-	// Absolute is the 1-based rank counting from the first result of the first page.
+	// Absolute is the 1-based rank counting from the first result of the first page,
+	// across both organic and ad blocks. Always emitted so SEO callers can plot
+	// rank vs. on-page position without inferring it from the result order.
 	Absolute int `json:"absolute"`
-	// Page is the 1-based page number derived from start/limit.
-	Page int `json:"page"`
-	// OnPage is the 1-based rank within this page.
-	OnPage int `json:"on_page"`
 }
 
 // DomainInfo carries TLD-derived category signals for a result domain.
 type DomainInfo struct {
-	TLD           string `json:"tld"`
-	SLD           string `json:"sld"`
-	IsGov         bool   `json:"is_gov"`
-	IsEdu         bool   `json:"is_edu"`
-	IsMil         bool   `json:"is_mil"`
-	IsNews        bool   `json:"is_news"`
-	IsForum       bool   `json:"is_forum"`
-	IsMarketplace bool   `json:"is_marketplace"`
-	IsSocial      bool   `json:"is_social"`
+	TLD string `json:"tld,omitempty"`
+	SLD string `json:"sld,omitempty"`
+	// Category is one of "gov", "edu", "mil", "news", "forum", "marketplace",
+	// "social", or "" when the domain does not match any known category.
+	Category string `json:"category"`
 }
 
 // Classification holds URL-path heuristic hints for downstream consumers.
 type Classification struct {
-	ContentType string `json:"content_type"`
-	SourceHint  string `json:"source_hint"`
+	ContentType string `json:"content_type,omitempty"`
+	SourceHint  string `json:"source_hint,omitempty"`
 }
 
-// Result is the v1 normalized result returned in every search response.
+// Result is the v2 normalized result returned in search responses. Optional
+// fields (Position, DomainInfo, Classification) are omitted when empty.
 type Result struct {
 	ID             string          `json:"id"`
 	Rank           int             `json:"rank"`
@@ -57,8 +52,7 @@ type Result struct {
 	Snippet        string          `json:"snippet"`
 	Domain         string          `json:"domain"`
 	Favicon        string          `json:"favicon"`
-	IsAd           bool            `json:"is_ad"`
-	Position       Position        `json:"position"`
+	Position       *Position       `json:"position,omitempty"`
 	Engine         string          `json:"engine"`
 	DomainInfo     *DomainInfo     `json:"domain_info,omitempty"`
 	Classification *Classification `json:"classification,omitempty"`
@@ -78,7 +72,7 @@ type ImageSource struct {
 	Domain  string `json:"domain"`
 }
 
-// ImageResult is the v1 shape for image search results.
+// ImageResult is the v2 shape for image search results.
 type ImageResult struct {
 	ID     string      `json:"id"`
 	Rank   int         `json:"rank"`

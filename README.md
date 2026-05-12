@@ -106,7 +106,7 @@ Common parameters:
 | `date`    | Date range                 | `20250101..20251231`                 |
 | `file`    | File extension             | `pdf`, `doc`, `xls`                  |
 | `site`    | Site-specific search       | `github.com`                         |
-| `limit`   | Number of results, max 100 | `10`, `25`, `50`                     |
+| `limit`   | Number of organic results, max 100. Ads may be returned in addition. | `10`, `25`, `50`                     |
 | `start`   | Pagination offset          | `0`, `10`, `20`                      |
 | `format`  | Output format              | `json`, `markdown`, `text`, `ndjson` |
 
@@ -130,7 +130,7 @@ Engine-specific parameters:
     "requested_at": "2026-04-25T22:27:52Z",
     "took_ms": 6410,
     "engines_failed": [],
-    "version": "1.0"
+    "version": "2.0"
   },
   "results": [
     {
@@ -143,22 +143,14 @@ Engine-specific parameters:
       "snippet": "Official Go documentation, tutorials, references, and release notes.",
       "domain": "go.dev",
       "favicon": "https://go.dev/favicon.ico",
-      "is_ad": false,
       "position": {
-        "absolute": 1,
-        "page": 1,
-        "on_page": 1
+        "absolute": 1
       },
       "engine": "google",
       "domain_info": {
         "tld": "dev",
         "sld": "go",
-        "is_gov": false,
-        "is_edu": false,
-        "is_social": false
-      },
-      "classification": {
-        "content_type": "webpage"
+        "category": ""
       }
     }
   ],

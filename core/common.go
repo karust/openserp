@@ -95,9 +95,11 @@ func classifyProxyNetworkError(err error) error {
 
 // SearchResult represents one normalized result item returned by any engine.
 type SearchResult struct {
-	// Rank is a 1-based position in engine output. Some engines use negative
-	// ranks for non-organic blocks such as ads or instant answers.
+	// Rank is the 1-based position within this result type. For SEO callers,
+	// organic rank must not be shifted by ads.
 	Rank int `json:"rank"`
+	// AbsoluteRank is the 1-based position in the mixed SERP stream.
+	AbsoluteRank int `json:"absolute_rank,omitempty"`
 	// URL is the canonical result URL.
 	URL string `json:"url"`
 	// Title is the result headline shown on the SERP.
@@ -118,14 +120,15 @@ func DeduplicateResults(results []SearchResult) []SearchResult {
 		if result.URL == "" {
 			continue
 		}
-		if !unique[result.URL] {
-			unique[result.URL] = true
+		key := resultDedupKey(result)
+		if !unique[key] {
+			unique[key] = true
 			deduped = append(deduped, result)
 		}
 	}
 
 	sort.Slice(deduped, func(i, j int) bool {
-		return deduped[i].Rank < deduped[j].Rank
+		return resultLess(deduped[i], deduped[j])
 	})
 	return deduped
 }
@@ -140,9 +143,77 @@ func ConvertSearchResultsMap(searchResultsMap map[string]SearchResult) *[]Search
 	}
 
 	sort.Slice(searchResults, func(i, j int) bool {
-		return searchResults[i].Rank < searchResults[j].Rank
+		return resultLess(searchResults[i], searchResults[j])
 	})
 	return &searchResults
+}
+
+// CountOrganicResults returns the number of non-ad results in a mixed SERP.
+func CountOrganicResults(results []SearchResult) int {
+	count := 0
+	for _, result := range results {
+		if !result.Ad {
+			count++
+		}
+	}
+	return count
+}
+
+// LimitOrganicResults keeps all ads and at most limit non-ad results.
+func LimitOrganicResults(results []SearchResult, limit int) []SearchResult {
+	if limit <= 0 {
+		return results
+	}
+	out := make([]SearchResult, 0, len(results))
+	organicCount := 0
+	for _, result := range results {
+		if result.Ad {
+			out = append(out, result)
+			continue
+		}
+		if organicCount >= limit {
+			continue
+		}
+		organicCount++
+		out = append(out, result)
+	}
+	return out
+}
+
+func resultDedupKey(result SearchResult) string {
+	resultType := "organic"
+	if result.Ad {
+		resultType = "ad"
+	}
+	return resultType + "\x00" + result.URL
+}
+
+func resultLess(left, right SearchResult) bool {
+	leftPos := resultSortPosition(left)
+	rightPos := resultSortPosition(right)
+	if leftPos != rightPos {
+		return leftPos < rightPos
+	}
+	if left.Ad != right.Ad {
+		return left.Ad
+	}
+	if left.Rank != right.Rank {
+		return left.Rank < right.Rank
+	}
+	return left.URL < right.URL
+}
+
+func resultSortPosition(result SearchResult) int {
+	if result.AbsoluteRank > 0 {
+		return result.AbsoluteRank
+	}
+	if result.Rank < 0 {
+		return -result.Rank
+	}
+	if result.Rank > 0 {
+		return result.Rank
+	}
+	return int(^uint(0) >> 1)
 }
 
 // Query holds request parameters used by HTTP handlers and search engines.
@@ -168,7 +239,7 @@ type Query struct {
 	// For Google, false includes similar results and true hides them.
 	Filter bool
 	// Answers enables parsing answer modules when supported by the engine.
-	// Such entries may be returned with negative rank values.
+	// Such entries may be returned with non-positive internal rank values.
 	Answers bool
 	// ProxyURL is a direct proxy URL used by raw HTTP search paths.
 	ProxyURL string

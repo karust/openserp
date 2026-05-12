@@ -139,13 +139,13 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 	}()
 
 	// nextRank counts up across pages for organic results; nextAdRank counts
-	// down from -1 so ads keep unique, order-preserving negative ranks.
+	// up within sponsored results so ad rank stays separate from SEO rank.
 	all := []core.SearchResult{}
 	pageNum, nextRank, err := startPage(query.Start)
 	if err != nil {
 		return nil, err
 	}
-	nextAdRank := -1
+	nextAdRank := 1
 	// fetchPage loads one SERP page and appends parsed results.
 	// Returns (done, error): done=true ends the outer loop without error.
 	fetchPage := func() (bool, error) {
@@ -192,13 +192,13 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 		for _, r := range ads {
 			if res, ok := e.parseResult(r, nextAdRank, true); ok {
 				all = append(all, res)
-				nextAdRank--
+				nextAdRank++
 			}
 		}
 		return false, nil
 	}
 
-	for query.Limit <= 0 || len(all) < query.Limit {
+	for query.Limit <= 0 || core.CountOrganicResults(all) < query.Limit {
 		done, err := fetchPage()
 		if err != nil {
 			return nil, err
@@ -207,7 +207,7 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 		if done {
 			break
 		}
-		if query.Limit > 0 && len(all) >= query.Limit {
+		if query.Limit > 0 && core.CountOrganicResults(all) >= query.Limit {
 			break
 		}
 		if err := core.SleepContext(ctx, e.pageSleep); err != nil {
@@ -215,13 +215,10 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 		}
 	}
 
+	setSeparatedAdAbsoluteRanks(all, query.Start)
 	deduped := core.DeduplicateResults(all)
 	if query.Limit > 0 {
-		organic, ads := splitAds(deduped)
-		if len(organic) > query.Limit {
-			organic = organic[:query.Limit]
-		}
-		deduped = append(organic, ads...)
+		deduped = core.LimitOrganicResults(deduped, query.Limit)
 	}
 	e.logger.Info("Search completed: %d results", len(deduped))
 	return deduped, nil
@@ -368,15 +365,4 @@ func (e *Ecosia) SearchImage(ctx context.Context, query core.Query) (results []c
 	}
 	e.logger.Info("Image search completed: %d results", len(deduped))
 	return deduped, nil
-}
-
-func splitAds(in []core.SearchResult) (organic, ads []core.SearchResult) {
-	for _, r := range in {
-		if r.Ad {
-			ads = append(ads, r)
-		} else {
-			organic = append(organic, r)
-		}
-	}
-	return
 }

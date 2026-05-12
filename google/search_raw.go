@@ -26,6 +26,8 @@ func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
 func parseGoogleDocument(doc *goquery.Document) []core.SearchResult {
 	results := []core.SearchResult{}
 	rank := 1
+	adRank := 1
+	absoluteRank := 1
 
 	// Use data attributes instead of class names to find results
 	// Both old and new DOM have data-hveid and data-ved attributes
@@ -55,6 +57,8 @@ func parseGoogleDocument(doc *goquery.Document) []core.SearchResult {
 		titleTag := item.Find(Selectors.Title)
 		title := titleTag.Text()
 
+		isAd := item.Is(Selectors.Ad) || item.Find(Selectors.Ad).Length() > 0
+
 		// Find description - find div with text content after the heading
 		// Using attribute selectors that match the description container
 		descTag := item.Find(Selectors.DescPrimary).First()
@@ -73,15 +77,25 @@ func parseGoogleDocument(doc *goquery.Document) []core.SearchResult {
 		desc := descTag.Text()
 
 		if link != "" && link != "#" {
+			resultRank := rank
+			if isAd {
+				resultRank = adRank
+				adRank++
+			} else {
+				rank++
+			}
+
 			result := core.SearchResult{
-				Rank:        rank,
-				URL:         link,
-				Title:       title,
-				Description: desc,
+				Rank:         resultRank,
+				AbsoluteRank: absoluteRank,
+				URL:          link,
+				Title:        title,
+				Description:  desc,
+				Ad:           isAd,
 			}
 
 			results = append(results, result)
-			rank++
+			absoluteRank++
 		}
 	}
 
@@ -153,8 +167,18 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 	}
 
 	if query.Start > 0 {
+		organicIdx := 0
 		for i := range parsedResults {
-			parsedResults[i].Rank = query.Start + i + 1
+			if parsedResults[i].Ad {
+				continue
+			}
+			organicIdx++
+			parsedResults[i].Rank = query.Start + organicIdx
+		}
+		for i := range parsedResults {
+			if parsedResults[i].AbsoluteRank > 0 {
+				parsedResults[i].AbsoluteRank += query.Start
+			}
 		}
 	}
 	core.WithRequest(ctx).WithField("results_count", len(parsedResults)).Debug(

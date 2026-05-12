@@ -138,6 +138,7 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 	bing.logger.Info("Found %d results (%d ads)", totalResults, len(adElements))
 
 	rank := query.Start
+	adRank := 1
 	for _, result := range organicElements {
 		srchRes := core.SearchResult{}
 
@@ -215,35 +216,17 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 			srchRes.Description, _ = descElem.Text()
 		}
 
-		// Mark ads with negative rank
-		srchRes.Rank = -1
+		srchRes.Rank = adRank
+		adRank++
 		searchResults = append(searchResults, srchRes)
 	}
+
+	setSeparatedAdAbsoluteRanks(searchResults, query.Start)
 
 	// Deduplicate results
 	deduped := core.DeduplicateResults(searchResults)
 
-	// Trim to exact limit if necessary (only organic results, not ads)
-	if query.Limit > 0 {
-		organicResults := []core.SearchResult{}
-		adResults := []core.SearchResult{}
-
-		for _, result := range deduped {
-			if result.Ad {
-				adResults = append(adResults, result)
-			} else {
-				organicResults = append(organicResults, result)
-			}
-		}
-
-		// Trim organic results to limit
-		if len(organicResults) > query.Limit {
-			organicResults = organicResults[:query.Limit]
-		}
-
-		// Combine back: organic results + ads
-		deduped = append(organicResults, adResults...)
-	}
+	deduped = core.LimitOrganicResults(deduped, query.Limit)
 
 	return deduped, nil
 }

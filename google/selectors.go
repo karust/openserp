@@ -8,6 +8,7 @@ var Selectors = struct {
 	ResultStats  string
 	CookieBtn    string
 	Results      string
+	Ad           string
 	Title        string
 	DescPrimary  string
 	DescFallback string
@@ -24,6 +25,7 @@ var Selectors = struct {
 	ResultStats:  "div#result-stats",
 	CookieBtn:    "div[role='dialog'][aria-modal] button",
 	Results:      "div[data-hveid][data-ved]",
+	Ad:           "div[data-text-ad], [data-text-ad]",
 	Title:        "h3",
 	DescPrimary:  "div[data-sncf='1'] div",
 	DescFallback: "div.VwiC3b",

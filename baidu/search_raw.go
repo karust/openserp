@@ -69,7 +69,13 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 	}
 	if query.Start > 0 {
 		for i := range parsedResults {
-			parsedResults[i].Rank = query.Start + i + 1
+			if parsedResults[i].AbsoluteRank > 0 {
+				parsedResults[i].AbsoluteRank += query.Start
+			}
+			if parsedResults[i].Ad {
+				continue
+			}
+			parsedResults[i].Rank = query.Start + parsedResults[i].Rank
 		}
 	}
 	core.WithRequest(ctx).WithField("results_count", len(parsedResults)).Debug(

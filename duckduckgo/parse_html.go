@@ -21,6 +21,8 @@ func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
 func parseDDGDocument(doc *goquery.Document) []core.SearchResult {
 	var results []core.SearchResult
 	rank := 1
+	adRank := 1
+	absoluteRank := 1
 
 	resultSel := firstMatchingSelector(doc, Selectors.Results)
 	if resultSel == "" {
@@ -40,30 +42,36 @@ func parseDDGDocument(doc *goquery.Document) []core.SearchResult {
 
 		desc := extractFirstText(item, Selectors.Desc)
 
-		isAd := false
-		for _, sel := range Selectors.AdBadge {
-			if item.Find(sel).Length() > 0 {
-				isAd = true
-				break
-			}
-		}
+		isAd := duckduckgoSelectionHasAdMarker(item)
 
 		r := core.SearchResult{
-			Rank:        rank,
-			URL:         href,
-			Title:       title,
-			Description: desc,
-			Ad:          isAd,
+			Rank:         rank,
+			AbsoluteRank: absoluteRank,
+			URL:          href,
+			Title:        title,
+			Description:  desc,
+			Ad:           isAd,
 		}
 		if !isAd {
 			rank++
 		} else {
-			r.Rank = -1
+			r.Rank = adRank
+			adRank++
 		}
 		results = append(results, r)
+		absoluteRank++
 	})
 
 	return core.DeduplicateResults(results)
+}
+
+func duckduckgoSelectionHasAdMarker(item *goquery.Selection) bool {
+	for _, sel := range Selectors.AdBadge {
+		if item.Is(sel) || item.Find(sel).Length() > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // firstMatchingSelector returns the first selector from the list that matches
