@@ -86,6 +86,21 @@ func TestEnrichResultUsesAdRankAndAbsolutePosition(t *testing.T) {
 	}
 }
 
+func TestEnrichResultUsesExplicitResultType(t *testing.T) {
+	t.Parallel()
+
+	result := EnrichResult(SearchResult{
+		Rank:  1,
+		Type:  ResultTypePeopleAlsoAsk,
+		URL:   "https://example.com/question",
+		Title: "Question",
+	}, EnrichContext{Engine: "google", Query: Query{Limit: 10}})
+
+	if result.Type != ResultTypePeopleAlsoAsk {
+		t.Fatalf("unexpected result type: %q", result.Type)
+	}
+}
+
 func TestEnvelopePaginationCountsOrganicResults(t *testing.T) {
 	t.Parallel()
 

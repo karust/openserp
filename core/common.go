@@ -100,6 +100,9 @@ type SearchResult struct {
 	Rank int `json:"rank"`
 	// AbsoluteRank is the 1-based position in the mixed SERP stream.
 	AbsoluteRank int `json:"absolute_rank,omitempty"`
+	// Type is the SERP block type when an engine can classify a non-standard
+	// SERP module without changing the public SearchEngine interface.
+	Type ResultType `json:"type,omitempty"`
 	// URL is the canonical result URL.
 	URL string `json:"url"`
 	// Title is the result headline shown on the SERP.

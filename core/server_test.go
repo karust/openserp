@@ -2223,8 +2223,8 @@ func TestDedicatedEndpointReturnsV2Envelope(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatalf("decode envelope: %v", err)
 	}
-	if env.Meta.Version != "2.0" {
-		t.Fatalf("expected meta.version=2.0, got %q", env.Meta.Version)
+	if env.Meta.Version != "2.1" {
+		t.Fatalf("expected meta.version=2.1, got %q", env.Meta.Version)
 	}
 	if env.Meta.RequestID == "" {
 		t.Fatal("expected non-empty meta.request_id")
@@ -2276,8 +2276,8 @@ func TestMegaSearchReturnsV2EnvelopeWithEnginesFailed(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatalf("decode envelope: %v", err)
 	}
-	if env.Meta.Version != "2.0" {
-		t.Fatalf("expected meta.version=2.0, got %q", env.Meta.Version)
+	if env.Meta.Version != "2.1" {
+		t.Fatalf("expected meta.version=2.1, got %q", env.Meta.Version)
 	}
 	if len(env.Meta.EnginesFailed) == 0 {
 		t.Fatal("expected engines_failed to contain bing")

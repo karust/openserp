@@ -9,9 +9,11 @@ var Selectors = struct {
 	CookieBtn    string
 	Results      string
 	Ad           string
+	Link         string
 	Title        string
 	DescPrimary  string
 	DescFallback string
+	DescAny      string
 	AnswerBox    string
 	AnswerItem   string
 
@@ -26,9 +28,11 @@ var Selectors = struct {
 	CookieBtn:    "div[role='dialog'][aria-modal] button",
 	Results:      "div[data-hveid][data-ved]",
 	Ad:           "div[data-text-ad], [data-text-ad]",
+	Link:         "a",
 	Title:        "h3",
 	DescPrimary:  "div[data-sncf='1'] div",
 	DescFallback: "div.VwiC3b",
+	DescAny:      "div",
 	AnswerBox:    "div[data-hveid][data-ulkwtsb] div[data-q]",
 	AnswerItem:   "a",
 

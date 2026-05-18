@@ -85,3 +85,63 @@ func TestParseBingHTMLAds(t *testing.T) {
 		}
 	}
 }
+
+func TestParseBingHTMLMixedAdsKeepAbsoluteOrder(t *testing.T) {
+	t.Parallel()
+
+	html := `
+<ol id="b_results">
+  <li class="b_algo">
+    <h2><a href="https://organic.example.com/one">Organic One</a></h2>
+    <div class="b_caption"><p>Organic snippet one</p></div>
+  </li>
+  <li class="b_ad">
+    <h2><a href="https://ads.example.com">Sponsored Result</a></h2>
+    <p>Paid snippet</p>
+  </li>
+  <li class="b_algo">
+    <h2><a href="https://organic.example.com/two">Organic Two</a></h2>
+    <div class="b_caption"><p>Organic snippet two</p></div>
+  </li>
+</ol>`
+
+	results, err := ParseHTML(bytes.NewReader([]byte(html)))
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	if results[0].Ad || !results[1].Ad || results[2].Ad {
+		t.Fatalf("unexpected ad ordering: %+v", results)
+	}
+	if results[0].AbsoluteRank != 1 || results[1].AbsoluteRank != 2 || results[2].AbsoluteRank != 3 {
+		t.Fatalf("unexpected absolute ranks: %d, %d, %d", results[0].AbsoluteRank, results[1].AbsoluteRank, results[2].AbsoluteRank)
+	}
+	if results[2].Rank != 2 {
+		t.Fatalf("second organic rank = %d, want 2", results[2].Rank)
+	}
+}
+
+func TestParseBingHTMLTitleFallback(t *testing.T) {
+	t.Parallel()
+
+	html := `
+<ol id="b_results">
+  <li class="b_algo">
+    <h2><a aria-label="Fallback Title" href="https://example.com/fallback"></a></h2>
+    <div class="b_caption"><p>Snippet</p></div>
+  </li>
+</ol>`
+
+	results, err := ParseHTML(bytes.NewReader([]byte(html)))
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Title != "Fallback Title" {
+		t.Fatalf("title = %q, want fallback", results[0].Title)
+	}
+}

@@ -72,7 +72,7 @@ type ImageEnvelope struct {
 	Pagination Pagination    `json:"pagination"`
 }
 
-const apiVersion = "2.0"
+const apiVersion = "2.1"
 
 // NewEnvelope builds a fresh Envelope pre-filled with query echo and an open
 // meta block. Call Finalize before serializing.

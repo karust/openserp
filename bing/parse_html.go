@@ -23,9 +23,21 @@ func parseBingDocument(doc *goquery.Document) []core.SearchResult {
 	var results []core.SearchResult
 	rank := 1
 	adRank := 1
+	absoluteRank := 1
 
-	doc.Find(Selectors.Results).Each(func(_ int, item *goquery.Selection) {
-		titleTag := item.Find(Selectors.Title).First()
+	doc.Find(Selectors.ResultItems).Each(func(_ int, item *goquery.Selection) {
+		isAd := item.Is(Selectors.Ads)
+		isOrganic := item.Is(Selectors.Results)
+		if !isAd && !isOrganic {
+			return
+		}
+
+		titleSelector := Selectors.Title
+		if isAd {
+			titleSelector = Selectors.AdTitle
+		}
+
+		titleTag := item.Find(titleSelector).First()
 		if titleTag.Length() == 0 {
 			return
 		}
@@ -37,68 +49,50 @@ func parseBingDocument(doc *goquery.Document) []core.SearchResult {
 
 		title := titleTag.Text()
 		if title == "" {
+			title = extractFirstText(item, Selectors.TitleFallbacks)
+		}
+		if title == "" {
 			return
 		}
 
 		desc := descriptionFromItem(item, title)
 
-		results = append(results, core.SearchResult{
-			Rank:        rank,
-			URL:         link,
-			Title:       title,
-			Description: desc,
-			Ad:          false,
-		})
-		rank++
-	})
-
-	doc.Find(Selectors.Ads).Each(func(_ int, item *goquery.Selection) {
-		titleTag := item.Find(Selectors.AdTitle).First()
-		if titleTag.Length() == 0 {
-			return
-		}
-
-		link, exists := titleTag.Attr("href")
-		if !exists || link == "" {
-			return
-		}
-
-		title := titleTag.Text()
-		desc := ""
-		if descTag := item.Find("p").First(); descTag.Length() > 0 {
-			desc = descTag.Text()
+		resultRank := rank
+		if isAd {
+			resultRank = adRank
+			adRank++
+		} else {
+			rank++
 		}
 
 		results = append(results, core.SearchResult{
-			Rank:        adRank,
-			URL:         link,
-			Title:       title,
-			Description: desc,
-			Ad:          true,
+			Rank:         resultRank,
+			AbsoluteRank: absoluteRank,
+			URL:          link,
+			Title:        title,
+			Description:  desc,
+			Ad:           isAd,
 		})
-		adRank++
+		absoluteRank++
 	})
 
-	setSeparatedAdAbsoluteRanks(results, 0)
 	return core.DeduplicateResults(results)
 }
 
-func setSeparatedAdAbsoluteRanks(results []core.SearchResult, start int) {
-	adCount := 0
-	for i := range results {
-		if results[i].Ad {
-			adCount++
-			results[i].AbsoluteRank = start + results[i].Rank
+func extractFirstText(item *goquery.Selection, selectors []string) string {
+	for _, selector := range selectors {
+		if tag := item.Find(selector).First(); tag.Length() > 0 {
+			if text := strings.TrimSpace(tag.Text()); text != "" {
+				return text
+			}
+			if label, exists := tag.Attr("aria-label"); exists {
+				if label = strings.TrimSpace(label); label != "" {
+					return label
+				}
+			}
 		}
 	}
-	organicAbsoluteRank := start + adCount + 1
-	for i := range results {
-		if results[i].Ad {
-			continue
-		}
-		results[i].AbsoluteRank = organicAbsoluteRank
-		organicAbsoluteRank++
-	}
+	return ""
 }
 
 // descriptionFromItem extracts a description using the same 4-step fallback
@@ -114,7 +108,7 @@ func descriptionFromItem(item *goquery.Selection, title string) string {
 			return text
 		}
 	}
-	if descTag := item.Find("p").First(); descTag.Length() > 0 {
+	if descTag := item.Find(Selectors.DescAny).First(); descTag.Length() > 0 {
 		if text := strings.TrimSpace(descTag.Text()); text != "" {
 			return text
 		}

@@ -35,11 +35,17 @@ func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 	}
 
 	resultType := ResultTypeOrganic
+	if raw.Type != "" {
+		if validType, warning := ValidateResultType(raw.Type); warning == "" {
+			resultType = validType
+		}
+	}
 	if raw.Ad {
 		resultType = ResultTypeAd
 	}
-	// Google answer boxes use negative rank; promote to answer_box type.
-	if raw.Rank <= 0 && !raw.Ad {
+	// Backward compatibility for older parsers: Google answer boxes used
+	// negative rank before SearchResult carried an explicit type hint.
+	if raw.Rank <= 0 && !raw.Ad && raw.Type == "" {
 		resultType = ResultTypeAnswerBox
 	}
 	rank := raw.Rank

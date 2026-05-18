@@ -77,6 +77,71 @@ func (bing *Bing) acceptCookies(ctx context.Context, page *rod.Page) error {
 	return core.SleepContext(ctx, 500*time.Millisecond)
 }
 
+func bingElementMatches(el *rod.Element, selector string) bool {
+	if el == nil {
+		return false
+	}
+	matches, err := el.Matches(selector)
+	return err == nil && matches
+}
+
+func (bing *Bing) parseResultElement(el *rod.Element, isAd bool, rank, absoluteRank int) (core.SearchResult, bool) {
+	titleSelector := Selectors.Title
+	if isAd {
+		titleSelector = Selectors.AdTitle
+	}
+
+	titleElem, err := el.Element(titleSelector)
+	if err != nil {
+		bing.logger.Debug("Missing title")
+		return core.SearchResult{}, false
+	}
+
+	href, err := titleElem.Property("href")
+	if err != nil {
+		bing.logger.Debug("Missing URL")
+		return core.SearchResult{}, false
+	}
+	url := strings.TrimSpace(href.String())
+	if url == "" || url == "#" || strings.HasPrefix(url, "javascript:") {
+		return core.SearchResult{}, false
+	}
+
+	title, _ := titleElem.Text()
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = core.FirstNonEmptyText(el, Selectors.TitleFallbacks...)
+	}
+	if title == "" {
+		title = core.FirstNonEmptyAttribute(el, "aria-label", Selectors.TitleFallbacks...)
+	}
+	if title == "" {
+		bing.logger.Debug("Missing title text")
+		return core.SearchResult{}, false
+	}
+
+	desc := ""
+	if descElem, err := el.Element(Selectors.DescPrimary); err == nil {
+		desc, _ = descElem.Text()
+	} else if descElem, err := el.Element(Selectors.DescFallback); err == nil {
+		desc, _ = descElem.Text()
+	} else if descElem, err := el.Element(Selectors.DescAny); err == nil {
+		desc, _ = descElem.Text()
+	} else {
+		fullText, _ := el.Text()
+		desc = strings.TrimSpace(strings.Replace(fullText, title, "", 1))
+	}
+
+	return core.SearchResult{
+		Rank:         rank,
+		AbsoluteRank: absoluteRank,
+		URL:          url,
+		Title:        title,
+		Description:  strings.TrimSpace(desc),
+		Ad:           isAd,
+	}, true
+}
+
 // Search executes a Bing web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
@@ -115,7 +180,7 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 		return nil, err
 	}
 
-	organicElements, _, err := core.WaitForElements(ctx, page, []string{Selectors.Results}, bing.GetSelectorTimeout())
+	resultElements, _, err := core.WaitForElements(ctx, page, []string{Selectors.ResultItems, Selectors.Results}, bing.GetSelectorTimeout())
 	if err != nil {
 		// Re-check captcha on timeout - Bing interstitials can render after WaitLoad.
 		if bing.checkCaptcha(page) {
@@ -126,102 +191,38 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 		return nil, core.ErrSearchTimeout
 	}
 
-	adElements, err := page.Timeout(bing.GetSelectorTimeout()).Elements(Selectors.Ads)
-	if err != nil {
-		bing.logger.Debug("No ads found")
-	}
-
 	totalResults, err := bing.getTotalResults(page)
 	if err != nil {
 		bing.logger.Debug("Failed to get total results: %v", err)
 	}
-	bing.logger.Info("Found %d results (%d ads)", totalResults, len(adElements))
+	bing.logger.Info("Found %d organic result containers", totalResults)
 
 	rank := query.Start
 	adRank := 1
-	for _, result := range organicElements {
-		srchRes := core.SearchResult{}
-
-		titleElem, err := result.Element(Selectors.Title)
-		if err != nil {
-			bing.logger.Debug("Missing title")
+	absoluteRank := query.Start + 1
+	for _, result := range resultElements {
+		isAd := bingElementMatches(result, Selectors.Ads)
+		isOrganic := bingElementMatches(result, Selectors.Results)
+		if !isAd && !isOrganic {
 			continue
 		}
 
-		href, err := titleElem.Property("href")
-		if err != nil {
-			bing.logger.Debug("Missing URL")
+		resultRank := rank + 1
+		if isAd {
+			resultRank = adRank
+		}
+		srchRes, ok := bing.parseResultElement(result, isAd, resultRank, absoluteRank)
+		if !ok {
 			continue
 		}
-		srchRes.URL = href.String()
-		if strings.TrimSpace(srchRes.URL) == "" || strings.HasPrefix(srchRes.URL, "javascript:") {
-			continue
-		}
-
-		srchRes.Title, _ = titleElem.Text()
-		srchRes.Title = strings.TrimSpace(srchRes.Title)
-		if srchRes.Title == "" {
-			srchRes.Title = core.FirstNonEmptyText(result, Selectors.TitleFallbacks...)
-		}
-		if srchRes.Title == "" {
-			bing.logger.Debug("Missing title text")
-			continue
-		}
-
-		var desc string
-		if descElem, err := result.Element(Selectors.DescPrimary); err == nil {
-			desc, _ = descElem.Text()
-		} else if descElem, err := result.Element(Selectors.DescFallback); err == nil {
-			desc, _ = descElem.Text()
-		} else if descElem, err := result.Element("p"); err == nil {
-			desc, _ = descElem.Text()
+		searchResults = append(searchResults, srchRes)
+		absoluteRank++
+		if isAd {
+			adRank++
 		} else {
-			fullText, _ := result.Text()
-			desc = strings.TrimSpace(strings.Replace(fullText, srchRes.Title, "", 1))
+			rank++
 		}
-		srchRes.Description = desc
-
-		rank++
-		srchRes.Rank = rank
-		srchRes.Ad = false
-
-		searchResults = append(searchResults, srchRes)
 	}
-
-	for _, adResult := range adElements {
-		srchRes := core.SearchResult{Ad: true}
-
-		titleElem, err := adResult.Element(Selectors.AdTitle)
-		if err != nil {
-			bing.logger.Debug("Ad missing title")
-			continue
-		}
-		srchRes.Title, _ = titleElem.Text()
-		srchRes.Title = strings.TrimSpace(srchRes.Title)
-		if srchRes.Title == "" {
-			srchRes.Title = core.FirstNonEmptyText(adResult, "h2", "a[aria-label]")
-		}
-		if srchRes.Title == "" {
-			continue
-		}
-
-		href, err := titleElem.Property("href")
-		if err != nil {
-			bing.logger.Debug("Ad missing URL")
-			continue
-		}
-		srchRes.URL = href.String()
-
-		if descElem, err := adResult.Element("p"); err == nil {
-			srchRes.Description, _ = descElem.Text()
-		}
-
-		srchRes.Rank = adRank
-		adRank++
-		searchResults = append(searchResults, srchRes)
-	}
-
-	setSeparatedAdAbsoluteRanks(searchResults, query.Start)
 
 	// Deduplicate results
 	deduped := core.DeduplicateResults(searchResults)

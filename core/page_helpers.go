@@ -123,6 +123,28 @@ func FirstNonEmptyText(root *rod.Element, selectors ...string) string {
 	return ""
 }
 
+// ClosestMatching walks up the ancestor chain (including el itself) and returns
+// the first element matching selector, or nil if none is found within maxHops.
+// rod has no native Closest helper, so this is a bounded walk used by parsers
+// that need to recover a wrapping <a> from a nested title node.
+func ClosestMatching(el *rod.Element, selector string, maxHops int) *rod.Element {
+	if el == nil || selector == "" {
+		return nil
+	}
+	current := el
+	for hop := 0; hop <= maxHops; hop++ {
+		if matches, err := current.Matches(selector); err == nil && matches {
+			return current
+		}
+		parent, err := current.Parent()
+		if err != nil || parent == nil {
+			return nil
+		}
+		current = parent
+	}
+	return nil
+}
+
 // FirstNonEmptyAttribute returns the trimmed value of attr from the first
 // selector under root whose attribute is non-empty.
 func FirstNonEmptyAttribute(root *rod.Element, attr string, selectors ...string) string {

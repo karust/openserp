@@ -168,6 +168,18 @@ func (gogl *Google) acceptCookies(page *rod.Page) {
 
 }
 
+func googleElementHasAdMarker(el *rod.Element) bool {
+	if el == nil {
+		return false
+	}
+	matches, err := el.Matches(Selectors.Ad)
+	if err == nil && matches {
+		return true
+	}
+	child, err := el.Element(Selectors.Ad)
+	return err == nil && child != nil
+}
+
 // Search executes a Google web search and returns normalized search results.
 // It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (gogl *Google) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
@@ -241,7 +253,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 	for _, resEl := range searchResultElems {
 		srchRes := core.SearchResult{}
 
-		isAd := core.HasAttribute(resEl, "data-text-ad")
+		isAd := googleElementHasAdMarker(resEl)
 		isAnswerBox := query.Answers && core.HasAttribute(resEl, "data-ulkwtsb") && !core.HasAttribute(resEl, "data-ispaa")
 		isResultCandidate := core.HasAttribute(resEl, "data-ved")
 
@@ -251,7 +263,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			srchRes.Ad = true
 
 			// Get URL
-			link, err := resEl.Element("a")
+			link, err := resEl.Element(Selectors.Link)
 			if err != nil {
 				gogl.logger.Debug("Missing link")
 				continue
@@ -354,6 +366,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 				srchRes.Title = answerText[0]
 				srchRes.Description = strings.Join(answerText[1:len(answerText)-2], "\n")
 				srchRes.Rank = -1 * (i + 1)
+				srchRes.Type = core.ResultTypePeopleAlsoAsk
 				searchResults = append(searchResults, srchRes)
 			}
 			continue
@@ -369,7 +382,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			// Get URL from parent link of h3
 			link, err := titleTag.Parent()
 			if err == nil {
-				isLink, matchErr := link.Matches("a")
+				isLink, matchErr := link.Matches(Selectors.Link)
 				if matchErr != nil {
 					gogl.logger.Debug("Failed to match link selector: %s", matchErr)
 				}
@@ -399,7 +412,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 						parent, err = parent.Parent()
 						if err == nil {
 							if descTag, err := parent.Next(); err == nil {
-								if descDiv, err := descTag.Element("div"); err == nil {
+								if descDiv, err := descTag.Element(Selectors.DescAny); err == nil {
 									desc, _ = descDiv.Text()
 								}
 							}

@@ -99,16 +99,16 @@ curl "http://127.0.0.1:7000/mega/engines"
 
 Common parameters:
 
-| Parameter | Description                | Example                              |
-| --------- | -------------------------- | ------------------------------------ |
-| `text`    | Search query               | `golang programming`                 |
-| `lang`    | Language code              | `EN`, `DE`, `RU`, `ES`               |
-| `date`    | Date range                 | `20250101..20251231`                 |
-| `file`    | File extension             | `pdf`, `doc`, `xls`                  |
-| `site`    | Site-specific search       | `github.com`                         |
+| Parameter | Description                                                          | Example                              |
+| --------- | -------------------------------------------------------------------- | ------------------------------------ |
+| `text`    | Search query                                                         | `golang programming`                 |
+| `lang`    | Language code                                                        | `EN`, `DE`, `RU`, `ES`               |
+| `date`    | Date range                                                           | `20250101..20251231`                 |
+| `file`    | File extension                                                       | `pdf`, `doc`, `xls`                  |
+| `site`    | Site-specific search                                                 | `github.com`                         |
 | `limit`   | Number of organic results, max 100. Ads may be returned in addition. | `10`, `25`, `50`                     |
-| `start`   | Pagination offset          | `0`, `10`, `20`                      |
-| `format`  | Output format              | `json`, `markdown`, `text`, `ndjson` |
+| `start`   | Pagination offset                                                    | `0`, `10`, `20`                      |
+| `format`  | Output format                                                        | `json`, `markdown`, `text`, `ndjson` |
 
 Engine-specific parameters:
 
@@ -130,7 +130,7 @@ Engine-specific parameters:
     "requested_at": "2026-04-25T22:27:52Z",
     "took_ms": 6410,
     "engines_failed": [],
-    "version": "2.0"
+    "version": "2.1"
   },
   "results": [
     {
@@ -255,8 +255,12 @@ curl "http://127.0.0.1:7000/stats/cb"
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome. See [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md).
 
-###### _"OpenSERP" is the name of this open-source project. The official [website](https://openserp.org) and [hosted](https://openserp.org/cloud) solution. Use of the name in a way that implies affiliation, endorsement, or official status is not permitted._
+## Updates
+
+If you want to follow updates to the hosted version — status, changes, and occasional notes on the OSS project — join the [Telegram channel](https://t.me/+RJEKspw3mUlhZDMy).
+
+###### _"OpenSERP" is the name of this open-source project. The official [website](https://openserp.org). Use of the name in a way that implies affiliation, endorsement, or official status is not permitted._

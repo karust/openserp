@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -76,43 +77,44 @@ func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.Searc
 	absoluteRank := pageNum*10 + 1
 
 	for _, r := range results {
-		// Get URL
-		link, err := r.Element(Selectors.Link)
+		titleTag, err := r.Element(Selectors.Title)
 		if err != nil {
-			if core.IsRodObjectNotFound(err) {
-				break
-			}
+			yand.logger.Debug("Missing h2 title")
 			continue
+		}
+		title, err := titleTag.Text()
+		if err != nil || strings.TrimSpace(title) == "" {
+			yand.logger.Debug("Failed to extract title")
+			continue
+		}
+		title = strings.TrimSpace(title)
+
+		link, err := r.Element(Selectors.LinkPrimary)
+		if err != nil {
+			if closest := core.ClosestMatching(titleTag, Selectors.Link, 4); closest != nil {
+				link = closest
+				err = nil
+			}
+		}
+		if err != nil {
+			link, err = r.Element(Selectors.Link)
+			if err != nil {
+				yand.logger.Debug("Missing link")
+				continue
+			}
 		}
 		linkText, err := link.Property("href")
 		if err != nil {
 			yand.logger.Debug("Missing href")
 			continue
 		}
-
-		// Get title
-		titleTag, err := link.Element(Selectors.Title)
-		if err != nil {
-			yand.logger.Debug("Missing h2 title")
+		hrefStr := strings.TrimSpace(linkText.String())
+		if hrefStr == "" || hrefStr == "#" || strings.HasPrefix(hrefStr, "javascript:") {
 			continue
 		}
 
-		title, err := titleTag.Text()
-		if err != nil {
-			yand.logger.Debug("Failed to extract title")
-			title = "No title"
-		}
+		desc := core.FirstNonEmptyText(r, Selectors.Desc, Selectors.DescFallback)
 
-		// Get description
-		descTag, err := r.Element(Selectors.Desc)
-		desc := ""
-		if err != nil {
-			yand.logger.Debug("No description")
-		} else {
-			desc, _ = descTag.Text()
-		}
-
-		hrefStr := linkText.String()
 		isAd := yandexElementHasAdMarker(r) || yandexURLLooksAd(hrefStr)
 		resultRank := 0
 		if isAd {

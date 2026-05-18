@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: OpenSERP API
-  version: 2.0.0
+  version: 2.1.0
   description: >
     OpenSERP provides dedicated and multi-engine search endpoints for Google, Yandex,
     Baidu, Bing, and DuckDuckGo. Search responses are wrapped in a v2 envelope with
@@ -90,7 +90,7 @@ paths:
                       requested_at: "2026-04-24T12:00:00Z"
                       took_ms: 842
                       engines_failed: []
-                      version: "2.0"
+                      version: "2.1"
                     results:
                       - id: s_a1b2c3d4e5f6a1b2
                         rank: 1
@@ -1023,7 +1023,7 @@ components:
             $ref: "#/components/schemas/EngineErrorDetail"
         version:
           type: string
-          example: "2.0"
+          example: "2.1"
     EngineErrorDetail:
       type: object
       required: [engine, error]
@@ -1092,8 +1092,8 @@ components:
       type: string
       description: >
         SERP block type. New values require a minor version bump (`meta.version: "2.1"`).
-        In v2.0, engines emit `organic`, `ad`, or `answer_box`; other enum values are
-        reserved for future parser upgrades.
+        In v2.1, engines may emit specialized modules such as `people_also_ask`
+        when a parser can classify them reliably.
       enum:
         - organic
         - ad
