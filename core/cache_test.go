@@ -5,6 +5,28 @@ import (
 	"time"
 )
 
+func TestCacheProxyMarketFallback(t *testing.T) {
+	tests := []struct {
+		name    string
+		q       Query
+		country string
+	}{
+		{name: "proxy country wins", q: Query{ProxyCountry: "DE", Region: "RU", LangCode: "EN"}, country: "de"},
+		{name: "region country fallback", q: Query{Region: "RU", LangCode: "EN"}, country: "ru"},
+		{name: "region locale fallback", q: Query{Region: "en-GB", LangCode: "EN"}, country: "gb"},
+		{name: "lang code last resort", q: Query{LangCode: "EN"}, country: "en"},
+		{name: "yandex numeric region ignored for market", q: Query{Region: "213", LangCode: "RU"}, country: "ru"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			country, _, _ := cacheProxyMarket(tt.q)
+			if country != tt.country {
+				t.Fatalf("cacheProxyMarket country = %q, want %q", country, tt.country)
+			}
+		})
+	}
+}
+
 func TestResponseCacheSetAndGet(t *testing.T) {
 	cache := NewResponseCache(5*time.Second, 10)
 	key := BuildCacheKey("google", "search", Query{Text: "golang", Limit: 10})
@@ -111,6 +133,17 @@ func TestBuildCacheKeyChangesWithPaginationAndFlags(t *testing.T) {
 
 	if same := BuildCacheKey("google", "search", base); same != baseKey {
 		t.Fatal("expected deterministic key for same query")
+	}
+	if changed := BuildCacheKey("google", "search", Query{
+		Text:     "golang",
+		LangCode: "EN",
+		Region:   "US",
+		Limit:    10,
+		Start:    0,
+		Filter:   true,
+		Answers:  false,
+	}); changed == baseKey {
+		t.Fatal("expected region to affect cache key")
 	}
 	if changed := BuildCacheKey("google", "search", Query{
 		Text:     "golang",

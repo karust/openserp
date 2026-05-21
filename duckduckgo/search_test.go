@@ -62,6 +62,21 @@ func TestBuildURL(t *testing.T) {
 			},
 		},
 		{
+			name: "region overrides duckduckgo market",
+			query: core.Query{
+				Text:     "weather",
+				LangCode: "de",
+				Region:   "AT",
+			},
+			page: 0,
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("kl"); got != "at-de" {
+					t.Fatalf("unexpected kl value: %q", got)
+				}
+			},
+		},
+		{
 			name:  "very large page offset",
 			query: core.Query{Text: "golang"},
 			page:  100000,
@@ -196,6 +211,7 @@ func TestDuckDuckGoLanguageMapping(t *testing.T) {
 	tests := []struct {
 		name     string
 		langCode string
+		region   string
 		wantKL   string
 	}{
 		{
@@ -209,6 +225,12 @@ func TestDuckDuckGoLanguageMapping(t *testing.T) {
 			wantKL:   "at-de",
 		},
 		{
+			name:     "region param overrides language default",
+			langCode: "de",
+			region:   "CH",
+			wantKL:   "ch-de",
+		},
+		{
 			name:     "unknown language omits kl",
 			langCode: "xx",
 			wantKL:   "",
@@ -217,7 +239,8 @@ func TestDuckDuckGoLanguageMapping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildURL(core.Query{Text: "golang", LangCode: tt.langCode}, 0)
+			query := core.Query{Text: "golang", LangCode: tt.langCode, Region: tt.region}
+			got, err := BuildURL(query, 0)
 			if err != nil {
 				t.Fatalf("BuildURL() error = %v", err)
 			}

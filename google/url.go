@@ -228,7 +228,7 @@ var googleDefaultCountryByLanguage = map[string]string{
 // BuildURL builds a Google web search URL from Query fields.
 // It returns an error when the resulting query text is empty or invalid.
 func BuildURL(q core.Query) (string, error) {
-	locale := googleLocale(q.LangCode)
+	locale := googleLocale(q.LangCode, q.Region)
 	googleBase := googleDomain(locale)
 	base, err := url.Parse(fmt.Sprintf("https://www.google.%s", googleBase))
 	if err != nil {
@@ -286,9 +286,11 @@ func BuildURL(q core.Query) (string, error) {
 		params.Add("filter", "0")
 	}
 
+	if locale.country != "" {
+		params.Add("gl", locale.country)
+	}
 	if locale.language != "" {
 		params.Add("hl", locale.language)
-		params.Add("gl", locale.country)
 		params.Add("lr", "lang_"+locale.language)
 	}
 
@@ -305,7 +307,7 @@ func BuildURL(q core.Query) (string, error) {
 // It returns an error when the resulting query text is empty or invalid.
 func BuildImageURL(q core.Query) (string, error) {
 	// TODO: Add new params
-	locale := googleLocale(q.LangCode)
+	locale := googleLocale(q.LangCode, q.Region)
 	googleBase := googleDomain(locale)
 	base, err := url.Parse(fmt.Sprintf("https://www.google.%s", googleBase))
 	if err != nil {
@@ -350,9 +352,11 @@ func BuildImageURL(q core.Query) (string, error) {
 		params.Add("num", strconv.Itoa(q.Limit))
 	}
 
+	if locale.country != "" {
+		params.Add("gl", locale.country)
+	}
 	if locale.language != "" {
 		params.Add("hl", locale.language)
-		params.Add("gl", locale.country)
 		params.Add("lr", "lang_"+locale.language)
 	}
 
@@ -370,15 +374,21 @@ type googleLocaleParams struct {
 
 // googleLocale parses langCode and fills in a default country when one is not
 // supplied so callers always get a usable (gl, hl) pair.
-func googleLocale(langCode string) googleLocaleParams {
+func googleLocale(langCode, region string) googleLocaleParams {
 	parsed := core.ParseLocale(langCode)
+	country := strings.ToLower(core.CountryFromRegion(region))
 	if parsed.Language == "" {
+		if country != "" {
+			return googleLocaleParams{country: country}
+		}
 		return googleLocaleParams{}
 	}
 
-	country := strings.ToLower(parsed.Country)
 	if country == "" {
-		country = defaultGoogleCountry(parsed.Language)
+		country = strings.ToLower(parsed.Country)
+		if country == "" {
+			country = defaultGoogleCountry(parsed.Language)
+		}
 	}
 	return googleLocaleParams{
 		language: parsed.Language,

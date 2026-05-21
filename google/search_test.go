@@ -90,6 +90,50 @@ func TestBuildSearchURL(t *testing.T) {
 			},
 		},
 		{
+			name: "region overrides google market without changing language",
+			query: core.Query{
+				Text:     "weather",
+				LangCode: "en",
+				Region:   "RU",
+				Filter:   true,
+			},
+			check: func(t *testing.T, params url.Values, host string) {
+				t.Helper()
+				if host != "www.google.ru" {
+					t.Fatalf("unexpected host: %s", host)
+				}
+				if got := params.Get("hl"); got != "en" {
+					t.Fatalf("unexpected hl value: %q", got)
+				}
+				if got := params.Get("gl"); got != "ru" {
+					t.Fatalf("unexpected gl value: %q", got)
+				}
+				if got := params.Get("lr"); got != "lang_en" {
+					t.Fatalf("unexpected lr value: %q", got)
+				}
+			},
+		},
+		{
+			name: "region only sets google market",
+			query: core.Query{
+				Text:   "weather",
+				Region: "de",
+				Filter: true,
+			},
+			check: func(t *testing.T, params url.Values, host string) {
+				t.Helper()
+				if host != "www.google.de" {
+					t.Fatalf("unexpected host: %s", host)
+				}
+				if got := params.Get("gl"); got != "de" {
+					t.Fatalf("unexpected gl value: %q", got)
+				}
+				if got := params.Get("hl"); got != "" {
+					t.Fatalf("hl should be omitted without language, got %q", got)
+				}
+			},
+		},
+		{
 			name: "site and filetype without text",
 			query: core.Query{
 				Site:     "example.com",
@@ -201,6 +245,26 @@ func TestBuildImageSearchURL(t *testing.T) {
 				}
 				if got := params.Get("lr"); got != "lang_en" {
 					t.Fatalf("unexpected lr value: %q", got)
+				}
+			},
+		},
+		{
+			name: "image region overrides google market",
+			query: core.Query{
+				Text:     "mountains",
+				LangCode: "en",
+				Region:   "GB",
+			},
+			check: func(t *testing.T, params url.Values, host string) {
+				t.Helper()
+				if host != "www.google.co.uk" {
+					t.Fatalf("unexpected host: %s", host)
+				}
+				if got := params.Get("gl"); got != "gb" {
+					t.Fatalf("unexpected gl value: %q", got)
+				}
+				if got := params.Get("hl"); got != "en" {
+					t.Fatalf("unexpected hl value: %q", got)
 				}
 			},
 		},

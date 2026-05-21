@@ -127,6 +127,7 @@ func QueryHashFromQuery(q Query) string {
 		q.Site,
 		q.Filetype,
 		q.LangCode,
+		q.Region,
 		q.DateInterval,
 	}, "|")
 	return QueryHash(raw)

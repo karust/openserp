@@ -83,7 +83,7 @@ curl "http://127.0.0.1:7000/mega/search?text=golang&mode=any&engines=google,yand
 curl "http://127.0.0.1:7000/mega/search?text=golang&mode=balanced&dedupe=true&merge=true"
 
 # Advanced filtering
-curl "http://127.0.0.1:7000/mega/search?text=golang&engines=google,bing&limit=20&date=20250101..20251231&lang=EN"
+curl "http://127.0.0.1:7000/mega/search?text=golang&engines=google,bing&limit=20&date=20250101..20251231&lang=EN&region=US"
 
 # Image megasearch
 curl "http://127.0.0.1:7000/mega/image?text=golang+logo&limit=20"
@@ -103,6 +103,7 @@ Common parameters:
 | --------- | -------------------------------------------------------------------- | ------------------------------------ |
 | `text`    | Search query                                                         | `golang programming`                 |
 | `lang`    | Language code                                                        | `EN`, `DE`, `RU`, `ES`               |
+| `region`  | Market/location hint. Yandex accepts numeric `lr`; others use country hints. | `213`, `RU`, `en-US`        |
 | `date`    | Date range                                                           | `20250101..20251231`                 |
 | `file`    | File extension                                                       | `pdf`, `doc`, `xls`                  |
 | `site`    | Site-specific search                                                 | `github.com`                         |

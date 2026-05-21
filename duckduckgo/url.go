@@ -60,14 +60,18 @@ var ddgKLByLocale = map[string]string{
 // duckDuckGoKL resolves a DuckDuckGo "kl" value for the supplied language code.
 // Returns "" when the input has no known mapping so callers can omit the
 // parameter rather than send an unrecognized region.
-func duckDuckGoKL(langCode string) string {
+func duckDuckGoKL(langCode, region string) string {
 	locale := core.ParseLocale(langCode)
 	if locale.Language == "" {
 		return ""
 	}
 
-	if locale.Country != "" {
-		key := locale.Language + "-" + strings.ToLower(locale.Country)
+	country := core.CountryFromRegion(region)
+	if country == "" {
+		country = locale.Country
+	}
+	if country != "" {
+		key := locale.Language + "-" + strings.ToLower(country)
 		if kl, ok := ddgKLByLocale[key]; ok {
 			return kl
 		}
@@ -128,7 +132,7 @@ func BuildURL(q core.Query, page int) (string, error) {
 		params.Add("df", dateRange)
 	}
 
-	if kl := duckDuckGoKL(q.LangCode); kl != "" {
+	if kl := duckDuckGoKL(q.LangCode, q.Region); kl != "" {
 		params.Add("kl", kl)
 	}
 
@@ -204,7 +208,7 @@ func BuildImageURL(q core.Query) (string, error) {
 		params.Add("df", dateRange)
 	}
 
-	if kl := duckDuckGoKL(q.LangCode); kl != "" {
+	if kl := duckDuckGoKL(q.LangCode, q.Region); kl != "" {
 		params.Add("kl", kl)
 	}
 	base.RawQuery = params.Encode()

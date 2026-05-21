@@ -118,6 +118,47 @@ func TestBuildURL(t *testing.T) {
 			},
 		},
 		{
+			name: "region overrides bing market country",
+			query: core.Query{
+				Text:     "weather",
+				LangCode: "en",
+				Region:   "DE",
+				Limit:    10,
+			},
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("mkt"); got != "en-DE" {
+					t.Fatalf("unexpected mkt value: %q", got)
+				}
+				if got := params.Get("setlang"); got != "en" {
+					t.Fatalf("unexpected setlang value: %q", got)
+				}
+				if got := params.Get("cc"); got != "DE" {
+					t.Fatalf("unexpected cc value: %q", got)
+				}
+			},
+		},
+		{
+			name: "region only sets bing country",
+			query: core.Query{
+				Text:   "weather",
+				Region: "RU",
+				Limit:  10,
+			},
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("cc"); got != "RU" {
+					t.Fatalf("unexpected cc value: %q", got)
+				}
+				if got := params.Get("mkt"); got != "" {
+					t.Fatalf("mkt should be omitted without language, got %q", got)
+				}
+				if got := params.Get("setlang"); got != "" {
+					t.Fatalf("setlang should be omitted without language, got %q", got)
+				}
+			},
+		},
+		{
 			name: "very large start",
 			query: core.Query{
 				Text:  "golang",
@@ -228,6 +269,23 @@ func TestBuildImageURL(t *testing.T) {
 				}
 				if got := params.Get("scenario"); got != "ImageBasicHover" {
 					t.Fatalf("unexpected scenario value: %q", got)
+				}
+			},
+		},
+		{
+			name: "image region overrides market country",
+			query: core.Query{
+				Text:     "cats",
+				LangCode: "en",
+				Region:   "GB",
+			},
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("mkt"); got != "en-GB" {
+					t.Fatalf("unexpected mkt value: %q", got)
+				}
+				if got := params.Get("cc"); got != "GB" {
+					t.Fatalf("unexpected cc value: %q", got)
 				}
 			},
 		},

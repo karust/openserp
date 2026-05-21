@@ -51,6 +51,30 @@ func ParseLocale(code string) Locale {
 	return Locale{Language: language, Country: country}
 }
 
+// CountryFromRegion extracts a two-letter country/market code from a region
+// hint. It accepts "ru", "RU", "en-RU", and "en_RU"; engine-native numeric
+// region IDs intentionally return empty here.
+func CountryFromRegion(region string) string {
+	region = strings.TrimSpace(region)
+	if region == "" {
+		return ""
+	}
+	region = strings.ReplaceAll(region, "_", "-")
+	if len(region) == 2 && isAlphaASCII(region[0]) && isAlphaASCII(region[1]) {
+		return strings.ToUpper(region)
+	}
+
+	locale := ParseLocale(region)
+	if len(locale.Country) == 2 && isAlphaASCII(locale.Country[0]) && isAlphaASCII(locale.Country[1]) {
+		return locale.Country
+	}
+	return ""
+}
+
+func isAlphaASCII(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+}
+
 // PrimaryLanguageTag returns the BCP47 primary tag for a lang code, filling in
 // a default country for bare languages (e.g. "de" -> "de-DE"). Returns "" when
 // the input has no language subtag.

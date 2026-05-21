@@ -71,9 +71,13 @@ func BuildURL(q core.Query) (string, error) {
 		return "", errors.New("empty query built")
 	}
 
-	if locale, ok := bingLocale(q.LangCode); ok {
-		params.Add("mkt", locale.market)
-		params.Add("setlang", locale.language)
+	if locale, ok := bingLocale(q.LangCode, q.Region); ok {
+		if locale.market != "" {
+			params.Add("mkt", locale.market)
+		}
+		if locale.language != "" {
+			params.Add("setlang", locale.language)
+		}
 		params.Add("cc", locale.country)
 	}
 
@@ -117,15 +121,21 @@ type bingLocaleParams struct {
 // caller-supplied language code. It returns ok=false when the input is empty
 // so callers can omit Bing's locale parameters entirely instead of forcing a
 // default market that biases results toward en-US.
-func bingLocale(langCode string) (bingLocaleParams, bool) {
+func bingLocale(langCode, region string) (bingLocaleParams, bool) {
 	parsed := core.ParseLocale(langCode)
+	country := core.CountryFromRegion(region)
 	if parsed.Language == "" {
+		if country != "" {
+			return bingLocaleParams{country: country}, true
+		}
 		return bingLocaleParams{}, false
 	}
 
-	country := parsed.Country
 	if country == "" {
-		country = defaultBingCountry(parsed.Language)
+		country = parsed.Country
+		if country == "" {
+			country = defaultBingCountry(parsed.Language)
+		}
 	}
 	return bingLocaleParams{
 		language: parsed.Language,
@@ -225,9 +235,13 @@ func BuildImageURL(q core.Query) (string, error) {
 		return "", errors.New("empty query built")
 	}
 
-	if locale, ok := bingLocale(q.LangCode); ok {
-		params.Add("mkt", locale.market)
-		params.Add("setlang", locale.language)
+	if locale, ok := bingLocale(q.LangCode, q.Region); ok {
+		if locale.market != "" {
+			params.Add("mkt", locale.market)
+		}
+		if locale.language != "" {
+			params.Add("setlang", locale.language)
+		}
 		params.Add("cc", locale.country)
 	}
 

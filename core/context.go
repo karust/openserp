@@ -41,9 +41,24 @@ func IsContextDone(err error) bool {
 // search implementations.
 func PrepareEngineContext(ctx context.Context, query Query, engineName string, minimalBrowserProfile bool) context.Context {
 	ctx = WithEngine(EnsureContext(ctx), engineName)
-	ctx = WithProfileRegion(ctx, query.LangCode)
+	ctx = WithProfileRegion(ctx, profileRegionHint(query))
 	if minimalBrowserProfile {
 		ctx = WithMinimalBrowserProfile(ctx)
 	}
 	return WithQueryHash(ctx, QueryHashFromQuery(query))
+}
+
+// profileRegionHint picks the strongest market signal for browser fingerprint
+// matching. An explicit country-code Region wins (e.g. region=DE → de or en-DE),
+// since it's what the user asked the engine to localize to. Engine-native
+// numeric region IDs (Yandex lr) are ignored here and we fall back to LangCode.
+func profileRegionHint(q Query) string {
+	country := CountryFromRegion(q.Region)
+	if country == "" {
+		return q.LangCode
+	}
+	if lang := ParseLocale(q.LangCode).Language; lang != "" {
+		return lang + "-" + country
+	}
+	return country
 }

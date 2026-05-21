@@ -226,6 +226,9 @@ type Query struct {
 	Text string
 	// LangCode is an engine language hint such as "EN", "DE", or "RU".
 	LangCode string
+	// Region is an engine market/location hint. Yandex accepts numeric lr IDs;
+	// global engines accept country-style hints such as "RU" or "en-RU".
+	Region string
 	// DateInterval filters by date range in YYYYMMDD..YYYYMMDD format.
 	// Example: "20250101..20250331".
 	DateInterval string
@@ -270,8 +273,8 @@ func (q Query) String() string {
 		maskedProxyURL = MaskProxyURL(q.ProxyURL)
 	}
 	return fmt.Sprintf(
-		"{Text:%s LangCode:%s DateInterval:%s Filetype:%s Site:%s Limit:%d Start:%d Filter:%t Answers:%t ProxyURL:%s ProxyCountry:%s ProxyClass:%s ProxyProvider:%s ProxySessionID:%s ProxyOverride:%s Insecure:%t}",
-		q.Text, q.LangCode, q.DateInterval, q.Filetype, q.Site,
+		"{Text:%s LangCode:%s Region:%s DateInterval:%s Filetype:%s Site:%s Limit:%d Start:%d Filter:%t Answers:%t ProxyURL:%s ProxyCountry:%s ProxyClass:%s ProxyProvider:%s ProxySessionID:%s ProxyOverride:%s Insecure:%t}",
+		q.Text, q.LangCode, q.Region, q.DateInterval, q.Filetype, q.Site,
 		q.Limit, q.Start, q.Filter, q.Answers,
 		maskedProxyURL, q.ProxyCountry, q.ProxyClass, q.ProxyProvider,
 		q.ProxySessionID, q.ProxyOverride, q.Insecure,
@@ -307,6 +310,7 @@ const MaxQueryLimit = 100
 func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 	searchQuery.Text = reqCtx.Query("text")
 	searchQuery.LangCode = reqCtx.Query("lang")
+	searchQuery.Region = reqCtx.Query("region")
 	searchQuery.DateInterval = reqCtx.Query("date")
 	searchQuery.Filetype = reqCtx.Query("file")
 	searchQuery.Site = reqCtx.Query("site")

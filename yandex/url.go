@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/karust/openserp/core"
 )
@@ -42,6 +43,10 @@ func BuildURL(q core.Query, page int) (string, error) {
 		return "", errors.New("empty query built")
 	}
 
+	if lr := yandexLR(q.Region); lr != "" {
+		params.Add("lr", lr)
+	}
+
 	base.RawQuery = params.Encode()
 	return base.String(), nil
 }
@@ -77,6 +82,23 @@ func BuildImageURL(q core.Query, page int) (string, error) {
 		params.Add("itype", q.Filetype)
 	}
 
+	if lr := yandexLR(q.Region); lr != "" {
+		params.Add("lr", lr)
+	}
+
 	base.RawQuery = params.Encode()
 	return base.String(), nil
+}
+
+func yandexLR(region string) string {
+	region = strings.TrimSpace(region)
+	if region == "" {
+		return ""
+	}
+	for i := 0; i < len(region); i++ {
+		if region[i] < '0' || region[i] > '9' {
+			return ""
+		}
+	}
+	return region
 }

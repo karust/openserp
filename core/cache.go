@@ -38,11 +38,12 @@ func NewResponseCache(ttl time.Duration, maxSize int) *ResponseCache {
 func BuildCacheKey(engine string, action string, q Query) string {
 	country, class, provider := cacheProxyMarket(q)
 	raw := fmt.Sprintf(
-		"%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s|%s|%s",
+		"%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s|%s|%s",
 		engine,
 		action,
 		q.Text,
 		q.LangCode,
+		q.Region,
 		q.DateInterval,
 		q.Filetype,
 		q.Site,
@@ -61,8 +62,13 @@ func BuildCacheKey(engine string, action string, q Query) string {
 func cacheProxyMarket(q Query) (country string, class string, provider string) {
 	country = strings.ToLower(strings.TrimSpace(q.ProxyCountry))
 	if country == "" {
-		// TODO: Use explicit balancer market metadata everywhere; language is only a weak market proxy.
-		country = strings.ToLower(strings.TrimSpace(q.LangCode))
+		// Region is a stronger market signal than LangCode; LangCode is the last
+		// fallback. TODO: Use explicit balancer market metadata everywhere.
+		if region := CountryFromRegion(q.Region); region != "" {
+			country = strings.ToLower(region)
+		} else {
+			country = strings.ToLower(strings.TrimSpace(q.LangCode))
+		}
 	}
 	return country,
 		strings.ToLower(strings.TrimSpace(q.ProxyClass)),

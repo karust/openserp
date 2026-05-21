@@ -2253,6 +2253,60 @@ func TestDedicatedEndpointReturnsV2Envelope(t *testing.T) {
 	}
 }
 
+func TestRegionQueryParamEchoesAndReachesEngine(t *testing.T) {
+	engine := &engineMock{
+		name:        "yandex",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			if q.Region != "213" {
+				return nil, fmt.Errorf("unexpected region %q", q.Region)
+			}
+			return []SearchResult{{Rank: 1, URL: "https://example.com/region", Title: "Region"}}, nil
+		},
+	}
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7230, opts, engine)
+
+	resp := request(t, srv, "/yandex/search?text=golang&region=213")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var env Envelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Query.Region != "213" {
+		t.Fatalf("expected query.region=213, got %q", env.Query.Region)
+	}
+}
+
+func TestMegaSearchPassesRegionToEngines(t *testing.T) {
+	makeEngine := func(name string) *engineMock {
+		return &engineMock{
+			name:        name,
+			initialized: true,
+			searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+				if q.Region != "RU" {
+					return nil, fmt.Errorf("%s got region %q", name, q.Region)
+				}
+				return []SearchResult{{Rank: 1, URL: "https://example.com/" + name, Title: name}}, nil
+			},
+		}
+	}
+	google := makeEngine("google")
+	bing := makeEngine("bing")
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7231, opts, google, bing)
+
+	resp := request(t, srv, "/mega/search?text=golang&engines=google,bing&region=RU")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
 func TestMegaSearchReturnsV2EnvelopeWithEnginesFailed(t *testing.T) {
 	good := &engineMock{name: "google", initialized: true}
 	bad := &engineMock{

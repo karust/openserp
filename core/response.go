@@ -6,6 +6,7 @@ import "time"
 type QueryEcho struct {
 	Text             string   `json:"text"`
 	Lang             string   `json:"lang,omitempty"`
+	Region           string   `json:"region,omitempty"`
 	EnginesRequested []string `json:"engines_requested"`
 }
 
@@ -81,6 +82,7 @@ func NewEnvelope(q Query, requestID string, startedAt time.Time, engines []strin
 		Query: QueryEcho{
 			Text:             q.Text,
 			Lang:             q.LangCode,
+			Region:           q.Region,
 			EnginesRequested: engines,
 		},
 		Meta: ResponseMeta{
@@ -100,6 +102,7 @@ func NewImageEnvelope(q Query, requestID string, startedAt time.Time, engines []
 		Query: QueryEcho{
 			Text:             q.Text,
 			Lang:             q.LangCode,
+			Region:           q.Region,
 			EnginesRequested: engines,
 		},
 		Meta: ResponseMeta{

@@ -34,6 +34,30 @@ func TestParseLocale(t *testing.T) {
 	}
 }
 
+func TestCountryFromRegion(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "empty", in: "", want: ""},
+		{name: "country lowercase", in: "ru", want: "RU"},
+		{name: "country uppercase", in: "US", want: "US"},
+		{name: "locale dash", in: "en-GB", want: "GB"},
+		{name: "locale underscore", in: "de_AT", want: "AT"},
+		{name: "numeric engine region is not country", in: "213", want: ""},
+		{name: "unknown shape", in: "moscow", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CountryFromRegion(tt.in); got != tt.want {
+				t.Fatalf("CountryFromRegion(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildAcceptLanguageHeader(t *testing.T) {
 	tests := []struct {
 		name string

@@ -71,7 +71,7 @@ All engines implement:
 
 ### `core.Query`
 
-Parsed from query parameters (`text`, `lang`, `date`, `file`, `site`, `limit`, `start`, `filter`, `answers`) and the `X-Use-Proxy` request header. At least one of `text`, `site`, or `file` must be non-empty.
+Parsed from query parameters (`text`, `lang`, `region`, `date`, `file`, `site`, `limit`, `start`, `filter`, `answers`) and the `X-Use-Proxy` request header. At least one of `text`, `site`, or `file` must be non-empty.
 
 ### Internal `core.SearchResult`
 
