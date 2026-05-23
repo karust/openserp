@@ -308,12 +308,12 @@ const MaxQueryLimit = 100
 // headers. It validates numeric/boolean inputs and returns an *APIError for
 // invalid client input (400) or a plain error for internal failures.
 func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
-	searchQuery.Text = reqCtx.Query("text")
-	searchQuery.LangCode = reqCtx.Query("lang")
-	searchQuery.Region = reqCtx.Query("region")
-	searchQuery.DateInterval = reqCtx.Query("date")
-	searchQuery.Filetype = reqCtx.Query("file")
-	searchQuery.Site = reqCtx.Query("site")
+	searchQuery.Text = strings.TrimSpace(reqCtx.Query("text"))
+	searchQuery.LangCode = strings.TrimSpace(reqCtx.Query("lang"))
+	searchQuery.Region = strings.TrimSpace(reqCtx.Query("region"))
+	searchQuery.DateInterval = strings.TrimSpace(reqCtx.Query("date"))
+	searchQuery.Filetype = strings.TrimSpace(reqCtx.Query("file"))
+	searchQuery.Site = strings.TrimSpace(reqCtx.Query("site"))
 
 	limitRaw := reqCtx.Query("limit", "25")
 	limit, err := strconv.Atoi(limitRaw)

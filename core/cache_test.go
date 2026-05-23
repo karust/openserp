@@ -187,6 +187,32 @@ func TestBuildCacheKeyChangesWithPaginationAndFlags(t *testing.T) {
 	}
 }
 
+func TestBuildCacheKeyNormalizesStableFields(t *testing.T) {
+	base := BuildCacheKey("google", "search", Query{
+		Text:         " golang ",
+		LangCode:     "EN",
+		Region:       " us ",
+		Filetype:     "PDF",
+		Site:         "EXAMPLE.COM",
+		Limit:        10,
+		ProxyCountry: " US ",
+		ProxyClass:   " Residential ",
+	})
+	same := BuildCacheKey("Google", "Search", Query{
+		Text:         "golang",
+		LangCode:     "en",
+		Region:       "US",
+		Filetype:     "pdf",
+		Site:         "example.com",
+		Limit:        10,
+		ProxyCountry: "us",
+		ProxyClass:   "residential",
+	})
+	if same != base {
+		t.Fatal("expected cache key to normalize engine/action, locale, filters, and proxy market fields")
+	}
+}
+
 func TestBuildCacheKeyUsesProxyMarketNotSessionOrURL(t *testing.T) {
 	base := Query{
 		Text:           "golang",

@@ -39,14 +39,14 @@ func BuildCacheKey(engine string, action string, q Query) string {
 	country, class, provider := cacheProxyMarket(q)
 	raw := fmt.Sprintf(
 		"%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s|%s|%s",
-		engine,
-		action,
-		q.Text,
-		q.LangCode,
-		q.Region,
-		q.DateInterval,
-		q.Filetype,
-		q.Site,
+		cacheToken(engine),
+		cacheToken(action),
+		strings.TrimSpace(q.Text),
+		cacheToken(q.LangCode),
+		cacheToken(q.Region),
+		strings.TrimSpace(q.DateInterval),
+		cacheToken(q.Filetype),
+		cacheToken(q.Site),
 		q.Limit,
 		q.Start,
 		q.Filter,
@@ -59,20 +59,24 @@ func BuildCacheKey(engine string, action string, q Query) string {
 	return hex.EncodeToString(hash[:])
 }
 
+func cacheToken(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
 func cacheProxyMarket(q Query) (country string, class string, provider string) {
-	country = strings.ToLower(strings.TrimSpace(q.ProxyCountry))
+	country = cacheToken(q.ProxyCountry)
 	if country == "" {
 		// Region is a stronger market signal than LangCode; LangCode is the last
 		// fallback. TODO: Use explicit balancer market metadata everywhere.
 		if region := CountryFromRegion(q.Region); region != "" {
 			country = strings.ToLower(region)
 		} else {
-			country = strings.ToLower(strings.TrimSpace(q.LangCode))
+			country = cacheToken(q.LangCode)
 		}
 	}
 	return country,
-		strings.ToLower(strings.TrimSpace(q.ProxyClass)),
-		strings.ToLower(strings.TrimSpace(q.ProxyProvider))
+		cacheToken(q.ProxyClass),
+		cacheToken(q.ProxyProvider)
 }
 
 func ShouldBypassCacheForProxyMarket(q Query) bool {

@@ -292,6 +292,12 @@ func TestInvalidQueryParametersReturnJSONError(t *testing.T) {
 			reason:  ReasonEmptyQuery,
 		},
 		{
+			name:    "whitespace text query",
+			path:    "/google/search?text=%20%20%20",
+			message: "query cannot be empty",
+			reason:  ReasonEmptyQuery,
+		},
+		{
 			name:    "limit too high",
 			path:    "/google/search?text=golang&limit=999",
 			message: "limit must be between 1 and 100",

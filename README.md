@@ -1,6 +1,6 @@
 # OpenSERP (Search Engine Results)
 
-![OpenSERP](/logo.svg)
+![OpenSERP](./logo.svg)
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/karust/openserp)](https://goreportcard.com/report/github.com/karust/openserp)
 [![Go Reference](https://pkg.go.dev/badge/github/karust/openserp?style=for-the-badge)](https://pkg.go.dev/github.com/karust/openserp)
@@ -8,12 +8,15 @@
 [![Docker Pulls](https://img.shields.io/docker/v/karust/openserp)](https://hub.docker.com/repository/docker/karust/openserp)
 [![CI](https://github.com/karust/openserp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/karust/openserp/actions/workflows/ci.yml)
 
-**OpenSERP** is an API and CLI for accessing search engine results from **Google, Yandex, Baidu, Bing, DuckDuckGo, and Ecosia**.
-A developer-friendly alternative to paid SERP API services!
+**OpenSERP** is a free, open-source API and CLI for accessing normalized search engine results from **Google, Yandex, Baidu, Bing, DuckDuckGo, and Ecosia**.
+
+Run it locally, self-host it, or use the optional hosted API when you do not want to manage infrastructure.
 
 **Official website:** [openserp.org](https://openserp.org)
 
-> 💡 OpenSerp is free and open-source. Only links listed in this repository and on the official website are associated with the project.
+**Feedback:** [GitHub Issues](https://github.com/karust/openserp/issues) · [Telegram](https://t.me/+RJEKspw3mUlhZDMy) · [feedback@openserp.org](mailto:feedback@openserp.org)
+
+> 💡 OpenSERP is free and open-source. Only links listed in this repository and on the official website are associated with the project.
 
 ## Features
 
@@ -25,7 +28,7 @@ A developer-friendly alternative to paid SERP API services!
 - 🐳 **Docker-ready** - local and container deployment
 - 📝 **Data Formats** - JSON, Markdown, Text, NdJSON response formats
 
-## Quick Start⚡️
+## ⚡ Quick Start
 
 ### Docker
 
@@ -46,10 +49,21 @@ go build -o openserp .
 ./openserp serve
 ```
 
+## Deployment Options
+
+- **Self-hosted (this repo)** - free, MIT-licensed, with full control over runtime, proxies, cache, and scaling.
+- **[Hosted API](https://openserp.org/cloud)** - optional managed version from the project maintainers, with the same API shape.
+
+The hosted API helps fund continued development of the open-source project. Same endpoints, same response schema, and client code can migrate either direction.
+
 ## API Docs
+
+Once the server is running, the interactive docs are available locally:
 
 - Swagger UI: `http://127.0.0.1:7000/docs`
 - OpenAPI YAML: `http://127.0.0.1:7000/openapi.yaml`
+
+To browse the spec without running the server, see [docs/openapi.yaml](./docs/openapi.yaml). For a higher-level overview of how OpenSERP works internally, see the [architecture docs](https://openserp.org/docs/architecture/).
 
 ## Search Endpoints
 
@@ -76,7 +90,7 @@ curl "http://127.0.0.1:7000/mega/search?text=golang&limit=10"
 # Fast mode: only one fastest engine is queried
 curl "http://127.0.0.1:7000/mega/search?text=golang&mode=fast&engines=google,bing,yandex"
 
-# Any mode: sequential fallback in provided order (default orded if none provided)
+# Any mode: sequential fallback in provided order (default order if none provided)
 curl "http://127.0.0.1:7000/mega/search?text=golang&mode=any&engines=google,yandex,bing"
 
 # Balanced mode (default): parallel all engines with aggregation controls
@@ -99,17 +113,17 @@ curl "http://127.0.0.1:7000/mega/engines"
 
 Common parameters:
 
-| Parameter | Description                                                          | Example                              |
-| --------- | -------------------------------------------------------------------- | ------------------------------------ |
-| `text`    | Search query                                                         | `golang programming`                 |
-| `lang`    | Language code                                                        | `EN`, `DE`, `RU`, `ES`               |
-| `region`  | Market/location hint. Yandex accepts numeric `lr`; others use country hints. | `213`, `RU`, `en-US`        |
-| `date`    | Date range                                                           | `20250101..20251231`                 |
-| `file`    | File extension                                                       | `pdf`, `doc`, `xls`                  |
-| `site`    | Site-specific search                                                 | `github.com`                         |
-| `limit`   | Number of organic results, max 100. Ads may be returned in addition. | `10`, `25`, `50`                     |
-| `start`   | Pagination offset                                                    | `0`, `10`, `20`                      |
-| `format`  | Output format                                                        | `json`, `markdown`, `text`, `ndjson` |
+| Parameter | Description                                                                  | Example                              |
+| --------- | ---------------------------------------------------------------------------- | ------------------------------------ |
+| `text`    | Search query                                                                 | `golang programming`                 |
+| `lang`    | Language code                                                                | `EN`, `DE`, `RU`, `ES`               |
+| `region`  | Market/location hint. Yandex accepts numeric `lr`; others use country hints. | `213`, `RU`, `en-US`                 |
+| `date`    | Date range                                                                   | `20250101..20251231`                 |
+| `file`    | File extension                                                               | `pdf`, `doc`, `xls`                  |
+| `site`    | Site-specific search                                                         | `github.com`                         |
+| `limit`   | Number of organic results, max 100. Ads may be returned in addition.         | `10`, `25`, `50`                     |
+| `start`   | Pagination offset                                                            | `0`, `10`, `20`                      |
+| `format`  | Output format                                                                | `json`, `markdown`, `text`, `ndjson` |
 
 Engine-specific parameters:
 
@@ -119,6 +133,9 @@ Engine-specific parameters:
 | `answers` | `google`          | Include Google answer boxes in output.                                 |
 
 ## Search Response Example
+
+<details>
+<summary>Search response example</summary>
 
 ```json
 {
@@ -163,9 +180,14 @@ Engine-specific parameters:
 }
 ```
 
+</details>
+
 ## Mega Response Notes
 
-`/mega/search` returns the same envelope plus `clusters`. Results are deduplicated by normalized URL; clusters keep the per-engine occurrences:
+`/mega/search` returns the same envelope plus `clusters`. Results are deduplicated by normalized URL; clusters keep the per-engine occurrences.
+
+<details>
+<summary>Cluster example</summary>
 
 ```json
 {
@@ -183,7 +205,12 @@ Engine-specific parameters:
 }
 ```
 
+</details>
+
 ## Image Response Example
+
+<details>
+<summary>Image result example</summary>
 
 ```json
 {
@@ -204,6 +231,8 @@ Engine-specific parameters:
   "engine": "bing"
 }
 ```
+
+</details>
 
 ## Error Responses
 
@@ -241,6 +270,8 @@ Simple global proxy:
 
 Advanced proxy configuration is available in [config.yaml](./config.yaml). You can enable tagged proxy pools and per-request override via `X-Use-Proxy: <tag>` or `X-Use-Proxy: direct`.
 
+A [managed API](https://openserp.org/cloud) is also available for teams that do not want to operate infrastructure.
+
 ## Health & Stats
 
 ```bash
@@ -260,8 +291,10 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE).
 
 Contributions are welcome. See [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md).
 
-## Updates
+## Feedback & Updates
 
-If you want to follow updates to the hosted version — status, changes, and occasional notes on the OSS project — join the [Telegram channel](https://t.me/+RJEKspw3mUlhZDMy).
+- [GitHub Issues](https://github.com/karust/openserp/issues) - bugs, feature ideas, and reproducible issues.
+- [Telegram channel](https://t.me/openserp_cloud) - OpenSERP news, release notes, and project updates. Direct messages are open for quick feedback and hosted API questions.
+- [feedback@openserp.org](mailto:feedback@openserp.org) - private notes, longer feedback, or anything that does not fit GitHub Issues.
 
-###### _"OpenSERP" is the name of this open-source project. The official [website](https://openserp.org). Use of the name in a way that implies affiliation, endorsement, or official status is not permitted._
+###### _"OpenSERP" is the name of this open-source project. The official website is [openserp.org](https://openserp.org). Use of the name in a way that implies affiliation, endorsement, or official status is not permitted._
