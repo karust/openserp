@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const responseIDBytes = 8
@@ -82,6 +83,96 @@ func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 	result.Classification = ClassifyURL(normalizedURL, domain)
 
 	return result
+}
+
+// AppendEnrichedSearchResult preserves the legacy results[] surface while
+// copying any extracted SERP features onto the top-level feature surface.
+func AppendEnrichedSearchResult(env *Envelope, raw SearchResult, ctx EnrichContext, extractedAt time.Time) {
+	var sourceResultID string
+	if raw.URL != "" || raw.Title != "" || raw.Description != "" || raw.Rank != 0 {
+		result := EnrichResult(raw, ctx)
+		env.Results = append(env.Results, result)
+		sourceResultID = result.ID
+	}
+
+	for _, rawFeature := range raw.Features {
+		env.SerpFeatures = append(env.SerpFeatures, EnrichSerpFeature(rawFeature, ctx.Engine, sourceResultID, extractedAt))
+	}
+	if len(raw.Features) == 0 && sourceResultID != "" && shouldMirrorResultAsFeature(raw.Type) {
+		result := env.Results[len(env.Results)-1]
+		env.SerpFeatures = append(env.SerpFeatures, EnrichSerpFeature(SerpFeature{
+			Type:     result.Type,
+			Title:    result.Title,
+			Text:     result.Snippet,
+			Position: result.Position,
+			Links: []FeatureLink{{
+				Title: result.Title,
+				URL:   result.URL,
+			}},
+		}, ctx.Engine, sourceResultID, extractedAt))
+	}
+}
+
+// EnrichSerpFeature stamps a raw feature with stable public fields.
+func EnrichSerpFeature(raw SerpFeature, engine string, sourceResultID string, extractedAt time.Time) SerpFeature {
+	feature := raw
+	feature.Engine = engine
+	if feature.SourceResultIDs == nil {
+		feature.SourceResultIDs = []string{}
+	}
+	if sourceResultID != "" && !containsString(feature.SourceResultIDs, sourceResultID) {
+		feature.SourceResultIDs = append(feature.SourceResultIDs, sourceResultID)
+	}
+	for i := range feature.Links {
+		feature.Links[i].URL = normalizeURL(feature.Links[i].URL)
+	}
+	for i := range feature.Items {
+		feature.Items[i].Link = normalizeURL(feature.Items[i].Link)
+	}
+	if feature.ID == "" {
+		feature.ID = buildFeatureID(feature)
+	}
+	if feature.ExtractedAt == "" {
+		feature.ExtractedAt = extractedAt.UTC().Format(time.RFC3339)
+	}
+	return feature
+}
+
+func buildFeatureID(feature SerpFeature) string {
+	primaryLink := ""
+	if len(feature.Links) > 0 {
+		primaryLink = feature.Links[0].URL
+	}
+	if primaryLink == "" && len(feature.Items) > 0 {
+		primaryLink = feature.Items[0].Link
+	}
+	key := strings.Join([]string{
+		feature.Engine,
+		string(feature.Type),
+		strings.ToLower(strings.TrimSpace(feature.Title)),
+		strings.ToLower(strings.TrimSpace(feature.Text)),
+		primaryLink,
+	}, "|")
+	return "f_" + shortMD5(key)
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldMirrorResultAsFeature(t ResultType) bool {
+	switch t {
+	case ResultTypeAnswerBox, ResultTypeFeaturedSnippet, ResultTypeKnowledgePanel,
+		ResultTypePeopleAlsoAsk, ResultTypeLocal:
+		return true
+	default:
+		return false
+	}
 }
 
 // EnrichImageResult converts a raw engine result into the v2 ImageResult shape.

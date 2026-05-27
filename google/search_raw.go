@@ -29,9 +29,13 @@ func parseGoogleDocument(doc *goquery.Document) []core.SearchResult {
 	adRank := 1
 	absoluteRank := 1
 
-	// Use data attributes instead of class names to find results
-	// Both old and new DOM have data-hveid and data-ved attributes
+	// Prefer the canonical organic result block (div.tF2Cxc, innermost). Fall
+	// back to the broad attribute selector only when no tF2Cxc blocks exist, so
+	// older/alternate SERP layouts still parse.
 	sel := doc.Find(Selectors.Results)
+	if sel.Length() == 0 {
+		sel = doc.Find(Selectors.ResultsBroad)
+	}
 
 	for i := range sel.Nodes {
 		item := sel.Eq(i)
@@ -102,7 +106,7 @@ func parseGoogleDocument(doc *goquery.Document) []core.SearchResult {
 	logrus.WithField("document_size", len(doc.Text())).Trace(
 		fmt.Sprintf("Google search document size: %d", len(doc.Text())),
 	)
-	return core.DeduplicateResults(results)
+	return core.AttachFeaturesToFirstResult(core.DeduplicateResults(results), extractGoogleFeatures(doc))
 }
 
 func classifyGoogleRawHTML(body []byte) error {

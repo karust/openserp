@@ -158,8 +158,19 @@ func classifyContentType(rawURL string) string {
 
 func classifySourceHint(domain string) string {
 	cfg := loadEnrichmentDomains()
-	if hint, ok := cfg.DomainSourceHints[normalizeDomain(domain)]; ok {
+	domain = normalizeDomain(domain)
+	if hint, ok := cfg.DomainSourceHints[domain]; ok {
 		return hint
+	}
+	// Fall back to the registrable domain so subdomain hosts (e.g.
+	// megadeth.fandom.com, zh.m.wikipedia.org) match a hint keyed on the
+	// registrable domain (fandom.com, wikipedia.org).
+	if _, sld := splitDomain(domain); sld != "" {
+		if registrable, err := publicsuffix.EffectiveTLDPlusOne(domain); err == nil {
+			if hint, ok := cfg.DomainSourceHints[registrable]; ok {
+				return hint
+			}
+		}
 	}
 	return ""
 }

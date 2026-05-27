@@ -1,6 +1,11 @@
 domain_source_hints:
   wikipedia.org: encyclopedia
   en.wikipedia.org: encyclopedia
+  zh.wikipedia.org: encyclopedia
+  baike.baidu.com: encyclopedia
+  wiki.mbalib.com: encyclopedia
+  britannica.com: encyclopedia
+  fandom.com: encyclopedia
   github.com: code_repository
   gitlab.com: code_repository
   stackoverflow.com: qa_forum

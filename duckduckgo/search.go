@@ -174,6 +174,7 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 	}()
 
 	allResults := []core.SearchResult{}
+	var pageFeatures []core.SerpFeature
 	searchPage := 0
 
 	// fetchPage loads one SERP page and appends parsed results.
@@ -211,6 +212,9 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 			return false, core.ErrSearchTimeout
 		}
 
+		if query.Features && searchPage == 0 {
+			pageFeatures = extractDDGFeaturesFromPage(page)
+		}
 		allResults = append(allResults, r...)
 		return false, nil
 	}
@@ -236,7 +240,7 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 	deduped = core.LimitOrganicResults(deduped, query.Limit)
 
 	ddg.logger.Info("Search completed: %d results", len(deduped))
-	return deduped, nil
+	return core.AttachFeaturesToFirstResult(deduped, pageFeatures), nil
 }
 
 // SearchImage executes a DuckDuckGo image search and returns normalized image

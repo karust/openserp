@@ -280,8 +280,8 @@ func TestInvalidQueryParametersReturnJSONError(t *testing.T) {
 			reason:  ReasonInvalidParam,
 		},
 		{
-			name:    "invalid answers flag on mega endpoint",
-			path:    "/mega/search?text=golang&answers=notabool",
+			name:    "invalid features flag on mega endpoint",
+			path:    "/mega/search?text=golang&features=notabool",
 			message: "invalid syntax",
 			reason:  ReasonInvalidParam,
 		},

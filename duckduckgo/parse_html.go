@@ -26,7 +26,7 @@ func parseDDGDocument(doc *goquery.Document) []core.SearchResult {
 
 	resultSel := firstMatchingSelector(doc, Selectors.Results)
 	if resultSel == "" {
-		return results
+		return core.AttachFeaturesToFirstResult(results, extractDDGFeatures(doc))
 	}
 
 	doc.Find(resultSel).Each(func(_ int, item *goquery.Selection) {
@@ -62,7 +62,7 @@ func parseDDGDocument(doc *goquery.Document) []core.SearchResult {
 		absoluteRank++
 	})
 
-	return core.DeduplicateResults(results)
+	return core.AttachFeaturesToFirstResult(core.DeduplicateResults(results), extractDDGFeatures(doc))
 }
 
 func duckduckgoSelectionHasAdMarker(item *goquery.Selection) bool {

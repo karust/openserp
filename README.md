@@ -24,6 +24,7 @@ Run it locally, self-host it, or use the optional hosted API when you do not wan
 - 🌐 **Megasearch** - cross-engine aggregation with deduplication
 - 🖼 **Images** - image search is also available
 - 🎯 **Advanced filters** - language, date range, file type, and site queries
+- ✨ **SERP features** - AI summaries, answer boxes, people-also-ask, and related searches in a response
 - 🌍 **Configurable** - proxy, cache, and resilient mode
 - 🐳 **Docker-ready** - local and container deployment
 - 📝 **Data Formats** - JSON, Markdown, Text, NdJSON response formats
@@ -127,10 +128,10 @@ Common parameters:
 
 Engine-specific parameters:
 
-| Parameter | Supported engines | Notes                                                                  |
-| --------- | ----------------- | ---------------------------------------------------------------------- |
-| `filter`  | `google`          | Duplicate filter: `true` hides similar results, `false` includes them. |
-| `answers` | `google`          | Include Google answer boxes in output.                                 |
+| Parameter  | Supported engines | Notes                                                                  |
+| ---------- | ----------------- | ---------------------------------------------------------------------- |
+| `filter`   | `google`          | Duplicate filter: `true` hides similar results, `false` includes them. |
+| `features` | browser `Search`  | Populate `serp_features[]` from the live page .                        |
 
 ## Search Response Example
 

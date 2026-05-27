@@ -4,17 +4,26 @@ package core
 type ResultType string
 
 const (
-	ResultTypeOrganic         ResultType = "organic"
-	ResultTypeAd              ResultType = "ad"
-	ResultTypeFeaturedSnippet ResultType = "featured_snippet"
-	ResultTypeKnowledgePanel  ResultType = "knowledge_panel"
-	ResultTypePeopleAlsoAsk   ResultType = "people_also_ask"
-	ResultTypeVideo           ResultType = "video"
-	ResultTypeImage           ResultType = "image"
-	ResultTypeNews            ResultType = "news"
-	ResultTypeShopping        ResultType = "shopping"
-	ResultTypeLocal           ResultType = "local"
-	ResultTypeAnswerBox       ResultType = "answer_box"
+	ResultTypeOrganic          ResultType = "organic"
+	ResultTypeAd               ResultType = "ad"
+	ResultTypeFeaturedSnippet  ResultType = "featured_snippet"
+	ResultTypeKnowledgePanel   ResultType = "knowledge_panel"
+	ResultTypePeopleAlsoAsk    ResultType = "people_also_ask"
+	ResultTypeVideo            ResultType = "video"
+	ResultTypeImage            ResultType = "image"
+	ResultTypeNews             ResultType = "news"
+	ResultTypeShopping         ResultType = "shopping"
+	ResultTypeLocal            ResultType = "local"
+	ResultTypeAnswerBox        ResultType = "answer_box"
+	ResultTypeAISummary        ResultType = "ai_summary"
+	ResultTypeRelatedQuestions ResultType = "related_questions"
+	ResultTypeRelatedSearches  ResultType = "related_searches"
+	ResultTypeSitelinks        ResultType = "sitelinks"
+	ResultTypeVideos           ResultType = "videos"
+	ResultTypeImagesInline     ResultType = "images_inline"
+	ResultTypeCalculator       ResultType = "calculator"
+	ResultTypeWeather          ResultType = "weather"
+	ResultTypeDictionary       ResultType = "dictionary"
 )
 
 // Position describes where a result sits in the overall result stream.
@@ -38,6 +47,35 @@ type DomainInfo struct {
 type Classification struct {
 	ContentType string `json:"content_type,omitempty"`
 	SourceHint  string `json:"source_hint,omitempty"`
+}
+
+// FeatureItem is one child entry inside a grouped SERP feature.
+type FeatureItem struct {
+	Title string `json:"title,omitempty"`
+	Text  string `json:"text,omitempty"`
+	Link  string `json:"link,omitempty"`
+}
+
+// FeatureLink is a source or citation associated with a SERP feature.
+type FeatureLink struct {
+	Title string `json:"title,omitempty"`
+	URL   string `json:"url,omitempty"`
+}
+
+// SerpFeature is a normalized non-organic SERP module surfaced separately
+// from rankable results.
+type SerpFeature struct {
+	ID              string        `json:"id"`
+	Engine          string        `json:"engine"`
+	Type            ResultType    `json:"type"`
+	Title           string        `json:"title,omitempty"`
+	Text            string        `json:"text,omitempty"`
+	Items           []FeatureItem `json:"items,omitempty"`
+	Links           []FeatureLink `json:"links,omitempty"`
+	SourceResultIDs []string      `json:"source_result_ids,omitempty"`
+	Position        *Position     `json:"position,omitempty"`
+	Confidence      float64       `json:"confidence,omitempty"`
+	ExtractedAt     string        `json:"extracted_at"`
 }
 
 // Result is the v2 normalized result returned in search responses. Optional

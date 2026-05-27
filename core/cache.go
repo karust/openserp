@@ -50,7 +50,7 @@ func BuildCacheKey(engine string, action string, q Query) string {
 		q.Limit,
 		q.Start,
 		q.Filter,
-		q.Answers,
+		q.Features,
 		country,
 		class,
 		provider,

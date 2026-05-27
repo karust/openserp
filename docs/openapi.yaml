@@ -46,7 +46,7 @@ paths:
         - $ref: "#/components/parameters/LimitQuery"
         - $ref: "#/components/parameters/StartQuery"
         - $ref: "#/components/parameters/FilterQuery"
-        - $ref: "#/components/parameters/AnswersQuery"
+        - $ref: "#/components/parameters/FeaturesQuery"
         - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
         - $ref: "#/components/parameters/ProxyURLHeader"
@@ -110,6 +110,19 @@ paths:
                           tld: dev
                           sld: go
                           category: ""
+                    serp_features:
+                      - id: f_a1b2c3d4e5f6a1b2
+                        engine: google
+                        type: ai_summary
+                        text: Go is an open source programming language used for fast, reliable services.
+                        links:
+                          - title: The Go Programming Language
+                            url: https://go.dev/
+                        source_result_ids: [s_a1b2c3d4e5f6a1b2]
+                        position:
+                          absolute: 1
+                        confidence: 0.95
+                        extracted_at: "2026-04-24T12:00:00Z"
                     pagination:
                       page: 1
                       has_more: true
@@ -155,7 +168,7 @@ paths:
         - $ref: "#/components/parameters/LimitQuery"
         - $ref: "#/components/parameters/StartQuery"
         - $ref: "#/components/parameters/FilterQuery"
-        - $ref: "#/components/parameters/AnswersQuery"
+        - $ref: "#/components/parameters/FeaturesQuery"
         - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
         - $ref: "#/components/parameters/ProxyURLHeader"
@@ -307,7 +320,7 @@ paths:
         - $ref: "#/components/parameters/LimitQuery"
         - $ref: "#/components/parameters/StartQuery"
         - $ref: "#/components/parameters/FilterQuery"
-        - $ref: "#/components/parameters/AnswersQuery"
+        - $ref: "#/components/parameters/FeaturesQuery"
         - $ref: "#/components/parameters/EnginesQuery"
         - $ref: "#/components/parameters/MegaModeQuery"
         - $ref: "#/components/parameters/MegaDedupeQuery"
@@ -380,7 +393,7 @@ paths:
         - $ref: "#/components/parameters/LimitQuery"
         - $ref: "#/components/parameters/StartQuery"
         - $ref: "#/components/parameters/FilterQuery"
-        - $ref: "#/components/parameters/AnswersQuery"
+        - $ref: "#/components/parameters/FeaturesQuery"
         - $ref: "#/components/parameters/EnginesQuery"
         - $ref: "#/components/parameters/MegaModeQuery"
         - $ref: "#/components/parameters/MegaDedupeQuery"
@@ -645,11 +658,14 @@ components:
       schema:
         type: boolean
         default: true
-    AnswersQuery:
-      name: answers
+    FeaturesQuery:
+      name: features
       in: query
       required: false
-      description: Include answer box style results when supported.
+      description: >
+        Populate the top-level serp_features array (AI summaries, answer boxes,
+        people-also-ask, related searches) from the live browser search when
+        supported by the engine.
       schema:
         type: boolean
         default: false
@@ -1129,6 +1145,15 @@ components:
         - shopping
         - local
         - answer_box
+        - ai_summary
+        - related_questions
+        - related_searches
+        - sitelinks
+        - videos
+        - images_inline
+        - calculator
+        - weather
+        - dictionary
     Result:
       type: object
       required:
@@ -1186,6 +1211,72 @@ components:
           $ref: "#/components/schemas/DomainInfo"
         classification:
           $ref: "#/components/schemas/Classification"
+    FeatureItem:
+      type: object
+      properties:
+        title:
+          type: string
+          example: "What is OpenSERP?"
+        text:
+          type: string
+          example: "OpenSERP is an open-source SERP API."
+        link:
+          type: string
+          example: https://openserp.org/
+    FeatureLink:
+      type: object
+      properties:
+        title:
+          type: string
+          example: OpenSERP
+        url:
+          type: string
+          example: https://openserp.org/
+    SerpFeature:
+      type: object
+      required: [id, engine, type, extracted_at]
+      properties:
+        id:
+          type: string
+          description: Stable identifier prefixed with `f_`.
+          example: f_a1b2c3d4e5f6a1b2
+        engine:
+          type: string
+          example: google
+        type:
+          $ref: "#/components/schemas/ResultType"
+        title:
+          type: string
+          example: OpenSERP
+        text:
+          type: string
+          description: Primary human-readable feature content.
+          example: OpenSERP is an open-source SERP API.
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeatureItem"
+        links:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeatureLink"
+        source_result_ids:
+          type: array
+          items:
+            type: string
+          example: [s_a1b2c3d4e5f6a1b2]
+        position:
+          $ref: "#/components/schemas/Position"
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          example: 0.95
+        extracted_at:
+          type: string
+          format: date-time
+          example: "2026-04-24T12:00:00Z"
     # ── Image result ─────────────────────────────────────────────────
     ImageData:
       type: object
@@ -1289,7 +1380,7 @@ components:
     # ── Envelopes ─────────────────────────────────────────────────────
     SearchEnvelope:
       type: object
-      required: [query, meta, results, pagination]
+      required: [query, meta, results, serp_features, pagination]
       properties:
         query:
           $ref: "#/components/schemas/QueryEcho"
@@ -1299,6 +1390,13 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Result"
+        serp_features:
+          type: array
+          description: >
+            Non-organic SERP modules such as AI summaries, answer boxes,
+            related questions, related searches, and knowledge panels.
+          items:
+            $ref: "#/components/schemas/SerpFeature"
         pagination:
           $ref: "#/components/schemas/Pagination"
     MegaSearchEnvelope:

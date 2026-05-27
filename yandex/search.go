@@ -196,6 +196,7 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 	}
 
 	allResults := []core.SearchResult{}
+	var pageFeatures []core.SerpFeature
 	const pageSize = 10
 	searchPage, skipOnFirstPage, err := core.ComputePagination(query.Start, pageSize)
 	if err != nil {
@@ -235,6 +236,9 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 		if searchPage == startPage && skipOnFirstPage > 0 {
 			r = skipOrganicResults(r, skipOnFirstPage)
 		}
+		if query.Features && searchPage == startPage {
+			pageFeatures = extractYandexFeaturesFromPage(page)
+		}
 		allResults = append(allResults, r...)
 		return false, nil
 	}
@@ -257,7 +261,8 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 	}
 
 	yand.logger.Info("Search completed: %d results", len(allResults))
-	return core.LimitOrganicResults(core.DeduplicateResults(allResults), query.Limit), nil
+	limited := core.LimitOrganicResults(core.DeduplicateResults(allResults), query.Limit)
+	return core.AttachFeaturesToFirstResult(limited, pageFeatures), nil
 }
 
 // SearchImage executes a Yandex image search and returns normalized image

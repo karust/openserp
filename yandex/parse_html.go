@@ -26,6 +26,13 @@ func parseYandexDocument(doc *goquery.Document) []core.SearchResult {
 	absoluteRank := 1
 
 	doc.Find(Selectors.Results).Each(func(_ int, item *goquery.Selection) {
+		// The neuro/AI answer renders as a serp-item li too, so it would be
+		// caught here as an organic row. It is surfaced separately as an
+		// ai_summary serp_feature; skip it from the rankable result stream.
+		if isYandexNeuroAnswer(item) {
+			return
+		}
+
 		// Skip blocks without a result heading (filters out non-organic blocks
 		// that share the result-row container).
 		titleTag := item.Find(Selectors.Title).First()
@@ -90,7 +97,15 @@ func parseYandexDocument(doc *goquery.Document) []core.SearchResult {
 		absoluteRank++
 	})
 
-	return core.DeduplicateResults(results)
+	return core.AttachFeaturesToFirstResult(core.DeduplicateResults(results), extractYandexFeatures(doc))
+}
+
+// isYandexNeuroAnswer reports whether a serp-item is the AI/neuro answer card.
+func isYandexNeuroAnswer(item *goquery.Selection) bool {
+	if name, ok := item.Attr("data-fast-name"); ok && name == "neuro_answer" {
+		return true
+	}
+	return item.Find("[data-fast-name='neuro_answer']").Length() > 0
 }
 
 func yandexSelectionHasAdMarker(item *goquery.Selection) bool {

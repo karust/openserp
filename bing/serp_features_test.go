@@ -1,0 +1,116 @@
+package bing
+
+import (
+	"bytes"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/karust/openserp/core"
+)
+
+// TestParseHTMLFixtureExtractsRealFeatures guards selectors against the
+// sanitized real-SERP fixture (related searches present; the noisy b_ans
+// "detailed look"/"searches you might like" modules must not be emitted as
+// answer boxes).
+func TestParseHTMLFixtureExtractsRealFeatures(t *testing.T) {
+	t.Parallel()
+	f, err := os.Open("testdata/search_results.html")
+	if err != nil {
+		t.Fatalf("open fixture: %v", err)
+	}
+	defer f.Close()
+
+	results, err := ParseHTML(f)
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+	assertFeatureType(t, results, core.ResultTypeRelatedSearches)
+	// The fixture carries a developer/rich answer card flagged as AI-generated.
+	assertFeatureType(t, results, core.ResultTypeAISummary)
+	for _, r := range results {
+		for _, feature := range r.Features {
+			if feature.Type == core.ResultTypeAnswerBox && feature.Title == "Get a detailed look atpizza delivery" {
+				t.Fatalf("related-search module leaked into answer_box: %#v", feature)
+			}
+		}
+	}
+
+	// Descriptions must be whitespace-collapsed: Bing leaves raw newlines and
+	// source indentation in snippet markup, which previously surfaced verbatim.
+	for i, r := range results {
+		if strings.ContainsAny(r.Description, "\n\t") {
+			t.Fatalf("result %d description has raw whitespace: %q", i, r.Description)
+		}
+	}
+}
+
+func TestParseHTMLExtractsSerpFeatures(t *testing.T) {
+	t.Parallel()
+
+	html := `
+<ol id="b_results">
+  <li class="b_ans">
+    <h2>Bing answer</h2>
+    <div class="b_focusTextLarge">Bing answer text.</div>
+    <div class="b_caption"><p>Source snippet</p></div>
+    <a href="https://example.com/source">Source</a>
+  </li>
+  <li class="b_rrsr">
+    <h2>People also ask</h2>
+    <ul>
+      <li><a href="https://example.com/question">What is OpenSERP?</a></li>
+    </ul>
+  </li>
+  <li class="b_algo">
+    <h2><a href="https://example.com/result">Organic result</a></h2>
+    <div class="b_caption"><p>Snippet</p></div>
+  </li>
+</ol>`
+
+	results, err := ParseHTML(bytes.NewReader([]byte(html)))
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+	assertFeatureType(t, results, core.ResultTypeAnswerBox)
+	assertFeatureType(t, results, core.ResultTypeRelatedQuestions)
+}
+
+func TestParseHTMLOrganicOnlyHasNoSerpFeatures(t *testing.T) {
+	t.Parallel()
+
+	html := `
+<ol id="b_results">
+  <li class="b_algo">
+    <h2><a href="https://example.com/result">Organic result</a></h2>
+    <div class="b_caption"><p>Snippet</p></div>
+  </li>
+</ol>`
+
+	results, err := ParseHTML(bytes.NewReader([]byte(html)))
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+	assertNoFeatures(t, results)
+}
+
+func assertFeatureType(t *testing.T, results []core.SearchResult, want core.ResultType) {
+	t.Helper()
+	for _, result := range results {
+		for _, feature := range result.Features {
+			if feature.Type == want {
+				return
+			}
+		}
+	}
+	t.Fatalf("expected feature type %q in %#v", want, results)
+}
+
+func assertNoFeatures(t *testing.T, results []core.SearchResult) {
+	t.Helper()
+	for _, result := range results {
+		if len(result.Features) > 0 {
+			t.Fatalf("expected no features, got %#v", result.Features)
+		}
+	}
+}

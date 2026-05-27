@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 func TestParseHTML(t *testing.T) {
@@ -36,6 +38,61 @@ func TestParseHTML(t *testing.T) {
 		}
 		if !strings.HasPrefix(r.URL, "http") {
 			t.Fatalf("result %d: URL not absolute: %s", i, r.URL)
+		}
+	}
+}
+
+// TestParseHTMLFixtureResultQuality locks in the real-SERP parser fixes:
+// the parser keys on canonical div.tF2Cxc result blocks (no broad data-hveid
+// sweep), reaches every organic block in the fixture, and never concatenates
+// sibling titles into one. The fixture's organic URLs are sanitized to a single
+// placeholder, so DeduplicateResults collapses the public ParseHTML output to
+// one row; to prove the selector still walks past the first result we read the
+// distinct titles at the document level (pre-dedup), since titles aren't
+// sanitized and so still distinguish the separate results.
+func TestParseHTMLFixtureResultQuality(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("testdata/search_results.html")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+
+	titles := map[string]struct{}{}
+	doc.Find(Selectors.Results).Each(func(_ int, item *goquery.Selection) {
+		title := strings.TrimSpace(item.Find(Selectors.Title).First().Text())
+		if title == "" {
+			return
+		}
+		// A concatenated title (two h3s swept from a broad container) shows up as
+		// an implausibly long title; real organic titles stay well under 200 runes.
+		if len([]rune(title)) > 200 {
+			t.Fatalf("title looks concatenated: %q", title)
+		}
+		titles[title] = struct{}{}
+	})
+	// More than one distinct title proves the selector matched separate results
+	// and walked past the first, rather than locking onto one over-broad container.
+	if len(titles) < 2 {
+		t.Fatalf("expected the canonical selector to reach multiple distinct organic results, got %d", len(titles))
+	}
+
+	// The public parser must still return at least one well-formed result.
+	results, err := ParseHTML(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+	for i, r := range results {
+		if r.Rank != i+1 {
+			t.Fatalf("rank sequence broken at index %d: got %d, want %d", i, r.Rank, i+1)
 		}
 	}
 }

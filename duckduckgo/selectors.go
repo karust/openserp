@@ -42,14 +42,21 @@ var Selectors = struct {
 		"unusual traffic",
 		"anomaly",
 	},
+	// Results selectors target the canonical result card. The data-testid cards
+	// are the innermost result element; selecting them avoids double-counting the
+	// li[data-layout] wrapper that encloses each one (which previously inflated
+	// ranks to 1,3,5,...). li[data-layout] is kept only as a fallback for older
+	// markup that lacks data-testid. wikinlp/about layouts are deliberately
+	// excluded here — they are instant-answer modules surfaced as serp_features.
 	Results: []string{
-		"article[data-testid='result'], article[data-testid='ad'], li[data-layout='organic'], li[data-layout='ad'], div[data-testid='result'], div[data-testid='ad']",
+		"article[data-testid='result'], article[data-testid='ad'], div[data-testid='result'], div[data-testid='ad']",
 		"article[data-testid='result']",
 		"article[data-testid='ad']",
-		"li[data-layout='organic']",
-		"li[data-layout='ad']",
 		"div[data-testid='result']",
 		"div[data-testid='ad']",
+		"li[data-layout='organic'], li[data-layout='ad']",
+		"li[data-layout='organic']",
+		"li[data-layout='ad']",
 		"div.result",
 	},
 	Title: []string{

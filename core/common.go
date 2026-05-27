@@ -111,6 +111,8 @@ type SearchResult struct {
 	Description string `json:"description"`
 	// Ad reports whether the result is sponsored.
 	Ad bool `json:"ad"`
+	// Features carries extracted SERP modules alongside the legacy result stream.
+	Features []SerpFeature `json:"-"`
 }
 
 // DeduplicateResults removes items with duplicate URLs and returns a result set
@@ -244,9 +246,11 @@ type Query struct {
 	// Filter controls duplicate filtering when supported by the engine.
 	// For Google, false includes similar results and true hides them.
 	Filter bool
-	// Answers enables parsing answer modules when supported by the engine.
-	// Such entries may be returned with non-positive internal rank values.
-	Answers bool
+	// Features enables parsing SERP feature modules (AI summaries, answer boxes,
+	// people-also-ask, related searches) on the browser Search path when
+	// supported by the engine. Such entries may be returned with non-positive
+	// internal rank values.
+	Features bool
 	// ProxyURL is a direct proxy URL used by raw HTTP search paths.
 	ProxyURL string
 	// ProxyCountry identifies the proxy market country for cache/error metadata.
@@ -273,9 +277,9 @@ func (q Query) String() string {
 		maskedProxyURL = MaskProxyURL(q.ProxyURL)
 	}
 	return fmt.Sprintf(
-		"{Text:%s LangCode:%s Region:%s DateInterval:%s Filetype:%s Site:%s Limit:%d Start:%d Filter:%t Answers:%t ProxyURL:%s ProxyCountry:%s ProxyClass:%s ProxyProvider:%s ProxySessionID:%s ProxyOverride:%s Insecure:%t}",
+		"{Text:%s LangCode:%s Region:%s DateInterval:%s Filetype:%s Site:%s Limit:%d Start:%d Filter:%t Features:%t ProxyURL:%s ProxyCountry:%s ProxyClass:%s ProxyProvider:%s ProxySessionID:%s ProxyOverride:%s Insecure:%t}",
 		q.Text, q.LangCode, q.Region, q.DateInterval, q.Filetype, q.Site,
-		q.Limit, q.Start, q.Filter, q.Answers,
+		q.Limit, q.Start, q.Filter, q.Features,
 		maskedProxyURL, q.ProxyCountry, q.ProxyClass, q.ProxyProvider,
 		q.ProxySessionID, q.ProxyOverride, q.Insecure,
 	)
@@ -340,9 +344,9 @@ func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 		return errInvalidParam(fmt.Sprintf("filter: %v", err))
 	}
 
-	searchQuery.Answers, err = strconv.ParseBool(reqCtx.Query("answers", "0"))
+	searchQuery.Features, err = strconv.ParseBool(reqCtx.Query("features", "0"))
 	if err != nil {
-		return errInvalidParam(fmt.Sprintf("answers: %v", err))
+		return errInvalidParam(fmt.Sprintf("features: %v", err))
 	}
 
 	searchQuery.ProxyOverride, err = NormalizeProxyRequestOverride(reqCtx.Get("X-Use-Proxy"))

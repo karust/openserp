@@ -141,10 +141,12 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 	// nextRank counts up across pages for organic results; nextAdRank counts
 	// up within sponsored results so ad rank stays separate from SEO rank.
 	all := []core.SearchResult{}
+	var pageFeatures []core.SerpFeature
 	pageNum, nextRank, err := startPage(query.Start)
 	if err != nil {
 		return nil, err
 	}
+	firstPage := pageNum
 	nextAdRank := 1
 	// fetchPage loads one SERP page and appends parsed results.
 	// Returns (done, error): done=true ends the outer loop without error.
@@ -195,6 +197,9 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 				nextAdRank++
 			}
 		}
+		if query.Features && pageNum == firstPage {
+			pageFeatures = extractEcosiaFeaturesFromPage(page)
+		}
 		return false, nil
 	}
 
@@ -221,7 +226,7 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 		deduped = core.LimitOrganicResults(deduped, query.Limit)
 	}
 	e.logger.Info("Search completed: %d results", len(deduped))
-	return deduped, nil
+	return core.AttachFeaturesToFirstResult(deduped, pageFeatures), nil
 }
 
 // parseImageResult extracts a single image card into a SearchResult,

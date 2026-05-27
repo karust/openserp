@@ -22,5 +22,13 @@ var Selectors = struct {
 	ImageJSONRoot: []string{"body > pre", "pre"},
 	Link:          "a",
 	Desc:          "div.c-abstract",
-	DescAlt:       []string{".content-right_8Zs40", ".summary-gap_3Jb4I"},
+	// DescAlt matches Baidu's hashed abstract containers by class *prefix*
+	// ([class*='summary-gap_']) rather than a frozen hash suffix
+	// (.summary-gap_3Jb4I): Baidu rotates the trailing hash per build (the same
+	// page already carries summary-gap_3Jb4I and summary-gap_68jXq), and the old
+	// content-right_8Zs40 suffix no longer appears at all. These two prefixes are
+	// specific enough to use as substrings. text_ is NOT: it is Baidu's generic
+	// text-styling class reused on dozens of nodes, so the baike abstract body is
+	// pinned to its exact .text_2NOr6 hash and tried last.
+	DescAlt: []string{"[class*='content-right_']", "[class*='summary-gap_']", "div.text_2NOr6"},
 }

@@ -8,6 +8,7 @@ var Selectors = struct {
 	ResultStats  string
 	CookieBtn    string
 	Results      string
+	ResultsBroad string
 	Ad           string
 	Link         string
 	Title        string
@@ -23,10 +24,16 @@ var Selectors = struct {
 	ImageLinkFallback string
 	ImageTitle        []string
 }{
-	Captcha:      "div[data-sitekey]",
-	ResultStats:  "div#result-stats",
-	CookieBtn:    "div[role='dialog'][aria-modal] button",
-	Results:      "div[data-hveid][data-ved]",
+	Captcha:     "div[data-sitekey]",
+	ResultStats: "div#result-stats",
+	CookieBtn:   "div[role='dialog'][aria-modal] button",
+	// Results targets the canonical organic result block. div.tF2Cxc is the
+	// stable per-result wrapper; the :not(:has(div.tF2Cxc)) guard keeps only the
+	// innermost block so nested knowledge-panel cards (which reuse tF2Cxc) don't
+	// double-count or concatenate sibling titles. ResultsBroad is the legacy
+	// attribute selector, kept as a fallback for SERP layouts without tF2Cxc.
+	Results:      "div.tF2Cxc:not(:has(div.tF2Cxc))",
+	ResultsBroad: "div[data-hveid][data-ved]",
 	Ad:           "div[data-text-ad], [data-text-ad]",
 	Link:         "a",
 	Title:        "h3",

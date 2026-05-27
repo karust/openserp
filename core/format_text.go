@@ -21,6 +21,11 @@ func RenderText(env *Envelope) []byte {
 	}
 	b.WriteString("\n")
 
+	renderTextFeatures(&b, env.SerpFeatures, featureRenderOrderBeforeResults())
+
+	if len(env.Results) > 0 {
+		b.WriteString("Results\n\n")
+	}
 	for i, r := range env.Results {
 		fmt.Fprintf(&b, "[%d] %s (%s)\n", i+1, r.Title, r.Domain)
 		if r.Snippet != "" {
@@ -28,6 +33,8 @@ func RenderText(env *Envelope) []byte {
 		}
 		fmt.Fprintf(&b, "URL: %s\n\n", r.URL)
 	}
+
+	renderTextFeatures(&b, env.SerpFeatures, featureRenderOrderAfterResults())
 
 	return []byte(b.String())
 }
@@ -47,17 +54,14 @@ func RenderTextImage(env *ImageEnvelope) []byte {
 	return []byte(b.String())
 }
 
-// RenderNDJSON formats an Envelope as newline-delimited JSON (one Result per line).
-// The envelope meta is omitted from the body; clients should read response headers.
+// RenderNDJSON formats an Envelope as newline-delimited JSON.
 func RenderNDJSON(env *Envelope) []byte {
 	var b strings.Builder
 	for _, r := range env.Results {
-		data, err := json.Marshal(r)
-		if err != nil {
-			continue
-		}
-		b.Write(data)
-		b.WriteByte('\n')
+		writeNDJSONLine(&b, "result", r)
+	}
+	for _, feature := range env.SerpFeatures {
+		writeNDJSONLine(&b, "feature", feature)
 	}
 	return []byte(b.String())
 }
@@ -66,12 +70,139 @@ func RenderNDJSON(env *Envelope) []byte {
 func RenderNDJSONImage(env *ImageEnvelope) []byte {
 	var b strings.Builder
 	for _, r := range env.Results {
-		data, err := json.Marshal(r)
-		if err != nil {
-			continue
-		}
-		b.Write(data)
-		b.WriteByte('\n')
+		writeNDJSONLine(&b, "result", r)
 	}
 	return []byte(b.String())
+}
+
+func renderTextFeatures(b *strings.Builder, features []SerpFeature, order []ResultType) {
+	for _, featureType := range order {
+		for _, feature := range features {
+			if feature.Type != featureType {
+				continue
+			}
+			renderTextFeature(b, feature)
+		}
+	}
+}
+
+func renderTextFeature(b *strings.Builder, feature SerpFeature) {
+	heading := featureHeading(feature)
+	if feature.Type == ResultTypeKnowledgePanel && feature.Title != "" {
+		heading += " - " + feature.Title
+	}
+	fmt.Fprintf(b, "%s\n", heading)
+	if feature.Text != "" {
+		fmt.Fprintf(b, "%s", feature.Text)
+		if len(feature.Links) == 1 {
+			fmt.Fprintf(b, " (source: %s)", feature.Links[0].URL)
+		}
+		b.WriteString("\n")
+	}
+	for _, item := range feature.Items {
+		switch {
+		case item.Title != "" && item.Text != "":
+			fmt.Fprintf(b, "- %s - %s\n", item.Title, item.Text)
+		case item.Text != "":
+			fmt.Fprintf(b, "- %s\n", item.Text)
+		case item.Title != "":
+			fmt.Fprintf(b, "- %s\n", item.Title)
+		}
+	}
+	if len(feature.Links) > 1 {
+		b.WriteString("Sources:\n")
+		for _, link := range feature.Links {
+			fmt.Fprintf(b, "- %s\n", link.URL)
+		}
+	}
+	b.WriteString("\n")
+}
+
+func writeNDJSONLine(b *strings.Builder, kind string, value any) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return
+	}
+	var object map[string]any
+	if err := json.Unmarshal(data, &object); err != nil {
+		return
+	}
+	object["kind"] = kind
+	data, err = json.Marshal(object)
+	if err != nil {
+		return
+	}
+	b.Write(data)
+	b.WriteByte('\n')
+}
+
+// featureRenderOrderBeforeResults lists the feature sections rendered above the
+// results list, in fixed order (spec: AI summary -> answer box -> featured
+// snippet -> PAA -> related questions -> knowledge panel -> results -> ...).
+func featureRenderOrderBeforeResults() []ResultType {
+	return []ResultType{
+		ResultTypeAISummary,
+		ResultTypeAnswerBox,
+		ResultTypeFeaturedSnippet,
+		ResultTypePeopleAlsoAsk,
+		ResultTypeRelatedQuestions,
+		ResultTypeKnowledgePanel,
+	}
+}
+
+// featureRenderOrderAfterResults lists the feature sections rendered below the
+// results list (related searches and the module gallery), in fixed order.
+func featureRenderOrderAfterResults() []ResultType {
+	return []ResultType{
+		ResultTypeRelatedSearches,
+		ResultTypeNews,
+		ResultTypeVideo,
+		ResultTypeVideos,
+		ResultTypeShopping,
+		ResultTypeImagesInline,
+		ResultTypeLocal,
+		ResultTypeSitelinks,
+		ResultTypeCalculator,
+		ResultTypeWeather,
+		ResultTypeDictionary,
+	}
+}
+
+func featureHeading(feature SerpFeature) string {
+	switch feature.Type {
+	case ResultTypeAISummary:
+		return "AI summary"
+	case ResultTypeAnswerBox:
+		return "Answer box"
+	case ResultTypeFeaturedSnippet:
+		return "Featured snippet"
+	case ResultTypePeopleAlsoAsk:
+		return "People also ask"
+	case ResultTypeRelatedQuestions:
+		return "Related questions"
+	case ResultTypeKnowledgePanel:
+		return "Knowledge panel"
+	case ResultTypeRelatedSearches:
+		return "Related searches"
+	case ResultTypeNews:
+		return "News"
+	case ResultTypeVideo, ResultTypeVideos:
+		return "Videos"
+	case ResultTypeShopping:
+		return "Shopping"
+	case ResultTypeImagesInline:
+		return "Images"
+	case ResultTypeLocal:
+		return "Local pack"
+	case ResultTypeSitelinks:
+		return "Sitelinks"
+	case ResultTypeCalculator:
+		return "Calculator"
+	case ResultTypeWeather:
+		return "Weather"
+	case ResultTypeDictionary:
+		return "Dictionary"
+	default:
+		return strings.ReplaceAll(string(feature.Type), "_", " ")
+	}
 }

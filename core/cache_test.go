@@ -126,7 +126,7 @@ func TestBuildCacheKeyChangesWithPaginationAndFlags(t *testing.T) {
 		Limit:    10,
 		Start:    0,
 		Filter:   true,
-		Answers:  false,
+		Features: false,
 	}
 
 	baseKey := BuildCacheKey("google", "search", base)
@@ -141,7 +141,7 @@ func TestBuildCacheKeyChangesWithPaginationAndFlags(t *testing.T) {
 		Limit:    10,
 		Start:    0,
 		Filter:   true,
-		Answers:  false,
+		Features: false,
 	}); changed == baseKey {
 		t.Fatal("expected region to affect cache key")
 	}
@@ -151,7 +151,7 @@ func TestBuildCacheKeyChangesWithPaginationAndFlags(t *testing.T) {
 		Limit:    20,
 		Start:    0,
 		Filter:   true,
-		Answers:  false,
+		Features: false,
 	}); changed == baseKey {
 		t.Fatal("expected limit to affect cache key")
 	}
@@ -161,7 +161,7 @@ func TestBuildCacheKeyChangesWithPaginationAndFlags(t *testing.T) {
 		Limit:    10,
 		Start:    10,
 		Filter:   true,
-		Answers:  false,
+		Features: false,
 	}); changed == baseKey {
 		t.Fatal("expected start to affect cache key")
 	}
@@ -171,7 +171,7 @@ func TestBuildCacheKeyChangesWithPaginationAndFlags(t *testing.T) {
 		Limit:    10,
 		Start:    0,
 		Filter:   false,
-		Answers:  false,
+		Features: false,
 	}); changed == baseKey {
 		t.Fatal("expected filter to affect cache key")
 	}
@@ -181,9 +181,9 @@ func TestBuildCacheKeyChangesWithPaginationAndFlags(t *testing.T) {
 		Limit:    10,
 		Start:    0,
 		Filter:   true,
-		Answers:  true,
+		Features: true,
 	}); changed == baseKey {
-		t.Fatal("expected answers to affect cache key")
+		t.Fatal("expected features to affect cache key")
 	}
 }
 

@@ -3,6 +3,7 @@ package baidu
 import (
 	"bytes"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +38,41 @@ func TestParseBaiduHTML(t *testing.T) {
 	}
 	if rank == 0 {
 		t.Fatal("expected at least one organic result")
+	}
+}
+
+// TestParseBaiduHTMLParsesBaike locks in two fixes: baike/encyclopedia cards
+// (div.result-op.c-container, tpl=bk_polysemy) are parsed alongside organic
+// www_index cards instead of being dropped by first-selector-wins, and op
+// "People also search" cards (relative /s? links) are excluded as non-organic.
+func TestParseBaiduHTMLParsesBaike(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("testdata/search_results.html")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	results, err := ParseHTML(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+
+	foundBaike := false
+	for i, r := range results {
+		if strings.Contains(strings.ToLower(r.Title), "baike") ||
+			strings.Contains(strings.ToLower(r.Title), "encyclopedia") {
+			foundBaike = true
+			if strings.TrimSpace(r.Description) == "" {
+				t.Fatalf("baike result %d has empty description", i)
+			}
+		}
+		// Op cards link to relative on-site search; organic results must not.
+		if strings.HasPrefix(r.URL, "/") {
+			t.Fatalf("result %d has a relative (non-organic) URL: %s", i, r.URL)
+		}
+	}
+	if !foundBaike {
+		t.Fatal("expected a baidu baike/encyclopedia result to be parsed")
 	}
 }
 

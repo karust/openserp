@@ -229,6 +229,9 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 
 	deduped = core.LimitOrganicResults(deduped, query.Limit)
 
+	if query.Features {
+		deduped = core.AttachFeaturesToFirstResult(deduped, extractBingFeaturesFromPage(page))
+	}
 	return deduped, nil
 }
 

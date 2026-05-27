@@ -217,8 +217,8 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 		return nil, core.ErrCaptcha
 	}
 
-	// Accept cookie consent to get google answers
-	if query.Answers {
+	// Accept cookie consent so Google renders its SERP feature modules
+	if query.Features {
 		gogl.acceptCookies(page)
 	}
 
@@ -254,7 +254,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 		srchRes := core.SearchResult{}
 
 		isAd := googleElementHasAdMarker(resEl)
-		isAnswerBox := query.Answers && core.HasAttribute(resEl, "data-ulkwtsb") && !core.HasAttribute(resEl, "data-ispaa")
+		isAnswerBox := query.Features && core.HasAttribute(resEl, "data-ulkwtsb") && !core.HasAttribute(resEl, "data-ispaa")
 		isResultCandidate := core.HasAttribute(resEl, "data-ved")
 
 		if isAd {
@@ -458,6 +458,9 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			return nil, nil
 		}
 		return nil, core.ErrSearchTimeout
+	}
+	if query.Features {
+		deduped = core.AttachFeaturesToFirstResult(deduped, extractGoogleFeaturesFromPage(page))
 	}
 	return deduped, nil
 }

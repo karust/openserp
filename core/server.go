@@ -331,7 +331,7 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 	}
 	ectx := EnrichContext{Engine: usedEngine, Query: q}
 	for _, r := range res {
-		env.Results = append(env.Results, EnrichResult(r, ectx))
+		AppendEnrichedSearchResult(env, r, ectx, startedAt)
 	}
 	env.Finalize(startedAt, q)
 
@@ -382,7 +382,7 @@ func (s *Server) handleParseEndpoint(c *fiber.Ctx, parser HTMLParser) error {
 	env := NewEnvelope(q, requestID, startedAt, []string{parser.Name()})
 	ectx := EnrichContext{Engine: parser.Name(), Query: q}
 	for _, r := range results {
-		env.Results = append(env.Results, EnrichResult(r, ectx))
+		AppendEnrichedSearchResult(env, r, ectx, startedAt)
 	}
 	env.Finalize(startedAt, q)
 
@@ -1021,7 +1021,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string) error {
 	env.Meta.EngineErrors = engineErrors
 	for _, r := range webResults {
 		ectx := EnrichContext{Engine: r.Engine, Query: q}
-		env.Results = append(env.Results, EnrichResult(r.SearchResult, ectx))
+		AppendEnrichedSearchResult(env, r.SearchResult, ectx, startedAt)
 	}
 	env.Finalize(startedAt, q)
 

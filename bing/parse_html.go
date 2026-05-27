@@ -76,7 +76,7 @@ func parseBingDocument(doc *goquery.Document) []core.SearchResult {
 		absoluteRank++
 	})
 
-	return core.DeduplicateResults(results)
+	return core.AttachFeaturesToFirstResult(core.DeduplicateResults(results), extractBingFeatures(doc))
 }
 
 func extractFirstText(item *goquery.Selection, selectors []string) string {
@@ -96,23 +96,30 @@ func extractFirstText(item *goquery.Selection, selectors []string) string {
 }
 
 // descriptionFromItem extracts a description using the same 4-step fallback
-// chain as the rod-based browser parser.
+// chain as the rod-based browser parser. Bing renders snippet text with heavy
+// source-indentation whitespace, so each candidate is whitespace-collapsed.
 func descriptionFromItem(item *goquery.Selection, title string) string {
 	if descTag := item.Find(Selectors.DescPrimary).First(); descTag.Length() > 0 {
-		if text := strings.TrimSpace(descTag.Text()); text != "" {
+		if text := normalizeWhitespace(descTag.Text()); text != "" {
 			return text
 		}
 	}
 	if descTag := item.Find(Selectors.DescFallback).First(); descTag.Length() > 0 {
-		if text := strings.TrimSpace(descTag.Text()); text != "" {
+		if text := normalizeWhitespace(descTag.Text()); text != "" {
 			return text
 		}
 	}
 	if descTag := item.Find(Selectors.DescAny).First(); descTag.Length() > 0 {
-		if text := strings.TrimSpace(descTag.Text()); text != "" {
+		if text := normalizeWhitespace(descTag.Text()); text != "" {
 			return text
 		}
 	}
 	// Structural fallback: strip title from full text
-	return strings.TrimSpace(strings.Replace(item.Text(), title, "", 1))
+	return normalizeWhitespace(strings.Replace(item.Text(), title, "", 1))
+}
+
+// normalizeWhitespace collapses runs of whitespace (including the newlines and
+// indentation Bing leaves in snippet markup) into single spaces.
+func normalizeWhitespace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }

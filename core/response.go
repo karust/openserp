@@ -37,10 +37,11 @@ type Pagination struct {
 
 // Envelope is the top-level v2 response wrapper for all search endpoints.
 type Envelope struct {
-	Query      QueryEcho    `json:"query"`
-	Meta       ResponseMeta `json:"meta"`
-	Results    []Result     `json:"results"`
-	Pagination Pagination   `json:"pagination"`
+	Query        QueryEcho     `json:"query"`
+	Meta         ResponseMeta  `json:"meta"`
+	Results      []Result      `json:"results"`
+	SerpFeatures []SerpFeature `json:"serp_features"`
+	Pagination   Pagination    `json:"pagination"`
 	// Clusters is only populated by /mega/search (see clusters.go).
 	Clusters *[]Cluster `json:"clusters,omitempty"`
 }
@@ -91,8 +92,9 @@ func NewEnvelope(q Query, requestID string, startedAt time.Time, engines []strin
 			EnginesFailed: []string{},
 			Version:       apiVersion,
 		},
-		Results:    []Result{},
-		Pagination: Pagination{},
+		Results:      []Result{},
+		SerpFeatures: []SerpFeature{},
+		Pagination:   Pagination{},
 	}
 }
 

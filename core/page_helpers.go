@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/go-rod/rod"
 )
 
@@ -165,4 +166,20 @@ func FirstNonEmptyAttribute(root *rod.Element, attr string, selectors ...string)
 		}
 	}
 	return ""
+}
+
+// FeaturesFromPage renders a live rod page to HTML and runs a document-level
+// feature extractor over it. Every engine's browser path shares this boilerplate
+// (page.HTML -> goquery doc -> extract), so it lives here rather than being
+// copied per engine. Returns nil on any rendering/parse error.
+func FeaturesFromPage(page *rod.Page, extract func(*goquery.Document) []SerpFeature) []SerpFeature {
+	html, err := page.HTML()
+	if err != nil {
+		return nil
+	}
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil
+	}
+	return extract(doc)
 }

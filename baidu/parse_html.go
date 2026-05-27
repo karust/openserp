@@ -19,12 +19,13 @@ func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
 }
 
 func parseBaiduDocument(doc *goquery.Document) []core.SearchResult {
-	for _, selector := range baiduResultSelectors() {
-		if results := parseBaiduSelection(doc.Find(selector)); len(results) > 0 {
-			return results
-		}
-	}
-	return nil
+	features := extractBaiduFeatures(doc)
+	// Match all result-card variants in one pass so DOM order is preserved and
+	// every card type (organic www_index, baike/encyclopedia, op cards) is
+	// collected. Selecting one variant at a time and returning on the first hit
+	// dropped baike and other result-op cards that interleave with organic rows.
+	results := parseBaiduSelection(doc.Find(baiduResultSelector()))
+	return core.AttachFeaturesToFirstResult(results, features)
 }
 
 func baiduResultSelectors() []string {
@@ -32,6 +33,10 @@ func baiduResultSelectors() []string {
 	selectors = append(selectors, Selectors.Results)
 	selectors = append(selectors, Selectors.ResultsAlt...)
 	return selectors
+}
+
+func baiduResultSelector() string {
+	return strings.Join(baiduResultSelectors(), ", ")
 }
 
 func parseBaiduSelection(sel *goquery.Selection) []core.SearchResult {
@@ -79,6 +84,21 @@ func parseBaiduSelection(sel *goquery.Selection) []core.SearchResult {
 		href = strings.TrimSpace(href)
 		if href == "" || href == "#" || strings.HasPrefix(href, "javascript:") {
 			return
+		}
+		// Organic Baidu results link out through an absolute redirect
+		// (http://www.baidu.com/link?url=...). Op cards like "People also search"
+		// (tpl=recommend_list) instead carry relative on-site search links
+		// (/s?wd=...); treat those as related-search modules, not organic rows.
+		if strings.HasPrefix(href, "/") {
+			return
+		}
+		// Baidu result cards carry the canonical destination in the mu= attribute
+		// (e.g. baike.baidu.com, britannica.com), while the visible link is an
+		// opaque www.baidu.com/link?url= redirect. Prefer mu= so callers get the
+		// real URL, which also enables domain-based classification (encyclopedia,
+		// news, etc.) downstream.
+		if mu := canonicalBaiduURL(item); mu != "" {
+			href = mu
 		}
 
 		desc := ""
@@ -132,6 +152,29 @@ func parseBaiduSelection(sel *goquery.Selection) []core.SearchResult {
 		deduped[i].Rank = organicIdx
 	}
 	return deduped
+}
+
+// canonicalBaiduURL returns the card's mu= destination when it is an absolute
+// http(s) URL. The attribute lives on the result-card container; when the title
+// link is nested, walk up to the nearest ancestor that carries it.
+func canonicalBaiduURL(item *goquery.Selection) string {
+	mu := strings.TrimSpace(firstAttrValue(item, "mu"))
+	if mu == "" {
+		if host := item.Closest("[mu]"); host.Length() > 0 {
+			mu = strings.TrimSpace(firstAttrValue(host, "mu"))
+		}
+	}
+	if strings.HasPrefix(mu, "http://") || strings.HasPrefix(mu, "https://") {
+		return mu
+	}
+	return ""
+}
+
+func firstAttrValue(item *goquery.Selection, name string) string {
+	if value, ok := item.Attr(name); ok {
+		return value
+	}
+	return ""
 }
 
 func baiduSelectionHasAdMarker(item *goquery.Selection) bool {

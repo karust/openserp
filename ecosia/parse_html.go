@@ -42,7 +42,7 @@ func parseEcosiaDocument(doc *goquery.Document) []core.SearchResult {
 	})
 
 	setSeparatedAdAbsoluteRanks(results, 0)
-	return core.DeduplicateResults(results)
+	return core.AttachFeaturesToFirstResult(core.DeduplicateResults(results), extractEcosiaFeatures(doc))
 }
 
 func parseEcosiaItem(item *goquery.Selection, rank int, ad bool) (core.SearchResult, bool) {
