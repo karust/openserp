@@ -315,6 +315,11 @@ func (q Query) IsEmpty() bool {
 // MaxQueryLimit is the maximum allowed value for the limit parameter.
 const MaxQueryLimit = 100
 
+// defaultQueryLimit is the assumed limit when a request omits it (InitFromContext)
+// and the fallback used by pagination math for internally-built queries that
+// leave Limit unset.
+const defaultQueryLimit = 10
+
 // InitFromContext populates Query from HTTP query parameters and request
 // headers. It validates numeric/boolean inputs and returns an *APIError for
 // invalid client input (400) or a plain error for internal failures.
@@ -326,7 +331,7 @@ func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 	searchQuery.Filetype = strings.TrimSpace(reqCtx.Query("file"))
 	searchQuery.Site = strings.TrimSpace(reqCtx.Query("site"))
 
-	limitRaw := reqCtx.Query("limit", "10")
+	limitRaw := reqCtx.Query("limit", strconv.Itoa(defaultQueryLimit))
 	limit, err := strconv.Atoi(limitRaw)
 	if err != nil {
 		return errInvalidLimit("limit must be an integer")

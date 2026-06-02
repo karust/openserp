@@ -34,7 +34,7 @@ func RenderText(env *Envelope) []byte {
 		fmt.Fprintf(&b, "URL: %s\n\n", r.URL)
 	}
 
-	renderTextFeatures(&b, env.SerpFeatures, featureRenderOrderAfterResults())
+	renderTextFeatures(&b, env.SerpFeatures, featureRenderOrderAfterResults(env.SerpFeatures))
 
 	return []byte(b.String())
 }
@@ -76,12 +76,20 @@ func RenderNDJSONImage(env *ImageEnvelope) []byte {
 }
 
 func renderTextFeatures(b *strings.Builder, features []SerpFeature, order []ResultType) {
+	forEachFeatureInOrder(features, order, func(feature SerpFeature) {
+		renderTextFeature(b, feature)
+	})
+}
+
+// forEachFeatureInOrder invokes render for every feature whose Type appears in
+// order, type by type. It is the single iteration shared by the text and
+// markdown renderers.
+func forEachFeatureInOrder(features []SerpFeature, order []ResultType, render func(SerpFeature)) {
 	for _, featureType := range order {
 		for _, feature := range features {
-			if feature.Type != featureType {
-				continue
+			if feature.Type == featureType {
+				render(feature)
 			}
-			renderTextFeature(b, feature)
 		}
 	}
 }
@@ -151,9 +159,12 @@ func featureRenderOrderBeforeResults() []ResultType {
 }
 
 // featureRenderOrderAfterResults lists the feature sections rendered below the
-// results list (related searches and the module gallery), in fixed order.
-func featureRenderOrderAfterResults() []ResultType {
-	return []ResultType{
+// results list (related searches and the module gallery), in fixed order. Any
+// feature type present in features but absent from both fixed orders is appended
+// at the end, so a newly added feature enum is never silently dropped from text
+// or markdown output.
+func featureRenderOrderAfterResults(features []SerpFeature) []ResultType {
+	order := []ResultType{
 		ResultTypeRelatedSearches,
 		ResultTypeNews,
 		ResultTypeVideo,
@@ -166,6 +177,20 @@ func featureRenderOrderAfterResults() []ResultType {
 		ResultTypeWeather,
 		ResultTypeDictionary,
 	}
+	placed := make(map[ResultType]bool, len(order)+len(featureRenderOrderBeforeResults()))
+	for _, t := range featureRenderOrderBeforeResults() {
+		placed[t] = true
+	}
+	for _, t := range order {
+		placed[t] = true
+	}
+	for _, feature := range features {
+		if !placed[feature.Type] {
+			order = append(order, feature.Type)
+			placed[feature.Type] = true
+		}
+	}
+	return order
 }
 
 func featureHeading(feature SerpFeature) string {

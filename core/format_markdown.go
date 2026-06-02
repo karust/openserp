@@ -34,7 +34,7 @@ func RenderMarkdown(env *Envelope) []byte {
 		fmt.Fprintf(&b, "-> %s\n\n", r.URL)
 	}
 
-	renderMarkdownFeatures(&b, env.SerpFeatures, featureRenderOrderAfterResults())
+	renderMarkdownFeatures(&b, env.SerpFeatures, featureRenderOrderAfterResults(env.SerpFeatures))
 
 	return []byte(b.String())
 }
@@ -59,14 +59,9 @@ func RenderMarkdownImage(env *ImageEnvelope) []byte {
 }
 
 func renderMarkdownFeatures(b *strings.Builder, features []SerpFeature, order []ResultType) {
-	for _, featureType := range order {
-		for _, feature := range features {
-			if feature.Type != featureType {
-				continue
-			}
-			renderMarkdownFeature(b, feature)
-		}
-	}
+	forEachFeatureInOrder(features, order, func(feature SerpFeature) {
+		renderMarkdownFeature(b, feature)
+	})
 }
 
 func renderMarkdownFeature(b *strings.Builder, feature SerpFeature) {

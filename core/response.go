@@ -124,7 +124,7 @@ func (e *Envelope) Finalize(startedAt time.Time, q Query) {
 
 	limit := q.Limit
 	if limit <= 0 {
-		limit = 25
+		limit = defaultQueryLimit
 	}
 	page := q.Start/limit + 1
 	e.Pagination = Pagination{
@@ -150,7 +150,7 @@ func (e *ImageEnvelope) Finalize(startedAt time.Time, q Query) {
 
 	limit := q.Limit
 	if limit <= 0 {
-		limit = 25
+		limit = defaultQueryLimit
 	}
 	page := q.Start/limit + 1
 	e.Pagination = Pagination{

@@ -104,7 +104,12 @@ func looksLikeCSS(text string) bool {
 		return true
 	}
 	// CSS rule blocks look like "} .cls {" / "} #id {"; prose almost never does.
-	return strings.Contains(text, "} .") || strings.Contains(text, "} #") || strings.Contains(text, "{ ") && strings.Count(text, ": ") > 20 && strings.Count(text, ";") > 20
+	if strings.Contains(text, "} .") || strings.Contains(text, "} #") {
+		return true
+	}
+	// A dense run of "prop: value;" declarations inside a "{ ... }" block is the
+	// other tell for inlined stylesheet text.
+	return strings.Contains(text, "{ ") && strings.Count(text, ": ") > 20 && strings.Count(text, ";") > 20
 }
 
 func extractGoogleFeaturesFromPage(page *rod.Page) []core.SerpFeature {

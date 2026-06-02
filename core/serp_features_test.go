@@ -150,3 +150,25 @@ func TestRenderersIncludeSerpFeatures(t *testing.T) {
 		t.Fatalf("feature ndjson lines missing kind tag: %v", lines)
 	}
 }
+
+// TestRenderFeaturesUnorderedTypeStillRenders guards against silently dropping a
+// feature whose Type is in neither render-order section (e.g. a newly added
+// enum value not yet placed). It must still appear in text and markdown output.
+func TestRenderFeaturesUnorderedTypeStillRenders(t *testing.T) {
+	const unplaced ResultType = "experimental_module"
+	env := NewEnvelope(Query{Text: "openserp"}, "req-1", time.Unix(0, 0), []string{"google"})
+	env.SerpFeatures = append(env.SerpFeatures, SerpFeature{
+		Type: unplaced,
+		Text: "experimental feature body",
+	})
+
+	text := string(RenderText(env))
+	if !strings.Contains(text, "experimental feature body") {
+		t.Fatalf("text output dropped an unordered feature type:\n%s", text)
+	}
+
+	markdown := string(RenderMarkdown(env))
+	if !strings.Contains(markdown, "experimental feature body") {
+		t.Fatalf("markdown output dropped an unordered feature type:\n%s", markdown)
+	}
+}
