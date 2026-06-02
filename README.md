@@ -124,7 +124,7 @@ Common parameters:
 | `date`    | Date range                                                                                                                           | `20250101..20251231`                 |
 | `file`    | File extension                                                                                                                       | `pdf`, `doc`, `xls`                  |
 | `site`    | Site-specific search                                                                                                                 | `github.com`                         |
-| `limit`   | Number of organic results, max 100. Ads may be returned in addition.                                                                 | `10`, `25`, `50`                     |
+| `limit`   | Number of organic results, max 100. When omitted or `<=10`, only the first SERP page is parsed.                                      | `25`, `50`                           |
 | `start`   | Pagination offset                                                                                                                    | `0`, `10`, `20`                      |
 | `format`  | Output format                                                                                                                        | `json`, `markdown`, `text`, `ndjson` |
 
@@ -133,7 +133,7 @@ Engine-specific parameters:
 | Parameter  | Supported engines | Notes                                                                  |
 | ---------- | ----------------- | ---------------------------------------------------------------------- |
 | `filter`   | `google`          | Duplicate filter: `true` hides similar results, `false` includes them. |
-| `features` | browser `Search`  | Populate `serp_features[]` from the live page .                        |
+| `features` | browser `Search`  | Populate `serp_features[]` from the live page. Defaults to `true`.     |
 
 ## Search Response Example
 

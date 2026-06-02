@@ -89,7 +89,7 @@ func BuildURL(q core.Query) (string, error) {
 	if q.Start > 0 {
 		// Bing uses 1-based first-result index for pagination.
 		params.Add("first", strconv.Itoa(q.Start+1))
-	} else if q.Limit > 0 {
+	} else if q.Limit > 10 {
 		params.Add("count", strconv.Itoa(q.Limit))
 	}
 

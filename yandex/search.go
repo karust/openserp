@@ -243,7 +243,7 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 		return false, nil
 	}
 
-	for !core.OrganicLimitReached(allResults, query.Limit) {
+	for core.ShouldFetchResultPage(core.CountOrganicResults(allResults), query.Limit, searchPage-startPage) {
 		done, err := fetchPage()
 		if err != nil {
 			// Yandex commonly challenges rapid pagination, so a later page can
@@ -257,7 +257,7 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 			break
 		}
 		searchPage++
-		if done || core.OrganicLimitReached(allResults, query.Limit) {
+		if done || !core.ShouldFetchResultPage(core.CountOrganicResults(allResults), query.Limit, searchPage-startPage) {
 			break
 		}
 		if err := core.SleepContext(ctx, yand.pageSleep); err != nil {
@@ -281,7 +281,6 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 	yand.logger.Debug("Starting image search, query: %+v", query)
 
 	searchResults := []core.SearchResult{}
-	allowPagination := query.Limit > 30
 
 	searchPage := 0
 	// fetchPage loads one image page and appends parsed results.
@@ -343,22 +342,19 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 			}
 
 			searchResults = append(searchResults, res)
-		}
-		if len(searchResults) >= query.Limit {
-			return true, nil
-		}
-		if searchPage == 1 && !allowPagination {
-			return true, nil
+			if query.Limit > 0 && len(searchResults) >= query.Limit {
+				return true, nil
+			}
 		}
 		return false, nil
 	}
 
-	for len(searchResults) < query.Limit {
+	for core.ShouldFetchResultPage(len(searchResults), query.Limit, searchPage) {
 		done, err := fetchPage()
 		if err != nil {
 			return searchResults, err
 		}
-		if done {
+		if done || !core.ShouldFetchResultPage(len(searchResults), query.Limit, searchPage) {
 			break
 		}
 	}

@@ -35,7 +35,7 @@ func TestBuildURL(t *testing.T) {
 				if got := params.Get("gpc"); got != "stf=1388534400,1672531200|stftype=2" {
 					t.Fatalf("unexpected gpc value: %q", got)
 				}
-				if got := params.Get("rn"); got != "10" {
+				if got := params.Get("rn"); got != "" {
 					t.Fatalf("unexpected rn value: %q", got)
 				}
 				if got := params.Get("pn"); got != "" {
@@ -136,6 +136,23 @@ func TestBuildImageURL(t *testing.T) {
 					t.Fatalf("unexpected rn value: %q", got)
 				}
 				if got := params.Get("pn"); got != "90" {
+					t.Fatalf("unexpected pn value: %q", got)
+				}
+			},
+		},
+		{
+			name: "small limit omits result count param",
+			query: core.Query{
+				Text:  "golang",
+				Limit: 10,
+			},
+			pageNum: 2,
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("rn"); got != "" {
+					t.Fatalf("rn should be omitted when Limit<=10, got %q", got)
+				}
+				if got := params.Get("pn"); got != "60" {
 					t.Fatalf("unexpected pn value: %q", got)
 				}
 			},

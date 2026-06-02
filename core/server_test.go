@@ -341,6 +341,40 @@ func TestInvalidQueryParametersReturnJSONError(t *testing.T) {
 	}
 }
 
+func TestFeaturesDefaultEnabledAndCanBeDisabled(t *testing.T) {
+	var got []bool
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			got = append(got, q.Features)
+			return []SearchResult{{Rank: 1, URL: "https://example.com/google", Title: "google"}}, nil
+		},
+	}
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7240, opts, engine)
+
+	resp := request(t, srv, "/google/search?text=golang")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected default features request to succeed, got %d", resp.StatusCode)
+	}
+	resp = request(t, srv, "/google/search?text=golang&features=false")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected features=false request to succeed, got %d", resp.StatusCode)
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 engine calls, got %d", len(got))
+	}
+	if !got[0] {
+		t.Fatal("expected features to default to true")
+	}
+	if got[1] {
+		t.Fatal("expected features=false to disable feature extraction")
+	}
+}
+
 func TestMegaEnginesEndpointResponseFormat(t *testing.T) {
 	google := &engineMock{name: "google", initialized: true}
 	yandex := &engineMock{name: "yandex", initialized: false}

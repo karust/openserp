@@ -82,6 +82,9 @@ func TestBuildURL(t *testing.T) {
 				if got := params.Get("filters"); got != `ex1:"ez5_20454_20570"` {
 					t.Fatalf("unexpected filters value: %q", got)
 				}
+				if got := params.Get("count"); got != "" {
+					t.Fatalf("count should be omitted when Limit<=10, got %q", got)
+				}
 				// LangCode unset → no locale params; let Bing pick defaults
 				// from the request rather than biasing toward en-US.
 				for _, key := range []string{"mkt", "setlang", "cc"} {

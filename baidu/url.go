@@ -65,7 +65,7 @@ func BuildURL(q core.Query) (string, error) {
 		logrus.Warn("File search not supported")
 	}
 
-	if q.Limit != 0 {
+	if q.Limit > 10 {
 		params.Add("rn", strconv.Itoa(q.Limit))
 	}
 	if q.Start < 0 {
@@ -104,8 +104,10 @@ func BuildImageURL(q core.Query, pageNum int) (string, error) {
 		return "", errors.New("Empty query built")
 	}
 
-	if q.Limit != 0 {
-		params.Add("rn", "30")                     // Results per page
+	if q.Limit > 10 {
+		params.Add("rn", "30") // Results per page
+	}
+	if pageNum > 0 {
 		params.Add("pn", strconv.Itoa(pageNum*30)) // Offset
 	}
 

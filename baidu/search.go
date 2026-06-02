@@ -278,13 +278,13 @@ func (baid *Baidu) SearchImage(ctx context.Context, query core.Query) ([]core.Se
 		return false, nil
 	}
 
-	for len(searchResults) < query.Limit {
+	for core.ShouldFetchResultPage(len(searchResults), query.Limit, searchPage) {
 		done, err := fetchPage()
 		if err != nil {
 			return nil, err
 		}
 		searchPage++
-		if done {
+		if done || !core.ShouldFetchResultPage(len(searchResults), query.Limit, searchPage) {
 			break
 		}
 	}

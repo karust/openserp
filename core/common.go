@@ -171,6 +171,19 @@ func OrganicLimitReached(results []SearchResult, limit int) bool {
 	return limit > 0 && CountOrganicResults(results) >= limit
 }
 
+// ShouldFetchResultPage reports whether a paginated engine should fetch another
+// SERP page. Small/default limits should use the first SERP page as-is instead
+// of chasing a target count across multiple page loads.
+func ShouldFetchResultPage(collected, limit, pagesFetched int) bool {
+	if pagesFetched <= 0 {
+		return true
+	}
+	if limit > 0 && collected >= limit {
+		return false
+	}
+	return limit > defaultQueryLimit
+}
+
 // LimitOrganicResults keeps all ads and at most limit non-ad results.
 func LimitOrganicResults(results []SearchResult, limit int) []SearchResult {
 	if limit <= 0 {
@@ -356,7 +369,7 @@ func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 		return errInvalidParam(fmt.Sprintf("filter: %v", err))
 	}
 
-	searchQuery.Features, err = strconv.ParseBool(reqCtx.Query("features", "0"))
+	searchQuery.Features, err = strconv.ParseBool(reqCtx.Query("features", "1"))
 	if err != nil {
 		return errInvalidParam(fmt.Sprintf("features: %v", err))
 	}

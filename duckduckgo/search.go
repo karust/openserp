@@ -219,13 +219,13 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 		return false, nil
 	}
 
-	for query.Limit <= 0 || core.CountOrganicResults(allResults) < query.Limit {
+	for core.ShouldFetchResultPage(core.CountOrganicResults(allResults), query.Limit, searchPage) {
 		done, err := fetchPage()
 		if err != nil {
 			return nil, err
 		}
 		searchPage++
-		if done || (query.Limit > 0 && core.CountOrganicResults(allResults) >= query.Limit) {
+		if done || !core.ShouldFetchResultPage(core.CountOrganicResults(allResults), query.Limit, searchPage) {
 			break
 		}
 		if err := core.SleepContext(ctx, ddg.pageSleep); err != nil {

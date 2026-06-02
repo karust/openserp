@@ -256,3 +256,68 @@ func TestDuckDuckGoLanguageMapping(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldFetchDuckDuckGoPage(t *testing.T) {
+	results := func(organic, ads int) []core.SearchResult {
+		out := make([]core.SearchResult, 0, organic+ads)
+		for i := 0; i < ads; i++ {
+			out = append(out, core.SearchResult{URL: "https://ad.example/" + string(rune('a'+i)), Ad: true})
+		}
+		for i := 0; i < organic; i++ {
+			out = append(out, core.SearchResult{URL: "https://example.com/" + string(rune('a'+i))})
+		}
+		return out
+	}
+
+	tests := []struct {
+		name         string
+		results      []core.SearchResult
+		limit        int
+		pagesFetched int
+		want         bool
+	}{
+		{
+			name:         "first page is always fetched",
+			limit:        10,
+			pagesFetched: 0,
+			want:         true,
+		},
+		{
+			name:         "default limit does not chase a short first page",
+			results:      results(8, 2),
+			limit:        10,
+			pagesFetched: 1,
+			want:         false,
+		},
+		{
+			name:         "explicit larger limit can paginate",
+			results:      results(8, 0),
+			limit:        11,
+			pagesFetched: 1,
+			want:         true,
+		},
+		{
+			name:         "satisfied larger limit stops",
+			results:      results(11, 0),
+			limit:        11,
+			pagesFetched: 1,
+			want:         false,
+		},
+		{
+			name:         "unset internal query stops after first page",
+			results:      results(8, 0),
+			limit:        0,
+			pagesFetched: 1,
+			want:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := core.ShouldFetchResultPage(core.CountOrganicResults(tt.results), tt.limit, tt.pagesFetched)
+			if got != tt.want {
+				t.Fatalf("ShouldFetchResultPage() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}

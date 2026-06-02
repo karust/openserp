@@ -270,7 +270,7 @@ func BuildURL(q core.Query) (string, error) {
 	}
 
 	// Limit number of results
-	if q.Limit != 0 {
+	if q.Limit > 10 {
 		params.Add("num", strconv.Itoa(q.Limit))
 	}
 
@@ -352,7 +352,7 @@ func BuildImageURL(q core.Query) (string, error) {
 	}
 
 	// Limit number of results
-	if q.Limit != 0 {
+	if q.Limit > 10 {
 		params.Add("num", strconv.Itoa(q.Limit))
 	}
 

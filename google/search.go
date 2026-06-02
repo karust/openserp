@@ -493,7 +493,7 @@ func (gogl *Google) SearchImage(ctx context.Context, query core.Query) ([]core.S
 	// cells can hang on right-click. Cap iterations as a last-resort guard.
 	const maxImagePasses = 20
 	stagnant := 0
-	for pass := 0; pass < maxImagePasses && len(searchResultsMap) < query.Limit; pass++ {
+	for pass := 0; pass < maxImagePasses && core.ShouldFetchResultPage(len(searchResultsMap), query.Limit, pass); pass++ {
 		if err := ctx.Err(); err != nil {
 			return *core.ConvertSearchResultsMap(searchResultsMap), err
 		}
@@ -526,7 +526,7 @@ func (gogl *Google) SearchImage(ctx context.Context, query core.Query) ([]core.S
 			if err := r.Remove(); err != nil {
 				gogl.logger.Debug("Failed to remove parsed image element: %s", err)
 			}
-			if len(searchResultsMap) >= query.Limit {
+			if query.Limit > 0 && len(searchResultsMap) >= query.Limit {
 				break
 			}
 		}

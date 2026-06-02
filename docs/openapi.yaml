@@ -637,12 +637,12 @@ components:
       name: limit
       in: query
       required: false
-      description: Maximum organic results to return (1–100). Ads may be returned in addition.
+      description: Maximum organic results to return (1-100). Ads may be returned in addition. Omitted or small limits (<=10) parse only the first SERP page; larger limits may paginate when an engine supports it.
       schema:
         type: integer
         minimum: 1
         maximum: 100
-        default: 25
+        default: 10
       example: 10
     StartQuery:
       name: start
@@ -672,7 +672,7 @@ components:
         supported by the engine.
       schema:
         type: boolean
-        default: false
+        default: true
     EnginesQuery:
       name: engines
       in: query

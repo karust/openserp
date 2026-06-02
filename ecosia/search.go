@@ -203,16 +203,13 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 		return false, nil
 	}
 
-	for query.Limit <= 0 || core.CountOrganicResults(all) < query.Limit {
+	for core.ShouldFetchResultPage(core.CountOrganicResults(all), query.Limit, pageNum-firstPage) {
 		done, err := fetchPage()
 		if err != nil {
 			return nil, err
 		}
 		pageNum++
-		if done {
-			break
-		}
-		if query.Limit > 0 && core.CountOrganicResults(all) >= query.Limit {
+		if done || !core.ShouldFetchResultPage(core.CountOrganicResults(all), query.Limit, pageNum-firstPage) {
 			break
 		}
 		if err := core.SleepContext(ctx, e.pageSleep); err != nil {
@@ -347,16 +344,13 @@ func (e *Ecosia) SearchImage(ctx context.Context, query core.Query) (results []c
 		return false, nil
 	}
 
-	for query.Limit <= 0 || len(out) < query.Limit {
+	for core.ShouldFetchResultPage(len(out), query.Limit, pageNum) {
 		done, err := fetchPage()
 		if err != nil {
 			return nil, err
 		}
 		pageNum++
-		if done {
-			break
-		}
-		if query.Limit > 0 && len(out) >= query.Limit {
+		if done || !core.ShouldFetchResultPage(len(out), query.Limit, pageNum) {
 			break
 		}
 		if err := core.SleepContext(ctx, e.pageSleep); err != nil {

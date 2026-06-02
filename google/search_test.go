@@ -72,11 +72,15 @@ func TestBuildSearchURL(t *testing.T) {
 				Text:     "megadeth tickets",
 				Filter:   true,
 				LangCode: "DE",
+				Limit:    10,
 			},
 			check: func(t *testing.T, params url.Values, host string) {
 				t.Helper()
 				if host != "www.google.de" {
 					t.Fatalf("unexpected host: %s", host)
+				}
+				if got := params.Get("num"); got != "" {
+					t.Fatalf("num should be omitted when Limit<=10, got %q", got)
 				}
 				if got := params.Get("hl"); got != "de" {
 					t.Fatalf("unexpected hl value: %q", got)
@@ -316,11 +320,15 @@ func TestBuildImageSearchURL(t *testing.T) {
 				Text:     "mountains",
 				LangCode: "en",
 				Region:   "GB",
+				Limit:    10,
 			},
 			check: func(t *testing.T, params url.Values, host string) {
 				t.Helper()
 				if host != "www.google.co.uk" {
 					t.Fatalf("unexpected host: %s", host)
+				}
+				if got := params.Get("num"); got != "" {
+					t.Fatalf("num should be omitted when Limit<=10, got %q", got)
 				}
 				if got := params.Get("gl"); got != "gb" {
 					t.Fatalf("unexpected gl value: %q", got)
