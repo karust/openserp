@@ -164,6 +164,13 @@ func CountOrganicResults(results []SearchResult) int {
 	return count
 }
 
+// OrganicLimitReached reports whether enough organic results have been
+// collected to satisfy limit. A non-positive limit means "no limit", so it
+// is never reached and pagination continues until the engine runs out.
+func OrganicLimitReached(results []SearchResult, limit int) bool {
+	return limit > 0 && CountOrganicResults(results) >= limit
+}
+
 // LimitOrganicResults keeps all ads and at most limit non-ad results.
 func LimitOrganicResults(results []SearchResult, limit int) []SearchResult {
 	if limit <= 0 {
@@ -319,7 +326,7 @@ func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 	searchQuery.Filetype = strings.TrimSpace(reqCtx.Query("file"))
 	searchQuery.Site = strings.TrimSpace(reqCtx.Query("site"))
 
-	limitRaw := reqCtx.Query("limit", "25")
+	limitRaw := reqCtx.Query("limit", "10")
 	limit, err := strconv.Atoi(limitRaw)
 	if err != nil {
 		return errInvalidLimit("limit must be an integer")

@@ -415,11 +415,17 @@ func (b *Browser) connectionState() *browserConnection {
 }
 
 func (b *Browser) newRodBrowser() *rod.Browser {
-	browser := rod.New().NoDefaultDevice().ControlURL(b.browserAddr)
-	if b.Timeout > 0 {
-		browser = browser.Timeout(b.Timeout)
-	}
-	return browser
+	// Do NOT set browser.Timeout here. rod's Browser.Timeout bakes a single
+	// absolute deadline (connectTime + d) into the connection's context. This
+	// connection is persistent and reused across requests, so a baked-in
+	// deadline expires permanently d after connect — after which every call
+	// (including the Version() health ping in ensureConnectedBrowser) fails
+	// with "context deadline exceeded", forcing a reconnect on every Navigate
+	// and orphaning in-flight pages ("Session with given id not found").
+	// Per-operation timeouts are applied at call sites (timedPage.Navigate,
+	// WaitLoad/WaitStable caps, page.Timeout(GetSelectorTimeout)), and the
+	// request context carries the overall deadline.
+	return rod.New().NoDefaultDevice().ControlURL(b.browserAddr)
 }
 
 func (b *Browser) connectBrowser() (*rod.Browser, error) {
@@ -552,8 +558,19 @@ func (b *Browser) ensureConnectedBrowser(ctx context.Context, forceReconnect boo
 		return state.browser, nil
 	}
 
-	if _, err := state.browser.Version(); err != nil {
-		WithRequest(ctx).WithError(err).Debug("Browser ping failed, reconnecting")
+	// Bound just this health-ping with a per-call timeout so a wedged browser
+	// can't block the connection lock forever. Use a fresh derived context each
+	// call (not browser.Timeout, which would bake a permanent deadline into the
+	// persistent connection — see newRodBrowser).
+	pingTimeout := b.Timeout
+	if pingTimeout <= 0 {
+		pingTimeout = 30 * time.Second
+	}
+	pingCtx, cancelPing := context.WithTimeout(EnsureContext(ctx), pingTimeout)
+	_, pingErr := state.browser.Context(pingCtx).Version()
+	cancelPing()
+	if pingErr != nil {
+		WithRequest(ctx).WithError(pingErr).Debug("Browser ping failed, reconnecting")
 		connected, reconnectErr := b.connectBrowser()
 		if reconnectErr != nil {
 			return nil, reconnectErr

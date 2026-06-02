@@ -243,16 +243,21 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 		return false, nil
 	}
 
-	for query.Limit <= 0 || core.CountOrganicResults(allResults) < query.Limit {
+	for !core.OrganicLimitReached(allResults, query.Limit) {
 		done, err := fetchPage()
 		if err != nil {
-			return nil, err
-		}
-		searchPage++
-		if done {
+			// Yandex commonly challenges rapid pagination, so a later page can
+			// be blocked after earlier pages already succeeded. Don't discard
+			// what we have: return the collected results and only surface the
+			// error when the first page itself yielded nothing.
+			if core.CountOrganicResults(allResults) == 0 {
+				return nil, err
+			}
+			yand.logger.Warn("Pagination stopped after page %d (%s); returning %d collected results", searchPage, err, len(allResults))
 			break
 		}
-		if query.Limit > 0 && core.CountOrganicResults(allResults) >= query.Limit {
+		searchPage++
+		if done || core.OrganicLimitReached(allResults, query.Limit) {
 			break
 		}
 		if err := core.SleepContext(ctx, yand.pageSleep); err != nil {

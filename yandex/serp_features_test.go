@@ -2,25 +2,40 @@ package yandex
 
 import (
 	"bytes"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/karust/openserp/core"
 )
 
-// TestParseHTMLFixtureSeparatesNeuroAnswer locks in the fix where the neuro/AI
-// answer card (li data-fast-name='neuro_answer') is excluded from the rankable
-// organic stream and surfaced as an ai_summary feature instead.
-func TestParseHTMLFixtureSeparatesNeuroAnswer(t *testing.T) {
+// TestParseHTMLSeparatesNeuroAnswer locks in the fix where the neuro/AI answer
+// card (li data-fast-name='neuro_answer') is excluded from the rankable organic
+// stream and surfaced as an ai_summary feature instead. It uses inline HTML
+// rather than a saved SERP fixture so the assertion does not break whenever the
+// fixture is refreshed with a SERP that happens to lack a neuro card.
+func TestParseHTMLSeparatesNeuroAnswer(t *testing.T) {
 	t.Parallel()
-	f, err := os.Open("testdata/search_results.html")
-	if err != nil {
-		t.Fatalf("open fixture: %v", err)
-	}
-	defer f.Close()
 
-	results, err := ParseHTML(f)
+	html := `
+<ul>
+  <li data-fast="1" data-fast-name="neuro_answer" class="serp-item">
+    <div class="FuturisSearch">
+      <div class="FuturisInlineHeader-Text">Нейро</div>
+      <div class="FuturisGPTMessage-GroupContent">Содержимое ответа: краткий пересказ.</div>
+      <a class="FuturisSource" href="https://source.example/cited">Источник</a>
+    </div>
+  </li>
+  <li data-fast="1" class="serp-item">
+    <a class="OrganicTitle-Link" href="https://example.com/first"><h2>First organic</h2></a>
+    <span class="OrganicTextContentSpan">First snippet</span>
+  </li>
+  <li data-fast="1" class="serp-item">
+    <a class="OrganicTitle-Link" href="https://example.com/second"><h2>Second organic</h2></a>
+    <span class="OrganicTextContentSpan">Second snippet</span>
+  </li>
+</ul>`
+
+	results, err := ParseHTML(bytes.NewReader([]byte(html)))
 	if err != nil {
 		t.Fatalf("ParseHTML() error = %v", err)
 	}
@@ -35,8 +50,7 @@ func TestParseHTMLFixtureSeparatesNeuroAnswer(t *testing.T) {
 		if r.Rank != rank {
 			t.Fatalf("organic rank gap at index %d: got %d, want %d", i, r.Rank, rank)
 		}
-		// The neuro answer's teaser ("Базовый синтаксис"/"Содержимое ответа")
-		// must not leak into the organic stream as the first result.
+		// The neuro answer's teaser must not leak into the organic stream.
 		if strings.Contains(r.Title, "Содержимое ответа") {
 			t.Fatalf("neuro answer leaked into organic results at index %d: %q", i, r.Title)
 		}
