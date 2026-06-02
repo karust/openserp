@@ -1,15 +1,11 @@
 package core
 
-import "strings"
+import "github.com/karust/openserp/core/region"
 
 // Locale is a parsed language/region pair derived from a BCP47-style code.
-// Language is the lowercase 2-letter language subtag (e.g. "en", "de").
-// Country is the uppercase 2-letter region subtag (e.g. "US", "DE"); it may be
-// empty when the input had no region and the caller did not request a default.
-type Locale struct {
-	Language string
-	Country  string
-}
+// The canonical definition lives in the dependency-free core/region subpackage;
+// this alias preserves the historical core.Locale name for existing callers.
+type Locale = region.Locale
 
 var defaultLocaleCountryByLanguage = map[string]string{
 	"en": "US",
@@ -29,50 +25,15 @@ var defaultLocaleCountryByLanguage = map[string]string{
 }
 
 // ParseLocale parses a language code such as "en", "EN-us", or "de_AT" into a
-// Locale. Returns the zero value when the input is empty or has no language
-// subtag. Country is uppercased; Language is lowercased.
+// Locale. See region.ParseLocale for details.
 func ParseLocale(code string) Locale {
-	code = strings.TrimSpace(code)
-	if code == "" {
-		return Locale{}
-	}
-	code = strings.ReplaceAll(code, "_", "-")
-
-	parts := strings.Split(code, "-")
-	language := strings.ToLower(strings.TrimSpace(parts[0]))
-	if language == "" {
-		return Locale{}
-	}
-
-	country := ""
-	if len(parts) > 1 {
-		country = strings.ToUpper(strings.TrimSpace(parts[1]))
-	}
-	return Locale{Language: language, Country: country}
+	return region.ParseLocale(code)
 }
 
 // CountryFromRegion extracts a two-letter country/market code from a region
-// hint. It accepts "ru", "RU", "en-RU", and "en_RU"; engine-native numeric
-// region IDs intentionally return empty here.
-func CountryFromRegion(region string) string {
-	region = strings.TrimSpace(region)
-	if region == "" {
-		return ""
-	}
-	region = strings.ReplaceAll(region, "_", "-")
-	if len(region) == 2 && isAlphaASCII(region[0]) && isAlphaASCII(region[1]) {
-		return strings.ToUpper(region)
-	}
-
-	locale := ParseLocale(region)
-	if len(locale.Country) == 2 && isAlphaASCII(locale.Country[0]) && isAlphaASCII(locale.Country[1]) {
-		return locale.Country
-	}
-	return ""
-}
-
-func isAlphaASCII(ch byte) bool {
-	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+// hint. See region.CountryFromRegion for details.
+func CountryFromRegion(hint string) string {
+	return region.CountryFromRegion(hint)
 }
 
 // PrimaryLanguageTag returns the BCP47 primary tag for a lang code, filling in
