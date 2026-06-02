@@ -54,7 +54,8 @@ func TestBuildURLRegionLR(t *testing.T) {
 	}{
 		{name: "numeric yandex region is lr", region: "213", wantLR: "213"},
 		{name: "whitespace is trimmed", region: " 1 ", wantLR: "1"},
-		{name: "country region is ignored by yandex lr", region: "RU", wantLR: ""},
+		{name: "country region maps to yandex lr", region: "DE", wantLR: "96"},
+		{name: "locale region maps to yandex lr", region: "en-GB", wantLR: "102"},
 		{name: "empty region omits lr", region: "", wantLR: ""},
 	}
 
@@ -72,6 +73,13 @@ func TestBuildURLRegionLR(t *testing.T) {
 			if gotLR := parsed.Query().Get("lr"); gotLR != tt.wantLR {
 				t.Fatalf("unexpected lr value: %q want %q", gotLR, tt.wantLR)
 			}
+			wantRstr := ""
+			if tt.wantLR != "" {
+				wantRstr = "true"
+			}
+			if gotRstr := parsed.Query().Get("rstr"); gotRstr != wantRstr {
+				t.Fatalf("unexpected rstr value: %q for lr %q", gotRstr, tt.wantLR)
+			}
 		})
 	}
 }
@@ -88,5 +96,8 @@ func TestBuildImageURLRegionLR(t *testing.T) {
 	}
 	if gotLR := parsed.Query().Get("lr"); gotLR != "2" {
 		t.Fatalf("unexpected lr value: %q", gotLR)
+	}
+	if gotRstr := parsed.Query().Get("rstr"); gotRstr != "true" {
+		t.Fatalf("unexpected rstr value: %q", gotRstr)
 	}
 }

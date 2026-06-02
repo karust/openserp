@@ -14,7 +14,9 @@ Run it locally, self-host it, or use the optional hosted API when you do not wan
 
 **Official website:** [openserp.org](https://openserp.org)
 
-**Feedback:** [GitHub Issues](https://github.com/karust/openserp/issues) · [Telegram](https://t.me/+RJEKspw3mUlhZDMy) · [feedback@openserp.org](mailto:feedback@openserp.org)
+**Feedback:** [GitHub Issues](https://github.com/karust/openserp/issues) or [feedback@openserp.org](mailto:feedback@openserp.org)
+
+**Latest updates, usage examples**: [Telegram](https://t.me/+RJEKspw3mUlhZDMy)
 
 > 💡 OpenSERP is free and open-source. Only links listed in this repository and on the official website are associated with the project.
 
@@ -114,17 +116,17 @@ curl "http://127.0.0.1:7000/mega/engines"
 
 Common parameters:
 
-| Parameter | Description                                                                  | Example                              |
-| --------- | ---------------------------------------------------------------------------- | ------------------------------------ |
-| `text`    | Search query                                                                 | `golang programming`                 |
-| `lang`    | Language code                                                                | `EN`, `DE`, `RU`, `ES`               |
-| `region`  | Market/location hint. Yandex accepts numeric `lr`; others use country hints. | `213`, `RU`, `en-US`                 |
-| `date`    | Date range                                                                   | `20250101..20251231`                 |
-| `file`    | File extension                                                               | `pdf`, `doc`, `xls`                  |
-| `site`    | Site-specific search                                                         | `github.com`                         |
-| `limit`   | Number of organic results, max 100. Ads may be returned in addition.         | `10`, `25`, `50`                     |
-| `start`   | Pagination offset                                                            | `0`, `10`, `20`                      |
-| `format`  | Output format                                                                | `json`, `markdown`, `text`, `ndjson` |
+| Parameter | Description                                                                                                                          | Example                              |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |
+| `text`    | Search query                                                                                                                         | `golang programming`                 |
+| `lang`    | Language code                                                                                                                        | `EN`, `DE`, `RU`, `ES`               |
+| `region`  | Market/location hint. Countries/locales work across engines; Google also accepts city names via `uule`; Yandex accepts numeric `lr`. | `DE`, `en-GB`, `Berlin`, `213`       |
+| `date`    | Date range                                                                                                                           | `20250101..20251231`                 |
+| `file`    | File extension                                                                                                                       | `pdf`, `doc`, `xls`                  |
+| `site`    | Site-specific search                                                                                                                 | `github.com`                         |
+| `limit`   | Number of organic results, max 100. Ads may be returned in addition.                                                                 | `10`, `25`, `50`                     |
+| `start`   | Pagination offset                                                                                                                    | `0`, `10`, `20`                      |
+| `format`  | Output format                                                                                                                        | `json`, `markdown`, `text`, `ndjson` |
 
 Engine-specific parameters:
 
@@ -298,4 +300,4 @@ Contributions are welcome. See [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md).
 - [Telegram channel](https://t.me/openserp_cloud) - OpenSERP news, release notes, and project updates. Direct messages are open for quick feedback and hosted API questions.
 - [feedback@openserp.org](mailto:feedback@openserp.org) - private notes, longer feedback, or anything that does not fit GitHub Issues.
 
-###### _"OpenSERP" is the name of this open-source project. The official website is [openserp.org](https://openserp.org). Use of the name in a way that implies affiliation, endorsement, or official status is not permitted._
+###### _"OpenSERP" is the name of this open-source project. The official website is [openserp.org](https://openserp.org). Resources not linked on this page are not affiliated with the project._

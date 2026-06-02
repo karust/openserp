@@ -594,9 +594,11 @@ components:
       in: query
       required: false
       description: >
-        Market/location hint. Yandex accepts numeric `lr` region IDs such as
-        `213`; Google, Bing, and DuckDuckGo use country/locale-style hints such
-        as `RU`, `US`, or `en-GB` where supported.
+        Market/location hint. Country or locale-style values such as `US`,
+        `DE`, or `en-GB` are shared by engines that support them. Google also
+        accepts city names such as `Berlin` or `New York` and sends them as
+        `uule`. Yandex accepts numeric `lr` region IDs such as `213`; those IDs
+        are engine-specific and are ignored by other engines.
       schema:
         type: string
       examples:
@@ -604,6 +606,8 @@ components:
           value: "213"
         country:
           value: RU
+        google_city:
+          value: Berlin
     DateQuery:
       name: date
       in: query

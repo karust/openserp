@@ -134,6 +134,68 @@ func TestBuildSearchURL(t *testing.T) {
 			},
 		},
 		{
+			name: "curated city region resolves to canonical google uule without country market",
+			query: core.Query{
+				Text:   "weather",
+				Region: "New York",
+				Filter: true,
+			},
+			check: func(t *testing.T, params url.Values, host string) {
+				t.Helper()
+				if host != "www.google.com" {
+					t.Fatalf("unexpected host: %s", host)
+				}
+				// "New York" resolves to the exact Google canonical name
+				// "New York,New York,United States", which is what Google
+				// actually honors (a bare city name is ignored).
+				if got := params.Get("uule"); got != "w+CAIQICIfTmV3IFlvcmssTmV3IFlvcmssVW5pdGVkIFN0YXRlcw==" {
+					t.Fatalf("unexpected uule value: %q", got)
+				}
+				if got := params.Get("gl"); got != "" {
+					t.Fatalf("city region should not set gl, got %q", got)
+				}
+			},
+		},
+		{
+			name: "bare city Berlin resolves to canonical google uule",
+			query: core.Query{
+				Text:   "weather",
+				Region: "Berlin",
+				Filter: true,
+			},
+			check: func(t *testing.T, params url.Values, host string) {
+				t.Helper()
+				// region=Berlin -> "Berlin,Berlin,Germany" canonical, which is
+				// the form Google honors. A bare "Berlin" UULE is ignored.
+				if got := params.Get("uule"); got != "w+CAIQICIVQmVybGluLEJlcmxpbixHZXJtYW55" {
+					t.Fatalf("unexpected uule value: %q", got)
+				}
+				if got := params.Get("gl"); got != "" {
+					t.Fatalf("city region should not set gl, got %q", got)
+				}
+			},
+		},
+		{
+			name: "numeric yandex region does not set google market",
+			query: core.Query{
+				Text:   "weather",
+				Region: "213",
+				Filter: true,
+			},
+			check: func(t *testing.T, params url.Values, host string) {
+				t.Helper()
+				if host != "www.google.com" {
+					t.Fatalf("unexpected host: %s", host)
+				}
+				if got := params.Get("gl"); got != "" {
+					t.Fatalf("numeric region should not set gl, got %q", got)
+				}
+				if got := params.Get("uule"); got != "" {
+					t.Fatalf("numeric region should not set uule, got %q", got)
+				}
+			},
+		},
+		{
 			name: "site and filetype without text",
 			query: core.Query{
 				Site:     "example.com",

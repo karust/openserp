@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"strings"
 
 	"github.com/karust/openserp/core"
 )
@@ -45,6 +44,7 @@ func BuildURL(q core.Query, page int) (string, error) {
 
 	if lr := yandexLR(q.Region); lr != "" {
 		params.Add("lr", lr)
+		params.Add("rstr", "true")
 	}
 
 	base.RawQuery = params.Encode()
@@ -84,6 +84,7 @@ func BuildImageURL(q core.Query, page int) (string, error) {
 
 	if lr := yandexLR(q.Region); lr != "" {
 		params.Add("lr", lr)
+		params.Add("rstr", "true")
 	}
 
 	base.RawQuery = params.Encode()
@@ -91,14 +92,5 @@ func BuildImageURL(q core.Query, page int) (string, error) {
 }
 
 func yandexLR(region string) string {
-	region = strings.TrimSpace(region)
-	if region == "" {
-		return ""
-	}
-	for i := 0; i < len(region); i++ {
-		if region[i] < '0' || region[i] > '9' {
-			return ""
-		}
-	}
-	return region
+	return core.ResolveRegion(region).YandexLR
 }

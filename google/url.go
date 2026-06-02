@@ -1,6 +1,7 @@
 package google
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/url"
@@ -225,6 +226,10 @@ var googleDefaultCountryByLanguage = map[string]string{
 	"ko": "kr",
 }
 
+const googleUULEPrefix = "w+CAIQICI"
+
+var googleUULELengthAlphabet = []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+
 // BuildURL builds a Google web search URL from Query fields.
 // It returns an error when the resulting query text is empty or invalid.
 func BuildURL(q core.Query) (string, error) {
@@ -288,6 +293,9 @@ func BuildURL(q core.Query) (string, error) {
 
 	if locale.country != "" {
 		params.Add("gl", locale.country)
+	}
+	if uule := googleUULE(q.Region); uule != "" {
+		params.Add("uule", uule)
 	}
 	if locale.language != "" {
 		params.Add("hl", locale.language)
@@ -355,6 +363,9 @@ func BuildImageURL(q core.Query) (string, error) {
 	if locale.country != "" {
 		params.Add("gl", locale.country)
 	}
+	if uule := googleUULE(q.Region); uule != "" {
+		params.Add("uule", uule)
+	}
 	if locale.language != "" {
 		params.Add("hl", locale.language)
 		params.Add("lr", "lang_"+locale.language)
@@ -418,6 +429,43 @@ func googleDomain(locale googleLocaleParams) string {
 		return domain
 	}
 	return GoogleDomains[""]
+}
+
+// googleUULE builds a Google UULE v1 value for a region hint.
+//
+// UULE only takes effect when the encoded string is an exact Google geotargets
+// canonical name; a bare free-text city is silently ignored by Google. We
+// therefore resolve the region first (core.ResolveRegion) and encode the
+// resolved canonical name when one is found. Country-level hints intentionally
+// produce no UULE — those are conveyed via gl= instead.
+func googleUULE(region string) string {
+	target := core.ResolveRegion(region)
+	canonical := target.GoogleCanonical
+	if canonical == "" {
+		// No resolved canonical name. A bare country code (e.g. "DE") or a
+		// numeric Yandex lr ID must not become a UULE; both are handled
+		// elsewhere (gl=) or are not applicable to Google.
+		if target.Country != "" || target.YandexLR != "" {
+			return ""
+		}
+		// Best-effort: encode the raw free-text region. This may be ignored by
+		// Google if it isn't a canonical name, matching prior behavior.
+		canonical = strings.TrimSpace(region)
+	}
+	if canonical == "" {
+		return ""
+	}
+	return encodeGoogleUULE(canonical)
+}
+
+// encodeGoogleUULE encodes a canonical location name into a UULE v1 value:
+// a fixed prefix, a single length-tag character, then base64(name).
+func encodeGoogleUULE(canonical string) string {
+	length := len([]rune(canonical))
+	if length <= 0 || length >= len(googleUULELengthAlphabet) {
+		return ""
+	}
+	return googleUULEPrefix + string(googleUULELengthAlphabet[length]) + base64.StdEncoding.EncodeToString([]byte(canonical))
 }
 
 // SourceImage contains parsed Google image metadata extracted from result links.
