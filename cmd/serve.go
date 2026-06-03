@@ -118,13 +118,14 @@ func serve(cmd *cobra.Command, args []string) {
 	baseOpts.CaptchaSolverEnabled = captchaSolverEnabled
 	baseOpts.CaptchaSolverApiKey = captchaSolverAPIKey
 
-	engines, closeBrowsers, err := buildBrowserEngines(baseOpts, proxyCfg)
+	engines, closeBrowsers, browserResolver, err := buildBrowserEngines(baseOpts, proxyCfg)
 	if err != nil {
 		logrus.Error(err)
 		return
 	}
 
 	serverOpts := buildServerOptions(corsCfg, proxyCfg, fingerprintBrowserOpts)
+	serverOpts.BrowserResolver = browserResolver
 	serv := core.NewServerWithOptions(config.Server.Host, config.Server.Port, serverOpts, engines...)
 	if err := listenWithGracefulShutdown(serv, closeBrowsers); err != nil {
 		logrus.Error(err)
@@ -160,6 +161,7 @@ func buildServerOptions(corsCfg core.CORSConfig, proxyCfg core.ProxyConfig, fing
 		FingerprintArtifactDir: core.DefaultFingerprintArtifactDir,
 		FingerprintBrowserOpts: fingerprintBrowserOpts,
 		MegaTimeout:            config.App.MegaTimeout,
+		Extract:                config.Extract,
 		Resilience: core.ResilientConfig{
 			Retry: core.RetryConfig{
 				MaxRetries:     config.Resilience.MaxRetries,
@@ -666,7 +668,7 @@ func browserEngineSpecs() []browserEngineSpec {
 	}
 }
 
-func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) ([]core.SearchEngine, func() error, error) {
+func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) ([]core.SearchEngine, func() error, core.BrowserResolver, error) {
 	launchProxyURL := ""
 	if strings.TrimSpace(proxyCfg.Proxies.Global) != "" && !proxyCfg.Proxies.AllowRequestProxyURL {
 		launchProxyURL = proxyCfg.Proxies.Global
@@ -690,7 +692,7 @@ func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) (
 	for idx, spec := range specs {
 		policy := resolveEngineProxyPolicy(proxyCfg, spec.name)
 		if err := validateBrowserProxyPolicy(proxyCfg, policy); err != nil {
-			return nil, nil, fmt.Errorf("browser proxy validation failed for engine %s: %w", spec.name, err)
+			return nil, nil, nil, fmt.Errorf("browser proxy validation failed for engine %s: %w", spec.name, err)
 		}
 
 		opts := spec.opts
@@ -710,7 +712,7 @@ func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) (
 		}
 	}
 
-	return engines, pool.close, nil
+	return engines, pool.close, pool.get, nil
 }
 
 func validateBrowserProxyPolicy(proxyCfg core.ProxyConfig, policy core.ProxyPolicy) error {

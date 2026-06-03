@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: OpenSERP API
-  version: 2.1.0
+  version: 2.2.0
   description: >
     OpenSERP provides dedicated and multi-engine search endpoints for Google, Yandex,
     Baidu, Bing, and DuckDuckGo. Search responses are wrapped in a v2 envelope with
@@ -47,6 +47,10 @@ paths:
         - $ref: "#/components/parameters/StartQuery"
         - $ref: "#/components/parameters/FilterQuery"
         - $ref: "#/components/parameters/FeaturesQuery"
+        - $ref: "#/components/parameters/ExtractQuery"
+        - $ref: "#/components/parameters/ExtractTopQuery"
+        - $ref: "#/components/parameters/ExtractModeQuery"
+        - $ref: "#/components/parameters/MinRunesQuery"
         - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
         - $ref: "#/components/parameters/ProxyURLHeader"
@@ -325,6 +329,10 @@ paths:
         - $ref: "#/components/parameters/MegaModeQuery"
         - $ref: "#/components/parameters/MegaDedupeQuery"
         - $ref: "#/components/parameters/MegaMergeQuery"
+        - $ref: "#/components/parameters/ExtractQuery"
+        - $ref: "#/components/parameters/ExtractTopQuery"
+        - $ref: "#/components/parameters/ExtractModeQuery"
+        - $ref: "#/components/parameters/MinRunesQuery"
         - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
         - $ref: "#/components/parameters/ProxyURLHeader"
@@ -454,6 +462,93 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MegaEnginesResponse"
+  /extract:
+    get:
+      tags: [Search]
+      operationId: extractURL
+      summary: Extract clean content from one URL
+      parameters:
+        - $ref: "#/components/parameters/URLQuery"
+        - $ref: "#/components/parameters/ExtractModeShortQuery"
+        - $ref: "#/components/parameters/MinRunesQuery"
+        - $ref: "#/components/parameters/LangQuery"
+        - $ref: "#/components/parameters/CleanQuery"
+        - $ref: "#/components/parameters/UseLLMSTxtQuery"
+        - $ref: "#/components/parameters/FormatQuery"
+        - $ref: "#/components/parameters/UseProxyHeader"
+        - $ref: "#/components/parameters/ProxyURLHeader"
+      responses:
+        "200":
+          description: Extracted URL content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExtractResult"
+            text/markdown:
+              schema:
+                type: string
+            text/plain:
+              schema:
+                type: string
+            application/x-ndjson:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "502":
+          $ref: "#/components/responses/BadGatewayError"
+    post:
+      tags: [Search]
+      operationId: extractURLPost
+      summary: Extract clean content from one URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                mode:
+                  type: string
+                  enum: [auto, fast, rendered]
+                  default: auto
+                clean:
+                  type: boolean
+                  default: true
+                  description: >
+                    Article-only extraction (default). Set `false` for
+                    whole-readable-body extraction that keeps nav/feature/landing
+                    content trafilatura would otherwise strip.
+                use_llms_txt:
+                  type: boolean
+                  default: false
+                  description: >
+                    When the URL is a site root, probe `/llms-full.txt` then
+                    `/llms.txt` and return that LLM-optimized markdown instead of
+                    scraping HTML. Falls through to normal extraction when absent.
+                min_runes:
+                  type: integer
+                  minimum: 0
+                  description: >
+                    Auto-mode escalation floor: if the fast (raw) pass yields fewer
+                    extracted-text runes than this, escalate to a browser render.
+                    `0` (default) uses the built-in floor. Ignored in `fast` and
+                    `rendered` modes.
+      responses:
+        "200":
+          description: Extracted URL content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExtractResult"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "502":
+          $ref: "#/components/responses/BadGatewayError"
   /health:
     get:
       tags: [Health]
@@ -727,6 +822,86 @@ components:
         type: string
         enum: [json, markdown, text, ndjson]
         default: json
+    URLQuery:
+      name: url
+      in: query
+      required: true
+      description: Absolute URL to fetch and extract.
+      schema:
+        type: string
+        format: uri
+    ExtractQuery:
+      name: extract
+      in: query
+      required: false
+      description: Fetch and embed cleaned target-page content for top web results.
+      schema:
+        type: boolean
+        default: false
+    ExtractTopQuery:
+      name: extract_top
+      in: query
+      required: false
+      description: Number of top organic results to enrich when `extract=true`.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 5
+        default: 3
+    ExtractModeQuery:
+      name: extract_mode
+      in: query
+      required: false
+      description: Extraction strategy for target pages.
+      schema:
+        type: string
+        enum: [auto, fast, rendered]
+        default: auto
+    ExtractModeShortQuery:
+      name: mode
+      in: query
+      required: false
+      description: Extraction strategy for one URL.
+      schema:
+        type: string
+        enum: [auto, fast, rendered]
+        default: auto
+    MinRunesQuery:
+      name: min_runes
+      in: query
+      required: false
+      description: >
+        Auto-mode escalation floor: if the fast (raw) pass yields fewer
+        extracted-text runes than this, escalate to a browser render. `0`
+        (default) uses the built-in floor. Ignored in `fast` and `rendered`
+        modes.
+      schema:
+        type: integer
+        minimum: 0
+    CleanQuery:
+      name: clean
+      in: query
+      required: false
+      description: >
+        Article-only extraction (default). Set `false` for whole-readable-body
+        extraction that keeps nav/feature/landing content trafilatura would
+        otherwise strip — useful for landing pages, doc indexes, and dashboards.
+      schema:
+        type: boolean
+        default: true
+    UseLLMSTxtQuery:
+      name: use_llms_txt
+      in: query
+      required: false
+      description: >
+        When the URL is a site root, probe `/llms-full.txt` then `/llms.txt` and
+        return that LLM-optimized markdown instead of scraping HTML
+        (see https://llmstxt.org/). Falls through to normal extraction when
+        absent. Ignored for non-root URLs, where it would miss the requested
+        page's own content.
+      schema:
+        type: boolean
+        default: false
     UseProxyHeader:
       name: X-Use-Proxy
       in: header
@@ -1215,6 +1390,102 @@ components:
           $ref: "#/components/schemas/DomainInfo"
         classification:
           $ref: "#/components/schemas/Classification"
+        extracted:
+          $ref: "#/components/schemas/ExtractedContent"
+    ExtractedContent:
+      type: object
+      description: >
+        One enriched target page. `content` holds a single representation chosen
+        by the response `format` (plain text for `format=text`, markdown
+        otherwise), named by `format`. No duplicated markdown/text blobs.
+      properties:
+        title:
+          type: string
+        format:
+          type: string
+          enum: [markdown, text]
+        content:
+          type: string
+        mode_used:
+          type: string
+          enum: [fast, rendered, llms_txt]
+        fetched_at:
+          type: string
+          format: date-time
+        error:
+          type: string
+    ExtractResult:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+        title:
+          type: string
+        description:
+          type: string
+        markdown:
+          type: string
+        text:
+          type: string
+        headings:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExtractHeading"
+        links:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExtractLink"
+        canonical:
+          type: string
+          format: uri
+        lang:
+          type: string
+        schema_org:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        og_tags:
+          type: object
+          additionalProperties:
+            type: string
+        meta:
+          $ref: "#/components/schemas/ExtractMeta"
+    ExtractHeading:
+      type: object
+      properties:
+        level:
+          type: integer
+          minimum: 1
+          maximum: 6
+        text:
+          type: string
+    ExtractLink:
+      type: object
+      properties:
+        text:
+          type: string
+        url:
+          type: string
+          format: uri
+    ExtractMeta:
+      type: object
+      properties:
+        mode_used:
+          type: string
+          description: >
+            Extraction strategy that produced the result. `llms_txt` means the
+            site's LLM-optimized markdown was served from `/llms-full.txt` or
+            `/llms.txt` instead of scraping HTML.
+          enum: [fast, rendered, llms_txt]
+        fetched_at:
+          type: string
+          format: date-time
+        bytes:
+          type: integer
+        took_ms:
+          type: integer
     FeatureItem:
       type: object
       properties:

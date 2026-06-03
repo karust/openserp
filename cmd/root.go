@@ -9,6 +9,7 @@ import (
 
 	"github.com/karust/openserp/core"
 	browserprofile "github.com/karust/openserp/core/browser"
+	extractpkg "github.com/karust/openserp/extract"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -16,7 +17,7 @@ import (
 )
 
 const (
-	version               = "0.7.16"
+	version               = "0.8.0"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -26,6 +27,7 @@ type Config struct {
 	App              AppConfig            `mapstructure:"app"`
 	Proxies          core.ProxiesConfig   `mapstructure:"proxies"`
 	Cache            CacheConfig          `mapstructure:"cache"`
+	Extract          extractpkg.Config    `mapstructure:"extract"`
 	Resilience       ResilienceConfig     `mapstructure:"resilience"`
 	CircuitBreaker   CircuitBreakerConfig `mapstructure:"circuit_breaker"`
 	CORS             CORSConfig           `mapstructure:"cors"`
@@ -184,6 +186,7 @@ func sanitizedConfigForLog(cfg Config) map[string]interface{} {
 			"lanes":                   cfg.Proxies.Lanes,
 		},
 		"cache":           cfg.Cache,
+		"extract":         cfg.Extract,
 		"resilience":      cfg.Resilience,
 		"circuit_breaker": cfg.CircuitBreaker,
 		"cors":            cfg.CORS,
@@ -404,6 +407,11 @@ func setConfigDefaults(v *viper.Viper) {
 
 	v.SetDefault("cache.ttl_seconds", 300)
 	v.SetDefault("cache.max_size", 1000)
+	v.SetDefault("extract.enabled", true)
+	v.SetDefault("extract.default_mode", "auto")
+	v.SetDefault("extract.timeout", "20s")
+	v.SetDefault("extract.max_bytes", 2*1024*1024)
+	v.SetDefault("extract.max_concurrent", 2)
 	// Keep stage2 defaults stable even when config file is absent.
 	v.SetDefault("resilience.max_retries", 3)
 	v.SetDefault("resilience.allow_endpoint_fallback", false)

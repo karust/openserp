@@ -32,6 +32,11 @@ func RenderText(env *Envelope) []byte {
 			fmt.Fprintf(&b, "%s\n", r.Snippet)
 		}
 		fmt.Fprintf(&b, "URL: %s\n\n", r.URL)
+		if r.Extracted != nil && r.Extracted.Content != "" {
+			b.WriteString("Extracted content:\n")
+			b.WriteString(r.Extracted.Content)
+			b.WriteString("\n\n")
+		}
 	}
 
 	renderTextFeatures(&b, env.SerpFeatures, featureRenderOrderAfterResults(env.SerpFeatures))

@@ -18,6 +18,14 @@ app:
   idle_ttl: 5m # close a Chrome that has not served traffic for this long
 
   mega_timeout: 90s # max total wait for /mega/* requests; slow engines return partial results
+
+extract:
+  enabled: true
+  default_mode: auto # auto|fast|rendered
+  timeout: 20s
+  max_bytes: 2000000
+  max_concurrent: 2
+
 proxies:
   allow_request_proxy_url: false
   # Force a single proxy for all engines.

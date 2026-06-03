@@ -27,6 +27,7 @@ Run it locally, self-host it, or use the optional hosted API when you do not wan
 - 🖼 **Images** - image search is also available
 - 🎯 **Advanced filters** - language, date range, file type, and site queries
 - ✨ **SERP features** - AI summaries, answer boxes, people-also-ask, and related searches in a response
+- 📄 **URL extraction** - turn target pages into clean markdown/text for grounding and automation
 - 🌍 **Configurable** - proxy, cache, and resilient mode
 - 🐳 **Docker-ready** - local and container deployment
 - 📝 **Data Formats** - JSON, Markdown, Text, NdJSON response formats
@@ -112,21 +113,37 @@ List engines:
 curl "http://127.0.0.1:7000/mega/engines"
 ```
 
+URL extraction:
+
+```bash
+# Extract one URL as JSON
+curl "http://127.0.0.1:7000/extract?url=https://example.com&mode=auto"
+
+# Return clean page markdown
+curl "http://127.0.0.1:7000/extract?url=https://example.com&format=markdown"
+
+# Embed extracted content under the top search results
+curl "http://127.0.0.1:7000/google/search?text=llm+observability&extract=true&extract_top=2&format=markdown"
+```
+
 ## 🔍 Query Parameters
 
 Common parameters:
 
-| Parameter | Description                                                                                                                          | Example                              |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |
-| `text`    | Search query                                                                                                                         | `golang programming`                 |
-| `lang`    | Language code                                                                                                                        | `EN`, `DE`, `RU`, `ES`               |
-| `region`  | Market/location hint. Countries/locales work across engines; Google also accepts city names via `uule`; Yandex accepts numeric `lr`. | `DE`, `en-GB`, `Berlin`, `213`       |
-| `date`    | Date range                                                                                                                           | `20250101..20251231`                 |
-| `file`    | File extension                                                                                                                       | `pdf`, `doc`, `xls`                  |
-| `site`    | Site-specific search                                                                                                                 | `github.com`                         |
-| `limit`   | Number of organic results, max 100. When omitted or `<=10`, only the first SERP page is parsed.                                      | `25`, `50`                           |
-| `start`   | Pagination offset                                                                                                                    | `0`, `10`, `20`                      |
-| `format`  | Output format                                                                                                                        | `json`, `markdown`, `text`, `ndjson` |
+| Parameter      | Description                                                                                                                          | Example                              |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |
+| `text`         | Search query                                                                                                                         | `golang programming`                 |
+| `lang`         | Language code                                                                                                                        | `EN`, `DE`, `RU`, `ES`               |
+| `region`       | Market/location hint. Countries/locales work across engines; Google also accepts city names via `uule`; Yandex accepts numeric `lr`. | `DE`, `en-GB`, `Berlin`, `213`       |
+| `date`         | Date range                                                                                                                           | `20250101..20251231`                 |
+| `file`         | File extension                                                                                                                       | `pdf`, `doc`, `xls`                  |
+| `site`         | Site-specific search                                                                                                                 | `github.com`                         |
+| `limit`        | Number of organic results, max 100. When omitted or `<=10`, only the first SERP page is parsed.                                      | `25`, `50`                           |
+| `start`        | Pagination offset                                                                                                                    | `0`, `10`, `20`                      |
+| `format`       | Output format                                                                                                                        | `json`, `markdown`, `text`, `ndjson` |
+| `extract`      | Fetch and embed target-page content for top web results                                                                              | `true`                               |
+| `extract_top`  | Number of top web results to extract, clamped to 1-5                                                                                 | `3`                                  |
+| `extract_mode` | Extraction strategy: raw HTTP first, raw only, or browser-rendered                                                                   | `auto`, `fast`, `rendered`           |
 
 Engine-specific parameters:
 

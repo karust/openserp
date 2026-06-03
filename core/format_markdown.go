@@ -32,11 +32,40 @@ func RenderMarkdown(env *Envelope) []byte {
 			fmt.Fprintf(&b, "%s\n\n", r.Snippet)
 		}
 		fmt.Fprintf(&b, "-> %s\n\n", r.URL)
+		if r.Extracted != nil && r.Extracted.Content != "" {
+			b.WriteString("#### Extracted content\n\n")
+			b.WriteString(shiftMarkdownHeadings(r.Extracted.Content, 4))
+			b.WriteString("\n\n")
+		}
 	}
 
 	renderMarkdownFeatures(&b, env.SerpFeatures, featureRenderOrderAfterResults(env.SerpFeatures))
 
 	return []byte(b.String())
+}
+
+func shiftMarkdownHeadings(markdown string, minLevel int) string {
+	lines := strings.Split(markdown, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " ")
+		indent := line[:len(line)-len(trimmed)]
+		if !strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		count := 0
+		for count < len(trimmed) && trimmed[count] == '#' {
+			count++
+		}
+		if count == 0 || count >= len(trimmed) || trimmed[count] != ' ' {
+			continue
+		}
+		target := count + minLevel
+		if target > 6 {
+			target = 6
+		}
+		lines[i] = indent + strings.Repeat("#", target) + trimmed[count:]
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 // RenderMarkdownImage formats an ImageEnvelope as Markdown.

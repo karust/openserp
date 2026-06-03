@@ -271,6 +271,14 @@ type Query struct {
 	// supported by the engine. Such entries may be returned with non-positive
 	// internal rank values.
 	Features bool
+	// Extract fetches and embeds cleaned target-page content for top results.
+	Extract bool
+	// ExtractTop limits how many top results are enriched when Extract is true.
+	ExtractTop int
+	// ExtractMode selects auto, fast, or rendered extraction.
+	ExtractMode string
+	// ExtractMinRunes overrides the auto-mode escalation floor (0 = default).
+	ExtractMinRunes int
 	// ProxyURL is a direct proxy URL used by raw HTTP search paths.
 	ProxyURL string
 	// ProxyCountry identifies the proxy market country for cache/error metadata.
@@ -297,9 +305,9 @@ func (q Query) String() string {
 		maskedProxyURL = MaskProxyURL(q.ProxyURL)
 	}
 	return fmt.Sprintf(
-		"{Text:%s LangCode:%s Region:%s DateInterval:%s Filetype:%s Site:%s Limit:%d Start:%d Filter:%t Features:%t ProxyURL:%s ProxyCountry:%s ProxyClass:%s ProxyProvider:%s ProxySessionID:%s ProxyOverride:%s Insecure:%t}",
+		"{Text:%s LangCode:%s Region:%s DateInterval:%s Filetype:%s Site:%s Limit:%d Start:%d Filter:%t Features:%t Extract:%t ExtractTop:%d ExtractMode:%s ProxyURL:%s ProxyCountry:%s ProxyClass:%s ProxyProvider:%s ProxySessionID:%s ProxyOverride:%s Insecure:%t}",
 		q.Text, q.LangCode, q.Region, q.DateInterval, q.Filetype, q.Site,
-		q.Limit, q.Start, q.Filter, q.Features,
+		q.Limit, q.Start, q.Filter, q.Features, q.Extract, q.ExtractTop, q.ExtractMode,
 		maskedProxyURL, q.ProxyCountry, q.ProxyClass, q.ProxyProvider,
 		q.ProxySessionID, q.ProxyOverride, q.Insecure,
 	)
@@ -372,6 +380,34 @@ func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 	searchQuery.Features, err = strconv.ParseBool(reqCtx.Query("features", "1"))
 	if err != nil {
 		return errInvalidParam(fmt.Sprintf("features: %v", err))
+	}
+	searchQuery.Extract, err = strconv.ParseBool(reqCtx.Query("extract", "0"))
+	if err != nil {
+		return errInvalidParam(fmt.Sprintf("extract: %v", err))
+	}
+	searchQuery.ExtractTop = 3
+	if raw := strings.TrimSpace(reqCtx.Query("extract_top")); raw != "" {
+		extractTop, err := strconv.Atoi(raw)
+		if err != nil {
+			return errInvalidParam("extract_top must be an integer")
+		}
+		if extractTop < 1 {
+			extractTop = 1
+		}
+		if extractTop > 5 {
+			extractTop = 5
+		}
+		searchQuery.ExtractTop = extractTop
+	}
+	searchQuery.ExtractMode = strings.ToLower(strings.TrimSpace(reqCtx.Query("extract_mode", "auto")))
+	switch searchQuery.ExtractMode {
+	case "auto", "fast", "rendered":
+	default:
+		return errInvalidParam("extract_mode must be one of auto, fast, rendered")
+	}
+	searchQuery.ExtractMinRunes, err = parseNonNegativeIntQuery(reqCtx.Query("min_runes"), 0)
+	if err != nil {
+		return errInvalidParam("min_runes must be a non-negative integer")
 	}
 
 	searchQuery.ProxyOverride, err = NormalizeProxyRequestOverride(reqCtx.Get("X-Use-Proxy"))

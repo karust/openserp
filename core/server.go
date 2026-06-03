@@ -22,6 +22,7 @@ import (
 	"github.com/karust/openserp/core/fpcheck"
 	"github.com/karust/openserp/core/fpcheck/detectors"
 	apidocs "github.com/karust/openserp/docs"
+	extractpkg "github.com/karust/openserp/extract"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
@@ -88,7 +89,13 @@ type ServerOptions struct {
 	// as failed with a context-deadline error. Zero disables the bound
 	// (legacy behavior — wait until the slowest engine finishes).
 	MegaTimeout time.Duration
+	// BrowserResolver returns a pooled browser for rendered extraction.
+	BrowserResolver BrowserResolver
+	// Extract configures the URL extraction endpoint and search enrichment.
+	Extract extractpkg.Config
 }
+
+type BrowserResolver func(proxyURL string) (*Browser, error)
 
 // DefaultServerOptions returns production-oriented defaults for cache, CORS,
 // and resilient search policies.
@@ -107,6 +114,7 @@ func DefaultServerOptions() ServerOptions {
 		},
 		Resilience:  DefaultResilientConfig(),
 		MegaTimeout: 90 * time.Second,
+		Extract:     extractpkg.DefaultConfig(),
 	}
 }
 
@@ -204,6 +212,8 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 	serv.app.Get("/mega/search", serv.handleMegaSearch)
 	serv.app.Get("/mega/image", serv.handleMegaImage)
 	serv.app.Get("/mega/engines", serv.handleListEngines)
+	serv.app.Get("/extract", serv.handleExtract)
+	serv.app.Post("/extract", serv.handleExtract)
 
 	return &serv
 }
@@ -251,7 +261,7 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		WithField("action", action).
 		Debugf("Starting %s request for query: %s", action, q.Text)
 
-	if format == "json" && !ShouldBypassCacheForProxyMarket(q) {
+	if format == "json" && !q.Extract && !ShouldBypassCacheForProxyMarket(q) {
 		if hit, err := s.tryServeCacheHit(
 			c,
 			startedAt,
@@ -335,7 +345,11 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 	}
 	env.Finalize(startedAt, q)
 
-	if format == "json" {
+	if q.Extract {
+		s.enrichEnvelopeWithExtraction(requestCtx, env, q, format)
+	}
+
+	if format == "json" && !q.Extract {
 		cacheStatus := s.cacheEnvelopeIfEligible(engine.Name(), usedEngine, action, q, env)
 		if cacheStatus != "" {
 			c.Set("X-Cache", cacheStatus)
@@ -928,7 +942,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string) error {
 		"mode":    runCfg.Mode,
 	}).Debugf("Starting mega %s request for query: %s", action, q.Text)
 
-	if format == "json" && !ShouldBypassCacheForProxyMarket(q) && runCfg.Mode != megaModeFast {
+	if format == "json" && !q.Extract && !ShouldBypassCacheForProxyMarket(q) && runCfg.Mode != megaModeFast {
 		cacheHitCandidates := []cacheHitCandidate{
 			{
 				key:        s.buildMegaCacheKey(action, enginesToUse, q, runCfg),
@@ -1024,6 +1038,9 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string) error {
 		AppendEnrichedSearchResult(env, r.SearchResult, ectx, startedAt)
 	}
 	env.Finalize(startedAt, q)
+	if q.Extract {
+		s.enrichEnvelopeWithExtraction(requestCtx, env, q, format)
+	}
 
 	if runCfg.Merge {
 		allEnriched := make([]Result, 0, len(rawResults))
@@ -1037,7 +1054,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string) error {
 		}
 	}
 
-	if format == "json" && s.cache != nil && runCfg.Mode != megaModeFast {
+	if format == "json" && s.cache != nil && !q.Extract && runCfg.Mode != megaModeFast {
 		c.Set("X-Cache", s.cacheMegaEnvelopeResults(action, enginesToUse, q, env, runCfg))
 	}
 

@@ -49,6 +49,18 @@ type Classification struct {
 	SourceHint  string `json:"source_hint,omitempty"`
 }
 
+// ExtractedContent carries one enriched target page. Content holds a single
+// representation chosen by the response format (markdown for json/ndjson/markdown,
+// plain text for text), with Format naming which it is — no duplicated blobs.
+type ExtractedContent struct {
+	Title     string `json:"title,omitempty"`
+	Format    string `json:"format,omitempty"`
+	Content   string `json:"content,omitempty"`
+	ModeUsed  string `json:"mode_used,omitempty"`
+	FetchedAt string `json:"fetched_at,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
 // FeatureItem is one child entry inside a grouped SERP feature.
 type FeatureItem struct {
 	Title string `json:"title,omitempty"`
@@ -81,19 +93,20 @@ type SerpFeature struct {
 // Result is the v2 normalized result returned in search responses. Optional
 // fields (Position, DomainInfo, Classification) are omitted when empty.
 type Result struct {
-	ID             string          `json:"id"`
-	Rank           int             `json:"rank"`
-	Type           ResultType      `json:"type"`
-	Title          string          `json:"title"`
-	URL            string          `json:"url"`
-	DisplayURL     string          `json:"display_url"`
-	Snippet        string          `json:"snippet"`
-	Domain         string          `json:"domain"`
-	Favicon        string          `json:"favicon"`
-	Position       *Position       `json:"position,omitempty"`
-	Engine         string          `json:"engine"`
-	DomainInfo     *DomainInfo     `json:"domain_info,omitempty"`
-	Classification *Classification `json:"classification,omitempty"`
+	ID             string            `json:"id"`
+	Rank           int               `json:"rank"`
+	Type           ResultType        `json:"type"`
+	Title          string            `json:"title"`
+	URL            string            `json:"url"`
+	DisplayURL     string            `json:"display_url"`
+	Snippet        string            `json:"snippet"`
+	Domain         string            `json:"domain"`
+	Favicon        string            `json:"favicon"`
+	Position       *Position         `json:"position,omitempty"`
+	Engine         string            `json:"engine"`
+	DomainInfo     *DomainInfo       `json:"domain_info,omitempty"`
+	Classification *Classification   `json:"classification,omitempty"`
+	Extracted      *ExtractedContent `json:"extracted,omitempty"`
 }
 
 // ImageData holds image-specific URL and dimension fields.
