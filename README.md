@@ -4,7 +4,7 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/karust/openserp)](https://goreportcard.com/report/github.com/karust/openserp)
 [![Go Reference](https://pkg.go.dev/badge/github/karust/openserp?style=for-the-badge)](https://pkg.go.dev/github.com/karust/openserp)
-[![release](https://img.shields.io/github/release/karust/openserp)](https://github.com/karust/openserp/releases)
+[![release](https://img.shields.io/github/v/release/karust/openserp)](https://github.com/karust/openserp/releases)
 [![Docker Pulls](https://img.shields.io/docker/v/karust/openserp)](https://hub.docker.com/repository/docker/karust/openserp)
 [![CI](https://github.com/karust/openserp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/karust/openserp/actions/workflows/ci.yml)
 
@@ -68,6 +68,25 @@ Once the server is running, the interactive docs are available locally:
 - OpenAPI YAML: `http://127.0.0.1:7000/openapi.yaml`
 
 To browse the spec without running the server, see [docs/openapi.yaml](./docs/openapi.yaml). For a higher-level overview of how OpenSERP works internally, see the [architecture docs](https://openserp.org/docs/architecture/).
+
+## SDKs & Integrations
+
+Official client packages. Each works against your self-hosted server (point it at the server's base URL):
+
+| Type                        | Package                                                                                      | Install                         |
+| --------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------- |
+| JavaScript / TypeScript SDK | [`@openserp/sdk`](https://www.npmjs.com/package/@openserp/sdk)                               | `npm install @openserp/sdk`     |
+| Python SDK                  | [`openserp`](https://pypi.org/project/openserp/)                                             | `pip install openserp`          |
+| MCP server (AI agents)      | [`@openserp/mcp`](https://www.npmjs.com/package/@openserp/mcp)                               | `npx @openserp/mcp`             |
+| n8n community node          | [`@openserp/n8n-nodes-openserp`](https://www.npmjs.com/package/@openserp/n8n-nodes-openserp) | Install via n8n community nodes |
+
+```js
+import { OpenSERP } from "@openserp/sdk";
+
+// Use your self-hosted server
+const client = new OpenSERP({ baseUrl: "http://localhost:7000" });
+const { results } = await client.search({ engine: "google", text: "openserp", limit: 5 });
+```
 
 ## Search Endpoints
 
