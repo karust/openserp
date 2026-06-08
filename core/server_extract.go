@@ -180,6 +180,10 @@ func (s *Server) enrichEnvelopeWithExtraction(ctx context.Context, env *Envelope
 	if limit > len(env.Results) {
 		limit = len(env.Results)
 	}
+	candidateLimit := limit + 3
+	if candidateLimit > len(env.Results) {
+		candidateLimit = len(env.Results)
+	}
 
 	// Per-fetch timeouts bound a single URL; this aggregate deadline bounds the
 	// whole batch so a few slow/hanging targets can't stretch the search request
@@ -187,8 +191,45 @@ func (s *Server) enrichEnvelopeWithExtraction(ctx context.Context, env *Envelope
 	// Config.BatchTimeout) rather than a separate knob. When it fires, in-flight
 	// fetches are cancelled and any not yet started record a timeout error instead
 	// of a result — never a 500.
-	ctx, cancel := context.WithTimeout(ctx, cfg.BatchTimeout(limit))
+	ctx, cancel := context.WithTimeout(ctx, cfg.BatchTimeout(candidateLimit))
 	defer cancel()
+
+	extractOne := func(idx int) {
+		// Skip the fetch entirely if the batch budget is already spent.
+		if err := ctx.Err(); err != nil {
+			env.Results[idx].Extracted = &ExtractedContent{Error: sanitizeExtractError(err)}
+			return
+		}
+		req := extractpkg.ExtractRequest{
+			URL:      env.Results[idx].URL,
+			Mode:     extractpkg.Mode(q.ExtractMode),
+			ProxyURL: q.ProxyURL,
+			LangCode: q.LangCode,
+			Timeout:  cfg.Timeout,
+			MaxBytes: cfg.MaxBytes,
+			MinRunes: q.ExtractMinRunes,
+		}
+		result, err := extractor.Extract(ctx, req)
+		if err != nil {
+			env.Results[idx].Extracted = &ExtractedContent{Error: sanitizeExtractError(err)}
+			return
+		}
+		content := result.Markdown
+		if contentFormat == "text" {
+			content = result.Text
+		}
+		if !extractedContentLooksUseful(content) {
+			env.Results[idx].Extracted = &ExtractedContent{Error: "empty extracted content"}
+			return
+		}
+		env.Results[idx].Extracted = &ExtractedContent{
+			Title:     result.Title,
+			Format:    contentFormat,
+			Content:   content,
+			ModeUsed:  result.Meta.ModeUsed,
+			FetchedAt: result.Meta.FetchedAt,
+		}
+	}
 
 	sem := make(chan struct{}, cfg.MaxConcurrent)
 	var wg sync.WaitGroup
@@ -201,39 +242,43 @@ func (s *Server) enrichEnvelopeWithExtraction(ctx context.Context, env *Envelope
 		go func(idx int) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			// Skip the fetch entirely if the batch budget is already spent.
-			if err := ctx.Err(); err != nil {
-				env.Results[idx].Extracted = &ExtractedContent{Error: sanitizeExtractError(err)}
-				return
-			}
-			req := extractpkg.ExtractRequest{
-				URL:      env.Results[idx].URL,
-				Mode:     extractpkg.Mode(q.ExtractMode),
-				ProxyURL: q.ProxyURL,
-				LangCode: q.LangCode,
-				Timeout:  cfg.Timeout,
-				MaxBytes: cfg.MaxBytes,
-				MinRunes: q.ExtractMinRunes,
-			}
-			result, err := extractor.Extract(ctx, req)
-			if err != nil {
-				env.Results[idx].Extracted = &ExtractedContent{Error: sanitizeExtractError(err)}
-				return
-			}
-			content := result.Markdown
-			if contentFormat == "text" {
-				content = result.Text
-			}
-			env.Results[idx].Extracted = &ExtractedContent{
-				Title:     result.Title,
-				Format:    contentFormat,
-				Content:   content,
-				ModeUsed:  result.Meta.ModeUsed,
-				FetchedAt: result.Meta.FetchedAt,
-			}
+			extractOne(idx)
 		}(i)
 	}
 	wg.Wait()
+
+	successes := extractedSuccessCount(env.Results[:limit])
+	for i := limit; successes < limit && i < candidateLimit; i++ {
+		if strings.TrimSpace(env.Results[i].URL) == "" {
+			continue
+		}
+		extractOne(i)
+		if extractedResultSucceeded(env.Results[i]) {
+			successes++
+		}
+	}
+}
+
+const minUsefulExtractRunes = 80
+
+func extractedContentLooksUseful(content string) bool {
+	return len([]rune(strings.TrimSpace(content))) >= minUsefulExtractRunes
+}
+
+func extractedSuccessCount(results []Result) int {
+	count := 0
+	for _, result := range results {
+		if extractedResultSucceeded(result) {
+			count++
+		}
+	}
+	return count
+}
+
+func extractedResultSucceeded(result Result) bool {
+	return result.Extracted != nil &&
+		result.Extracted.Error == "" &&
+		extractedContentLooksUseful(result.Extracted.Content)
 }
 
 func sendExtractResult(c *fiber.Ctx, format string, result *extractpkg.ExtractResult) error {
