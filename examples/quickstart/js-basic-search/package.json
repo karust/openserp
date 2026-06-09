@@ -1,0 +1,14 @@
+{
+  "name": "openserp-example-js-basic-search",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@openserp/sdk": "^0.2.0"
+  }
+}

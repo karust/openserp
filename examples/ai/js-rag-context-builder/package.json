@@ -1,0 +1,14 @@
+{
+  "name": "openserp-example-js-rag-context-builder",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@openserp/sdk": "^0.2.0"
+  }
+}

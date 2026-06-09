@@ -69,9 +69,9 @@ Once the server is running, the interactive docs are available locally:
 
 To browse the spec without running the server, see [docs/openapi.yaml](./docs/openapi.yaml). For a higher-level overview of how OpenSERP works internally, see the [architecture docs](https://openserp.org/docs/architecture/).
 
-## SDKs & Integrations
+## SDKs & Examples
 
-Official client packages. Each works against your self-hosted server (point it at the server's base URL):
+Official client packages. Each works against your self-hosted server (set `baseUrl`) or the [hosted API](https://openserp.org/cloud) (set `apiKey`):
 
 | Type                        | Package                                                                                      | Install                         |
 | --------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------- |
@@ -79,6 +79,8 @@ Official client packages. Each works against your self-hosted server (point it a
 | Python SDK                  | [`openserp`](https://pypi.org/project/openserp/)                                             | `pip install openserp`          |
 | MCP server (AI agents)      | [`@openserp/mcp`](https://www.npmjs.com/package/@openserp/mcp)                               | `npx @openserp/mcp`             |
 | n8n community node          | [`@openserp/n8n-nodes-openserp`](https://www.npmjs.com/package/@openserp/n8n-nodes-openserp) | Install via n8n community nodes |
+
+See [**examples**](./examples) for small JavaScript and Python use cases covering search, AI grounding, SEO, content extraction, and image search.
 
 ```js
 import { OpenSERP } from "@openserp/sdk";
