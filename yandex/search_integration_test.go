@@ -1,7 +1,7 @@
 //go:build integration
 // +build integration
 
-package ecosia
+package yandex
 
 import (
 	"testing"
@@ -10,7 +10,7 @@ import (
 	"github.com/karust/openserp/testutil/ithelper"
 )
 
-func TestSearchEcosia(t *testing.T) {
+func TestSearchYandex(t *testing.T) {
 	ithelper.RunEngineTests(t, func(b *core.Browser) core.SearchEngine {
 		return New(*b, core.SearchEngineOptions{})
 	})
