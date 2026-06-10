@@ -8,8 +8,8 @@
 4. Run `make fmt`, `make lint`, and `make test` before opening the PR.
 5. Explain what changed, why it changed, and how you tested it.
 
-Good first issues are curated in [`GOOD_FIRST_ISSUES.md`](GOOD_FIRST_ISSUES.md).
-New engine work should start with [`ADDING_AN_ENGINE.md`](ADDING_AN_ENGINE.md).
+Good first issues are curated in [`GOOD_FIRST_ISSUES.md`](https://github.com/karust/openserp/blob/main/docs/GOOD_FIRST_ISSUES.md).
+New engine work should start with [`ADDING_AN_ENGINE.md`](https://github.com/karust/openserp/blob/main/docs/ADDING_AN_ENGINE.md).
 
 ## Development Setup
 
@@ -92,7 +92,7 @@ Update [`config.yaml`](../config.yaml) with your engine section:
 - Parser tests (prefer deterministic fixtures in `testdata/`)
 - Integration tests guarded by `testutil.RequireIntegration(t)`
 
-See [`ADDING_AN_ENGINE.md`](ADDING_AN_ENGINE.md) for the full checklist.
+See [`ADDING_AN_ENGINE.md`](https://github.com/karust/openserp/blob/main/docs/ADDING_AN_ENGINE.md) for the full checklist.
 
 ## Code Style and Quality Checks
 

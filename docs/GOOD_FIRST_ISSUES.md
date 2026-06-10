@@ -14,26 +14,11 @@ with [`ADDING_AN_ENGINE.md`](ADDING_AN_ENGINE.md).
 
 Area: CLI, tests
 
-Add a table test verifying every supported engine name is accepted by the CLI and
-an unknown engine returns a deterministic, user-friendly error listing valid
-engines. Covers `google`, `yandex`, `baidu`, `bing`, `duckduckgo`, `ecosia`.
-Start in [`cmd/search.go`](../cmd/search.go).
-
-### [#28 Add Yandex parser fallback micro-fixtures](https://github.com/karust/openserp/issues/28)
-
-Area: parser tests
-
-Add compact Yandex HTML fixtures covering link, title, and snippet fallback
-selectors without depending on full saved result pages. No browser or network.
-Start in `yandex/selectors.go` and `yandex/parse_html.go`.
-
-### [#29 Add Baidu parser fallback micro-fixtures](https://github.com/karust/openserp/issues/29)
-
-Area: parser tests
-
-Add compact Baidu HTML fixtures for title, URL, and description fallback paths.
-Missing optional fields must not panic; result order stays stable. No browser or
-network. Start in `baidu/selectors.go` and `baidu/parse_html.go`.
+Make the unknown-engine error list valid engine names, then add a table test for
+engine dispatch in both modes: browser mode accepts all six engines (`google`,
+`yandex`, `baidu`, `bing`, `duckduckgo`, `ecosia`); raw mode accepts
+`google/yandex/baidu/ecosia` and rejects `bing`/`duckduckgo` with a clear message.
+Both dispatch switches live in [`cmd/search.go`](../cmd/search.go).
 
 ### [#30 Document raw-mode support per engine](https://github.com/karust/openserp/issues/30)
 
@@ -47,10 +32,11 @@ search-endpoint section. Start in `cmd/serve.go` and `README.md`.
 
 Area: release tooling
 
-Add a script under `.release/` that builds the binary, starts the server, checks
-`/health`, and exits cleanly. It must fail fast with a useful error when the
-server does not become healthy. Docker and `go install` checks are follow-ups.
-Document it in [`.release/build.md`](../.release/build.md).
+Add a script under `scripts/` (e.g. `scripts/smoke-check.sh`) that builds the
+binary, starts the server, polls `/health` until ready, then shuts down and exits
+cleanly. It must fail fast with a non-zero exit when the server does not become
+healthy. Docker and `go install` checks are follow-ups. Document it in
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Backlog
 

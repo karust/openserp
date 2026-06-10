@@ -61,8 +61,8 @@ func TestBuildSearchURL(t *testing.T) {
 				if got := params.Get("pws"); got != "0" {
 					t.Fatalf("unexpected pws value: %q", got)
 				}
-				if got := params.Get("nfpr"); got != "1" {
-					t.Fatalf("unexpected nfpr value: %q", got)
+				if got := params.Get("nfpr"); got != "" {
+					t.Fatalf("nfpr should be omitted by default, got %q", got)
 				}
 			},
 		},

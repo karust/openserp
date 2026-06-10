@@ -298,8 +298,7 @@ func BuildURL(q core.Query) (string, error) {
 		params.Add("lr", "lang_"+locale.language)
 	}
 
-	params.Add("pws", "0")  // Do not personalize earch results
-	params.Add("nfpr", "1") // Do not auto correct search queries
+	params.Add("pws", "0") // Do not personalize search results
 	params.Add("sourceid", "chrome")
 	params.Add("ie", "UTF-8")
 
@@ -367,8 +366,7 @@ func BuildImageURL(q core.Query) (string, error) {
 		params.Add("lr", "lang_"+locale.language)
 	}
 
-	params.Add("pws", "0")  // Do not personalize earch results
-	params.Add("nfpr", "1") // Do not auto correct search queries
+	params.Add("pws", "0") // Do not personalize search results
 
 	base.RawQuery = params.Encode()
 	return base.String(), nil

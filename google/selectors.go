@@ -53,3 +53,7 @@ var Selectors = struct {
 	// ImageTitle selectors are tried in order to recover a human-readable title.
 	ImageTitle: []string{"h3", "a"},
 }
+
+func searchResultSelectors() []string {
+	return []string{Selectors.Results, Selectors.ResultsBroad}
+}

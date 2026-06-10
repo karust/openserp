@@ -222,10 +222,10 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 		gogl.acceptCookies(page)
 	}
 
-	// Wait for result containers (data-hveid + data-ved) to hydrate. WaitLoad in
-	// Navigate fires before Google's right-rail/answers script attaches these
-	// attributes, so a one-shot Search races the DOM and frequently sees nothing.
-	searchResultElems, _, err := core.WaitForElements(ctx, page, []string{Selectors.Results}, gogl.GetSelectorTimeout())
+	// Wait for the canonical organic wrapper first, then Google's broader
+	// data-hveid/data-ved layout. Headless and headful Chrome can receive
+	// different SERP markup for the same query.
+	searchResultElems, matchedSelector, err := core.WaitForElements(ctx, page, searchResultSelectors(), gogl.GetSelectorTimeout())
 	if err != nil {
 		if gogl.checkCaptcha(page, query.ProxyURL) {
 			gogl.logger.Error("Captcha detected: %s", url)
@@ -240,6 +240,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 		}
 		return nil, core.ErrSearchTimeout
 	}
+	gogl.logger.Debug("Search result selector matched: %s (%d elements)", matchedSelector, len(searchResultElems))
 
 	totalResults, err := gogl.getTotalResults(page)
 	if err != nil {
@@ -250,12 +251,18 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 	rank := query.Start
 	adRank := 1
 	absoluteRank := query.Start + 1
+	// When matched by the canonical organic selector (div.tF2Cxc) every element
+	// is already an organic result, but the wrapper itself often lacks data-ved
+	// (it sits on the outer .g/data-hveid container). Only require data-ved when
+	// we fell back to the broad attribute selector, which also matches non-result
+	// blocks (knowledge panels, nav) that must be filtered out.
+	matchedOrganic := matchedSelector == Selectors.Results
 	for _, resEl := range searchResultElems {
 		srchRes := core.SearchResult{}
 
 		isAd := googleElementHasAdMarker(resEl)
 		isAnswerBox := query.Features && core.HasAttribute(resEl, "data-ulkwtsb") && !core.HasAttribute(resEl, "data-ispaa")
-		isResultCandidate := core.HasAttribute(resEl, "data-ved")
+		isResultCandidate := matchedOrganic || core.HasAttribute(resEl, "data-ved")
 
 		if isAd {
 			// 1. Parse ads
@@ -364,7 +371,11 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 				}
 				srchRes.URL = href.String()
 				srchRes.Title = answerText[0]
-				srchRes.Description = strings.Join(answerText[1:len(answerText)-2], "\n")
+				// answerText is [title, body..., source, meta]; drop the trailing
+				// two metadata lines, but never slice past the title — a short
+				// answer (len 2) would otherwise produce answerText[1:0] and panic.
+				descEnd := max(len(answerText)-2, 1)
+				srchRes.Description = strings.Join(answerText[1:descEnd], "\n")
 				srchRes.Rank = -1 * (i + 1)
 				srchRes.Type = core.ResultTypePeopleAlsoAsk
 				searchResults = append(searchResults, srchRes)
@@ -379,17 +390,11 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			}
 			srchRes.Title, _ = titleTag.Text()
 
-			// Get URL from parent link of h3
-			link, err := titleTag.Parent()
-			if err == nil {
-				isLink, matchErr := link.Matches(Selectors.Link)
-				if matchErr != nil {
-					gogl.logger.Debug("Failed to match link selector: %s", matchErr)
-				}
-				if isLink {
-					href, _ := link.Property("href")
-					srchRes.URL = href.String()
-				}
+			// Get URL from the nearest link around the title.
+			link := core.ClosestMatching(titleTag, Selectors.Link, 3)
+			if link != nil {
+				href, _ := link.Property("href")
+				srchRes.URL = href.String()
 			}
 
 			// Skip if URL is empty
@@ -404,18 +409,18 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			} else if descTag, err := resEl.Element(Selectors.DescFallback); err == nil {
 				desc, _ = descTag.Text()
 			} else {
-				// Structural fallback
-				parent, err := titleTag.Parent()
-				if err == nil {
-					parent, err = parent.Parent()
-					if err == nil {
-						parent, err = parent.Parent()
-						if err == nil {
-							if descTag, err := parent.Next(); err == nil {
-								if descDiv, err := descTag.Element(Selectors.DescAny); err == nil {
-									desc, _ = descDiv.Text()
-								}
-							}
+				// Structural fallback: the description lives in the sibling block
+				// after the title's great-grandparent wrapper.
+				anchor := titleTag
+				for i := 0; i < 3 && anchor != nil; i++ {
+					if anchor, err = anchor.Parent(); err != nil {
+						anchor = nil
+					}
+				}
+				if anchor != nil {
+					if sib, err := anchor.Next(); err == nil {
+						if descDiv, err := sib.Element(Selectors.DescAny); err == nil {
+							desc, _ = descDiv.Text()
 						}
 					}
 				}
