@@ -1,5 +1,16 @@
 # Contributing to OpenSERP
 
+## Fastest Path to a Merged PR
+
+1. Pick a focused issue, ideally one labeled `good first issue`.
+2. Comment on the issue with the approach you plan to take.
+3. Keep the PR narrow: one bug, one parser fallback, one docs page, or one engine step.
+4. Run `make fmt`, `make lint`, and `make test` before opening the PR.
+5. Explain what changed, why it changed, and how you tested it.
+
+Good first issues are curated in [`GOOD_FIRST_ISSUES.md`](GOOD_FIRST_ISSUES.md).
+New engine work should start with [`ADDING_AN_ENGINE.md`](ADDING_AN_ENGINE.md).
+
 ## Development Setup
 
 ### Prerequisites
@@ -7,14 +18,15 @@
 - Go 1.24+
 - Chromium/Chrome (only required for browser-mode work and integration tests)
 - Optional: Docker
+- Optional: `make` and `golangci-lint` for the same local workflow used by CI
 
 ### Clone, build, run
 
 ```bash
 git clone https://github.com/karust/openserp.git
 cd openserp
-go build -o openserp .
-./openserp serve
+make build
+make run
 ```
 
 ### Test commands
@@ -22,13 +34,13 @@ go build -o openserp .
 Unit tests (default, no browser/network assumptions):
 
 ```bash
-go test -race ./...
+make test
 ```
 
 Integration tests (explicitly enabled):
 
 ```bash
-OPENSERP_INTEGRATION_TESTS=1 go test -race -timeout=120s ./...
+make test-integration
 ```
 
 Notes:
@@ -80,15 +92,16 @@ Update [`config.yaml`](../config.yaml) with your engine section:
 - Parser tests (prefer deterministic fixtures in `testdata/`)
 - Integration tests guarded by `testutil.RequireIntegration(t)`
 
+See [`ADDING_AN_ENGINE.md`](ADDING_AN_ENGINE.md) for the full checklist.
+
 ## Code Style and Quality Checks
 
 Run these before opening a PR:
 
 ```bash
-gofmt -w .
-go vet ./...
-golangci-lint run
-go test -race ./...
+make fmt
+make lint
+make test
 ```
 
 Guidelines:

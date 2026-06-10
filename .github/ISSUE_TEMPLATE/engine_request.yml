@@ -1,0 +1,47 @@
+name: Engine request
+description: Request support for a new search engine or engine vertical.
+title: "engine: "
+labels: ["enhancement"]
+body:
+  - type: input
+    id: engine
+    attributes:
+      label: Engine name
+      placeholder: "Brave Search"
+    validations:
+      required: true
+  - type: input
+    id: search_url
+    attributes:
+      label: Public search URL
+      placeholder: "https://search.brave.com/search?q=openserp"
+    validations:
+      required: true
+  - type: dropdown
+    id: vertical
+    attributes:
+      label: Result type
+      options:
+        - web
+        - images
+        - web and images
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: selectors
+    attributes:
+      label: Known stable selectors or sample HTML
+      description: If you inspected the page, mention stable data attributes or attach a sanitized fixture.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Region/language quirks, captcha behavior, pagination, or API constraints.
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I can help test this engine.
+        - label: I am willing to implement this engine.

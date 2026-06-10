@@ -1,0 +1,76 @@
+name: Bug report
+description: Report a reproducible OpenSERP bug.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Reproducible reports are the fastest to fix.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the unexpected behavior and what you expected instead.
+      placeholder: "Google search returns empty results for ..."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How do we reproduce it?
+      description: Include the exact command, request, config, and minimal input.
+      placeholder: |
+        1. Run `openserp serve ...`
+        2. Request `curl "..."`
+        3. See ...
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Retrieval mode
+      options:
+        - browser
+        - raw
+        - both
+        - not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine
+      options:
+        - google
+        - yandex
+        - baidu
+        - bing
+        - duckduckgo
+        - ecosia
+        - megasearch
+        - not engine-specific
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: OpenSERP version
+      description: Paste `openserp --version`, the Docker tag, or the commit SHA.
+      placeholder: "0.8.0 / v0.7.15 / commit SHA"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Go version, Docker/browser version, proxy/captcha setup if relevant.
+      placeholder: "Windows 11, Go 1.24, Docker, Chromium ..."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or response body
+      description: Paste relevant logs, stack traces, or API responses. Remove secrets and proxy credentials.
+      render: shell

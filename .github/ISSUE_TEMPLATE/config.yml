@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Contributing guide
+    url: https://github.com/karust/openserp/blob/main/docs/CONTRIBUTING.md
+    about: Start here before opening a pull request.
+  - name: Add a new engine guide
+    url: https://github.com/karust/openserp/blob/main/docs/ADDING_AN_ENGINE.md
+    about: Implementation checklist for new search engines.
