@@ -131,13 +131,6 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 	e = &scoped
 
 	e.logger.Debug("Starting search, query: %+v", query)
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanicWithContext(ctx, e.Name(), recovered, e.logger)
-			results = nil
-		}
-	}()
-
 	// nextRank counts up across pages for organic results; nextAdRank counts
 	// up within sponsored results so ad rank stays separate from SEO rank.
 	all := []core.SearchResult{}
@@ -288,13 +281,6 @@ func (e *Ecosia) SearchImage(ctx context.Context, query core.Query) (results []c
 	e = &scoped
 
 	e.logger.Debug("Starting image search, query: %+v", query)
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanicWithContext(ctx, e.Name(), recovered, e.logger)
-			results = nil
-		}
-	}()
-
 	out := []core.SearchResult{}
 	pageNum := 0
 	nextRank := 1

@@ -213,13 +213,15 @@ func (b *Browser) configureRequestBlocking(ctx context.Context, page *rod.Page) 
 
 	blocked := blockedResourceTypeSet(b.BlockResourceTypes)
 	router := page.HijackRequests()
-	router.MustAdd("*", func(h *rod.Hijack) {
+	if err := router.Add("*", "", func(h *rod.Hijack) {
 		if _, ok := blocked[h.Request.Type()]; ok {
 			h.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
 			return
 		}
 		h.ContinueRequest(&proto.FetchContinueRequest{})
-	})
+	}); err != nil {
+		return fmt.Errorf("install resource-blocking route: %w", err)
+	}
 
 	go router.Run()
 

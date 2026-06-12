@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -294,6 +295,9 @@ type Query struct {
 	ProxyOverride string
 	// Insecure enables insecure TLS for request/browser execution.
 	Insecure bool
+	// GuardPrivateNetworks rejects raw HTTP targets that resolve to private,
+	// loopback, link-local, multicast, or otherwise non-public addresses.
+	GuardPrivateNetworks bool
 }
 
 // String renders Query for logs with the proxy URL credentials masked. The
@@ -447,7 +451,17 @@ type SearchEngineOptions struct {
 	// IsSolveCaptcha enables automatic captcha solving when engine support and
 	// solver credentials are configured.
 	IsSolveCaptcha bool `mapstructure:"captcha"`
+
+	limiterState *rateLimiterState
 }
+
+type rateLimiterState struct {
+	limiter *rate.Limiter
+	every   time.Duration
+	burst   int
+}
+
+var searchEngineOptionsLimiterMu sync.Mutex
 
 // Init sets default option values when fields are zero.
 func (o *SearchEngineOptions) Init() {
@@ -471,10 +485,23 @@ func (o *SearchEngineOptions) GetRatelimit() time.Duration {
 	return (time.Duration(o.RateTime) * time.Second) / time.Duration(o.RateRequests)
 }
 
-// GetRateLimiter returns a limiter configured from SearchEngineOptions.
-// Call Init() first so RateBurst is non-zero.
+// GetRateLimiter returns a cached limiter configured from SearchEngineOptions.
+// Call Init() first so RateBurst is non-zero. Do not copy SearchEngineOptions
+// after first use; the limiter state is intentionally shared by each engine.
 func (o *SearchEngineOptions) GetRateLimiter() *rate.Limiter {
-	return rate.NewLimiter(rate.Every(o.GetRatelimit()), o.RateBurst)
+	every := o.GetRatelimit()
+	burst := o.RateBurst
+	searchEngineOptionsLimiterMu.Lock()
+	defer searchEngineOptionsLimiterMu.Unlock()
+	if o.limiterState == nil {
+		o.limiterState = &rateLimiterState{}
+	}
+	if o.limiterState.limiter == nil || o.limiterState.every != every || o.limiterState.burst != burst {
+		o.limiterState.limiter = rate.NewLimiter(rate.Every(every), burst)
+		o.limiterState.every = every
+		o.limiterState.burst = burst
+	}
+	return o.limiterState.limiter
 }
 
 // GetSelectorTimeout returns the selector wait timeout as time.Duration.

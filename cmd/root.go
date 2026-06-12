@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	version               = "0.8.2"
+	version               = "0.8.3"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -412,6 +412,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("extract.timeout", "20s")
 	v.SetDefault("extract.max_bytes", 2*1024*1024)
 	v.SetDefault("extract.max_concurrent", 2)
+	v.SetDefault("extract.allow_private_networks", false)
 	// Keep stage2 defaults stable even when config file is absent.
 	v.SetDefault("resilience.max_retries", 3)
 	v.SetDefault("resilience.allow_endpoint_fallback", false)

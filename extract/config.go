@@ -3,11 +3,12 @@ package extract
 import "time"
 
 type Config struct {
-	Enabled       bool          `json:"enabled" mapstructure:"enabled"`
-	DefaultMode   string        `json:"default_mode" mapstructure:"default_mode"`
-	Timeout       time.Duration `json:"timeout" mapstructure:"timeout"`
-	MaxBytes      int           `json:"max_bytes" mapstructure:"max_bytes"`
-	MaxConcurrent int           `json:"max_concurrent" mapstructure:"max_concurrent"`
+	Enabled              bool          `json:"enabled" mapstructure:"enabled"`
+	DefaultMode          string        `json:"default_mode" mapstructure:"default_mode"`
+	Timeout              time.Duration `json:"timeout" mapstructure:"timeout"`
+	MaxBytes             int           `json:"max_bytes" mapstructure:"max_bytes"`
+	MaxConcurrent        int           `json:"max_concurrent" mapstructure:"max_concurrent"`
+	AllowPrivateNetworks bool          `json:"allow_private_networks" mapstructure:"allow_private_networks"`
 }
 
 func DefaultConfig() Config {

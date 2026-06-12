@@ -185,12 +185,6 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 	yand = &scoped
 
 	yand.logger.Debug("Starting search, query: %+v", query)
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanicWithContext(ctx, yand.Name(), recovered, yand.logger)
-			results = nil
-		}
-	}()
 	if query.Start < 0 {
 		return nil, fmt.Errorf("incorrect start provided")
 	}

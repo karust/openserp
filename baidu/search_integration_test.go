@@ -12,6 +12,6 @@ import (
 
 func TestSearchBaidu(t *testing.T) {
 	ithelper.RunEngineTests(t, func(b *core.Browser) core.SearchEngine {
-		return New(*b, core.SearchEngineOptions{})
+		return New(*b, ithelper.EngineOptions())
 	})
 }

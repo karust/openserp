@@ -175,7 +175,7 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 		limiter := engine.GetRateLimiter()
 		if limiter != nil {
 			if err := limiter.Wait(callCtx); err != nil {
-				return nil, err
+				return nil, normalizeLimiterWaitErr(callCtx, err)
 			}
 		}
 
@@ -202,16 +202,8 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 			attemptMeta.Used = MaskProxyURL(proxyURL)
 		}
 
-		var (
-			results []SearchResult
-			err     error
-		)
 		requestCtx := proxyRequestContext(callCtx, engine.Name(), attemptQuery)
-		if isImage {
-			results, err = engine.SearchImage(requestCtx, attemptQuery)
-		} else {
-			results, err = engine.Search(requestCtx, attemptQuery)
-		}
+		results, err := invokeEngine(requestCtx, engine, attemptQuery, isImage)
 
 		if reportToRegistry {
 			rs.reportProxyAttempt(engineCtx, proxyURL, err)
@@ -231,7 +223,7 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 	})
 
 	if result.Err != nil {
-		if !errors.Is(result.Err, ErrProxyUnavailable) {
+		if shouldRecordCircuitFailure(result.Err) {
 			cb.RecordFailure(engineCtx)
 		}
 		return nil, attemptMeta, result.Err
@@ -239,6 +231,44 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 
 	cb.RecordSuccessDuration(engineCtx, time.Since(startedAt))
 	return result.Results, attemptMeta, nil
+}
+
+func shouldRecordCircuitFailure(err error) bool {
+	return err != nil &&
+		!IsContextDone(err) &&
+		!errors.Is(err, ErrProxyUnavailable) &&
+		!errors.Is(err, ErrCircuitOpen)
+}
+
+// normalizeLimiterWaitErr maps rate.Limiter.Wait failures back to the caller's
+// context error. Wait reports a bare "would exceed context deadline" error that
+// errors.Is cannot trace to the context, so without this an impatient client
+// would be counted as an engine failure by the circuit breaker.
+func normalizeLimiterWaitErr(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if _, hasDeadline := ctx.Deadline(); hasDeadline {
+		return fmt.Errorf("%w: %v", context.DeadlineExceeded, err)
+	}
+	return err
+}
+
+// invokeEngine is the single panic-recovery point for every engine call made
+// through the resilient pipeline (browser, raw, and any future engine method).
+// A rod/CDP panic surfaces as ErrEngineInternal instead of killing the process.
+func invokeEngine(ctx context.Context, engine SearchEngine, q Query, isImage bool) (results []SearchResult, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			results = nil
+			err = RecoverEnginePanicWithContext(ctx, engine.Name(), recovered, nil)
+		}
+	}()
+
+	if isImage {
+		return engine.SearchImage(ctx, q)
+	}
+	return engine.Search(ctx, q)
 }
 
 // SearchAllParallel applies retry/circuit protections per engine for mega search.

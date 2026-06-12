@@ -101,7 +101,7 @@ func (e *Extractor) extractRendered(ctx context.Context, req ExtractRequest, sta
 }
 
 func normalizeRequest(req ExtractRequest, cfg Config) ExtractRequest {
-	req.URL = normalizeURL(strings.TrimSpace(req.URL))
+	req.URL = NormalizeURL(strings.TrimSpace(req.URL))
 	if req.Timeout <= 0 {
 		req.Timeout = cfg.Timeout
 	}
@@ -115,9 +115,8 @@ func normalizeRequest(req ExtractRequest, cfg Config) ExtractRequest {
 	return req
 }
 
-// normalizeURL defaults a missing scheme to https so callers can pass a bare host
-// (e.g. "kamaloff.ru"). URLs that already carry a scheme are left untouched.
-func normalizeURL(raw string) string {
+// NormalizeURL defaults a missing scheme to https so callers can pass a bare host
+func NormalizeURL(raw string) string {
 	if raw == "" || strings.Contains(raw, "://") || strings.HasPrefix(raw, "//") {
 		return raw
 	}

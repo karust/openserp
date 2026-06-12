@@ -47,6 +47,13 @@ func HandleError(t *testing.T, operation string, err error) {
 	t.Skipf("skipping flaky live %s: %v", operation, err)
 }
 
+// EngineOptions returns engine options tuned for live-site integration runs.
+// Real SERPs (Baidu especially) hydrate result cards client-side and can take
+// well past the 5s default selector timeout on a first visit.
+func EngineOptions() core.SearchEngineOptions {
+	return core.SearchEngineOptions{SelectorTimeout: 15}
+}
+
 // CreateBrowser creates a browser configured for integration tests and closes
 // it when the test finishes. Respects OPENSERP_INTEGRATION_HEADFUL for
 // debugging (browser and page are left open for inspection).

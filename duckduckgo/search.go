@@ -166,12 +166,6 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 	ddg = &scoped
 
 	ddg.logger.Debug("Starting search, query: %+v", query)
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanicWithContext(ctx, ddg.Name(), recovered, ddg.logger)
-			results = nil
-		}
-	}()
 
 	allResults := []core.SearchResult{}
 	var pageFeatures []core.SerpFeature

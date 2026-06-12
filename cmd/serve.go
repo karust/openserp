@@ -27,7 +27,9 @@ import (
 
 // rawEngine implements SearchEngine interface for raw HTTP requests
 type rawEngine struct {
-	name string
+	name      string
+	limiterMu sync.Mutex
+	limiter   *rate.Limiter
 }
 
 func (r *rawEngine) Search(ctx context.Context, q core.Query) ([]core.SearchResult, error) {
@@ -60,8 +62,13 @@ func (r *rawEngine) IsInitialized() bool {
 }
 
 func (r *rawEngine) GetRateLimiter() *rate.Limiter {
-	// Use default rate limiter for raw requests
-	return rate.NewLimiter(rate.Every(time.Second), 5)
+	r.limiterMu.Lock()
+	defer r.limiterMu.Unlock()
+	if r.limiter == nil {
+		// Use default rate limiter for raw requests.
+		r.limiter = rate.NewLimiter(rate.Every(time.Second), 5)
+	}
+	return r.limiter
 }
 
 var serveCMD = &cobra.Command{
@@ -151,6 +158,14 @@ func buildFingerprintBrowserOptions() core.BrowserOpts {
 }
 
 func buildServerOptions(corsCfg core.CORSConfig, proxyCfg core.ProxyConfig, fingerprintBrowserOpts core.BrowserOpts) core.ServerOptions {
+	retryCfg := core.RetryConfig{
+		MaxRetries:     config.Resilience.MaxRetries,
+		InitialBackoff: 1 * time.Second,
+		MaxBackoff:     30 * time.Second,
+		BackoffFactor:  2.0,
+	}
+	engineTimeout := time.Duration(config.App.Timeout) * time.Second
+
 	return core.ServerOptions{
 		CacheTTL:               time.Duration(config.Cache.TTLSeconds) * time.Second,
 		CacheMaxSize:           config.Cache.MaxSize,
@@ -161,14 +176,10 @@ func buildServerOptions(corsCfg core.CORSConfig, proxyCfg core.ProxyConfig, fing
 		FingerprintArtifactDir: core.DefaultFingerprintArtifactDir,
 		FingerprintBrowserOpts: fingerprintBrowserOpts,
 		MegaTimeout:            config.App.MegaTimeout,
+		RequestTimeout:         core.RequestTimeoutForRetries(engineTimeout, retryCfg),
 		Extract:                config.Extract,
 		Resilience: core.ResilientConfig{
-			Retry: core.RetryConfig{
-				MaxRetries:     config.Resilience.MaxRetries,
-				InitialBackoff: 1 * time.Second,
-				MaxBackoff:     30 * time.Second,
-				BackoffFactor:  2.0,
-			},
+			Retry: retryCfg,
 			CircuitBreaker: core.CircuitBreakerConfig{
 				FailureThreshold: config.CircuitBreaker.Failures,
 				RecoveryTimeout:  time.Duration(config.CircuitBreaker.RecoverySeconds) * time.Second,
@@ -530,7 +541,6 @@ func (p *browserPool) close() error {
 
 type pooledBrowserEngine struct {
 	name    string
-	limiter *rate.Limiter
 	opts    core.SearchEngineOptions
 	factory func(core.Browser, core.SearchEngineOptions) core.SearchEngine
 	pool    *browserPool
@@ -574,7 +584,7 @@ func (e *pooledBrowserEngine) Name() string {
 }
 
 func (e *pooledBrowserEngine) GetRateLimiter() *rate.Limiter {
-	return e.limiter
+	return e.opts.GetRateLimiter()
 }
 
 func (e *pooledBrowserEngine) DropProxyLaneCookies(ctx context.Context, q core.Query) {
@@ -699,7 +709,6 @@ func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) (
 		opts.Init()
 		base := &pooledBrowserEngine{
 			name:            spec.name,
-			limiter:         rate.NewLimiter(rate.Every(opts.GetRatelimit()), opts.RateBurst),
 			opts:            opts,
 			factory:         spec.factory,
 			pool:            pool,

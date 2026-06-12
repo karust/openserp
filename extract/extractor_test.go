@@ -76,8 +76,8 @@ func TestNormalizeURL(t *testing.T) {
 		"socks5h://127.0.0.1:80": "socks5h://127.0.0.1:80",
 	}
 	for in, want := range cases {
-		if got := normalizeURL(in); got != want {
-			t.Errorf("normalizeURL(%q) = %q, want %q", in, got, want)
+		if got := NormalizeURL(in); got != want {
+			t.Errorf("NormalizeURL(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
