@@ -1,6 +1,6 @@
-# OpenSERP (Search Engine Results)
-
 ![OpenSERP](./logo.svg)
+
+# OpenSERP (Search Engine Results)
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/karust/openserp)](https://goreportcard.com/report/github.com/karust/openserp)
 [![Go Reference](https://pkg.go.dev/badge/github/karust/openserp?style=for-the-badge)](https://pkg.go.dev/github.com/karust/openserp)
@@ -36,7 +36,7 @@ Run it locally, self-host it, or use the optional hosted API when you do not wan
 
 ### Docker
 
-```bash
+```sh
 # Run the API server via prebuilt image
 docker run --rm -p 127.0.0.1:7000:7000 karust/openserp:latest serve -a 0.0.0.0 -p 7000
 
@@ -46,7 +46,7 @@ docker compose up
 
 ### From Source
 
-```bash
+```sh
 git clone https://github.com/karust/openserp.git
 cd openserp
 go build -o openserp .

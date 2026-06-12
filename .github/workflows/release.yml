@@ -1,0 +1,100 @@
+name: Release
+
+# Publishes binary archives to the GitHub release for a version tag.
+# Docker images are published separately by docker.yml on the same tag.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  # Manual re-run (e.g. after a workflow fix) — must be dispatched from a tag ref.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guard non-tag dispatch
+        if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/v')
+        run: |
+          echo "::error::Manual runs must be dispatched from a v*.*.* tag ref (use the 'Run workflow' ref selector)."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history + tags, needed to diff against the previous release tag
+          fetch-depth: 0
+
+      - name: Check tag matches cmd/root.go version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CODE_VERSION=$(sed -nE 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' cmd/root.go)
+          echo "tag=v${TAG_VERSION} code=${CODE_VERSION}"
+          if [ "$TAG_VERSION" != "$CODE_VERSION" ]; then
+            echo "::error::Git tag v${TAG_VERSION} does not match version \"${CODE_VERSION}\" in cmd/root.go. Bump cmd/root.go before tagging."
+            exit 1
+          fi
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Run unit tests
+        run: go test -count=1 ./...
+
+      - name: Build release binaries
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          for GOOS in darwin linux windows; do
+            for GOARCH in amd64 386 arm64; do
+              if [ "$GOOS" = "darwin" ] && [ "$GOARCH" = "386" ]; then
+                continue
+              fi
+              BIN="openserp"
+              if [ "$GOOS" = "windows" ]; then
+                BIN="openserp.exe"
+              fi
+              rm -f "$BIN"
+              echo "Building ${GOOS}/${GOARCH}..."
+              CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+                go build -trimpath -ldflags="-s -w" -o "$BIN" .
+              tar --create --gzip --file="dist/openserp-${GOOS}-${GOARCH}-${VERSION}.tgz" "$BIN"
+              rm -f "$BIN"
+            done
+          done
+          ls -lh dist/
+
+      # Most changes land directly on main without PRs, and GitHub's
+      # auto-generated notes only list merged PRs — so build the changelog
+      # from commit subjects since the previous tag. Auto-notes stay enabled
+      # below for the compare link and occasional contributor PR credits.
+      - name: Generate commit changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          {
+            echo "## Changes"
+            echo ""
+            if [ -n "$PREV_TAG" ]; then
+              echo "Commits since ${PREV_TAG}:"
+              echo ""
+              git log --no-merges --pretty='- %s' "${PREV_TAG}..${GITHUB_REF_NAME}"
+            else
+              git log --no-merges --pretty='- %s' "${GITHUB_REF_NAME}"
+            fi
+          } > release_notes.md
+          cat release_notes.md
+
+      # Creates the release if it doesn't exist, or attaches the archives to
+      # an existing one (e.g. a release drafted manually in the GitHub UI).
+      - name: Create GitHub release and upload binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tgz
+          body_path: release_notes.md
+          generate_release_notes: true
