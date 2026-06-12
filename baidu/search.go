@@ -160,7 +160,12 @@ func (baid *Baidu) waitForParsedSearchResults(ctx context.Context, page *rod.Pag
 		}
 		return nil, core.ErrParser
 	}
-	return nil, nil
+	// The page never reached a recognizable state: no result containers, no
+	// captcha or timeout markers. Baidu hydrates result cards client-side and
+	// can exceed the selector deadline, so report a timeout rather than a
+	// successful empty SERP — callers must retry/skip, not trust 0 results.
+	baid.logger.Debug("No result containers or block markers within selector timeout")
+	return nil, core.ErrSearchTimeout
 }
 
 // SearchImage executes a Baidu image search and returns normalized image
