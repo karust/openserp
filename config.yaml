@@ -8,7 +8,7 @@ server:
 
 app:
   log_format: "text" # json|text
-  timeout: 15 # Browser/search timeout in seconds
+  timeout: 15 # Browser/search timeout in seconds, per attempt; the request deadline is derived from this x retries
   browser_path: "" # Custom browser binary path (chrome/chromium/edge..)
   profiles: "" # Overriding built-in browser profiles
   head: false # Headful mode
@@ -18,6 +18,8 @@ app:
   idle_ttl: 5m # close a Chrome that has not served traffic for this long
 
   mega_timeout: 90s # max total wait for /mega/* requests; slow engines return partial results
+  block_trackers: true
+  block_resources: "image,font,css,media"
 
 extract:
   enabled: true

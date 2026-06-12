@@ -151,6 +151,14 @@ func buildFingerprintBrowserOptions() core.BrowserOpts {
 }
 
 func buildServerOptions(corsCfg core.CORSConfig, proxyCfg core.ProxyConfig, fingerprintBrowserOpts core.BrowserOpts) core.ServerOptions {
+	retryCfg := core.RetryConfig{
+		MaxRetries:     config.Resilience.MaxRetries,
+		InitialBackoff: 1 * time.Second,
+		MaxBackoff:     30 * time.Second,
+		BackoffFactor:  2.0,
+	}
+	engineTimeout := time.Duration(config.App.Timeout) * time.Second
+
 	return core.ServerOptions{
 		CacheTTL:               time.Duration(config.Cache.TTLSeconds) * time.Second,
 		CacheMaxSize:           config.Cache.MaxSize,
@@ -161,14 +169,10 @@ func buildServerOptions(corsCfg core.CORSConfig, proxyCfg core.ProxyConfig, fing
 		FingerprintArtifactDir: core.DefaultFingerprintArtifactDir,
 		FingerprintBrowserOpts: fingerprintBrowserOpts,
 		MegaTimeout:            config.App.MegaTimeout,
+		RequestTimeout:         core.RequestTimeoutForRetries(engineTimeout, retryCfg),
 		Extract:                config.Extract,
 		Resilience: core.ResilientConfig{
-			Retry: core.RetryConfig{
-				MaxRetries:     config.Resilience.MaxRetries,
-				InitialBackoff: 1 * time.Second,
-				MaxBackoff:     30 * time.Second,
-				BackoffFactor:  2.0,
-			},
+			Retry: retryCfg,
 			CircuitBreaker: core.CircuitBreakerConfig{
 				FailureThreshold: config.CircuitBreaker.Failures,
 				RecoveryTimeout:  time.Duration(config.CircuitBreaker.RecoverySeconds) * time.Second,

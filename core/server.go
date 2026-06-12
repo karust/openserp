@@ -90,6 +90,13 @@ type ServerOptions struct {
 	// as failed with a context-deadline error. Zero disables the bound
 	// (legacy behavior — wait until the slowest engine finishes).
 	MegaTimeout time.Duration
+	// RequestTimeout bounds wall-clock time of any request that does not
+	// manage its own deadline budget (/mega/* uses MegaTimeout, /extract has
+	// a per-batch budget). Exceeding it returns 504 request_timeout. Zero
+	// disables the bound. The serve command derives it from the engine
+	// timeout and retry budget via RequestTimeoutForRetries instead of
+	// exposing a separate config knob.
+	RequestTimeout time.Duration
 	// BrowserResolver returns a pooled browser for rendered extraction.
 	BrowserResolver BrowserResolver
 	// Extract configures the URL extraction endpoint and search enrichment.
@@ -115,7 +122,10 @@ func DefaultServerOptions() ServerOptions {
 		},
 		Resilience:  DefaultResilientConfig(),
 		MegaTimeout: 90 * time.Second,
-		Extract:     extractpkg.DefaultConfig(),
+		// 30s matches the default engine timeout (app.timeout); the serve
+		// command re-derives from the configured values.
+		RequestTimeout: RequestTimeoutForRetries(30*time.Second, DefaultRetryConfig()),
+		Extract:        extractpkg.DefaultConfig(),
 	}
 }
 
@@ -161,6 +171,9 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 	// extract, stats) so the process survives.
 	app.Use(fiberrecover.New(fiberrecover.Config{EnableStackTrace: true}))
 	app.Use(RequestContextMiddleware())
+	if opts.RequestTimeout > 0 {
+		app.Use(RequestTimeoutMiddleware(opts.RequestTimeout))
+	}
 	if opts.EnableCORS {
 		app.Use(CORSMiddleware(opts.CORS))
 	}
