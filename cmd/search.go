@@ -100,7 +100,10 @@ func search(cmd *cobra.Command, args []string) {
 
 func searchBrowser(engineType string, query core.Query, browserProxyURL string, captchaSolverEnabled bool, captchaSolverAPIKey string) ([]core.SearchResult, error) {
 	var engine core.SearchEngine
-	blockedResourceTypes := core.MustParseBlockedResourceTypes(config.App.BlockResources)
+	blockedResourceTypes, err := core.ParseBlockedResourceTypes(config.App.BlockResources)
+	if err != nil {
+		return nil, fmt.Errorf("invalid block_resources config: %w", err)
+	}
 	if core.IsAuthenticatedSocksProxyURL(browserProxyURL) {
 		return nil, fmt.Errorf(
 			"%w: browser runtime does not support authenticated SOCKS proxy %s",

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -47,6 +48,9 @@ func (s *Server) handleExtract(c *fiber.Ctx) error {
 	result, err := extractor.Extract(requestCtx, req)
 	if err != nil {
 		WithRequest(requestCtx).WithError(err).Warn("Extract failed")
+		if errors.Is(err, ErrTargetNotAllowed) {
+			return &APIError{HTTPStatus: fiber.StatusBadRequest, ErrorCode: "invalid_extract_url", Message: err.Error()}
+		}
 		return &APIError{HTTPStatus: fiber.StatusBadGateway, ErrorCode: "extract_failed", Message: "Failed to extract URL content"}
 	}
 	result.Meta.TookMs = time.Since(startedAt).Milliseconds()
@@ -86,8 +90,12 @@ func (s *Server) extractRequestFromFiber(c *fiber.Ctx, cfg extractpkg.Config) (e
 	if err != nil {
 		return extractpkg.ExtractRequest{}, errInvalidParam("min_runes must be a non-negative integer")
 	}
+	targetURL := extractpkg.NormalizeURL(strings.TrimSpace(firstNonEmpty(c.Query("url"), body.URL)))
+	if err := validateExtractTargetURL(c.UserContext(), targetURL, cfg.AllowPrivateNetworks); err != nil {
+		return extractpkg.ExtractRequest{}, errInvalidParam(err.Error())
+	}
 	return extractpkg.ExtractRequest{
-		URL:        firstNonEmpty(c.Query("url"), body.URL),
+		URL:        targetURL,
 		Mode:       extractpkg.Mode(mode),
 		ProxyURL:   proxyURL,
 		LangCode:   strings.TrimSpace(c.Query("lang")),
@@ -108,10 +116,15 @@ func (s *Server) newExtractor() extractpkg.Extractor {
 }
 
 func (s *Server) rawExtractFetch(ctx context.Context, req extractpkg.ExtractRequest) (*extractpkg.FetchResponse, error) {
+	cfg := s.opts.Extract.Normalized()
+	if err := validateExtractTargetURL(ctx, req.URL, cfg.AllowPrivateNetworks); err != nil {
+		return nil, err
+	}
 	resp, err := RawSearchRequest(ctx, req.URL, Query{
-		ProxyURL: req.ProxyURL,
-		LangCode: req.LangCode,
-		Insecure: s.opts.FingerprintBrowserOpts.Insecure,
+		ProxyURL:             req.ProxyURL,
+		LangCode:             req.LangCode,
+		Insecure:             s.opts.FingerprintBrowserOpts.Insecure,
+		GuardPrivateNetworks: !cfg.AllowPrivateNetworks,
 	})
 	if err != nil {
 		return nil, err
@@ -138,6 +151,10 @@ func (s *Server) renderedExtractFetch(ctx context.Context, req extractpkg.Extrac
 	if s.opts.BrowserResolver == nil {
 		return nil, fmt.Errorf("rendered extraction is unavailable")
 	}
+	cfg := s.opts.Extract.Normalized()
+	if err := s.validateRenderedExtractNavigation(ctx, req, cfg); err != nil {
+		return nil, err
+	}
 	browser, err := s.opts.BrowserResolver(req.ProxyURL)
 	if err != nil {
 		return nil, err
@@ -158,6 +175,48 @@ func (s *Server) renderedExtractFetch(ctx context.Context, req extractpkg.Extrac
 		body = body[:req.MaxBytes]
 	}
 	return &extractpkg.FetchResponse{StatusCode: http.StatusOK, Body: body}, nil
+}
+
+func (s *Server) validateRenderedExtractNavigation(ctx context.Context, req extractpkg.ExtractRequest, cfg extractpkg.Config) error {
+	if err := validateExtractTargetURL(ctx, req.URL, cfg.AllowPrivateNetworks); err != nil {
+		return err
+	}
+	if cfg.AllowPrivateNetworks {
+		return nil
+	}
+
+	client, err := NewRawHTTPClient(Query{
+		ProxyURL:             req.ProxyURL,
+		LangCode:             req.LangCode,
+		Insecure:             s.opts.FingerprintBrowserOpts.Insecure,
+		GuardPrivateNetworks: true,
+	})
+	if err != nil {
+		return err
+	}
+	preflight, err := http.NewRequestWithContext(ctx, http.MethodHead, req.URL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(preflight)
+	if err != nil {
+		if errors.Is(err, ErrTargetNotAllowed) {
+			return err
+		}
+		WithRequest(ctx).WithError(err).Debug("Rendered extract redirect preflight failed; continuing after initial target validation")
+		return nil
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
+func validateExtractTargetURL(ctx context.Context, rawURL string, allowPrivateNetworks bool) error {
+	rawURL = extractpkg.NormalizeURL(strings.TrimSpace(rawURL))
+	if allowPrivateNetworks {
+		_, err := validateHTTPURL(rawURL)
+		return err
+	}
+	return ValidatePublicHTTPURL(ctx, rawURL)
 }
 
 func (s *Server) enrichEnvelopeWithExtraction(ctx context.Context, env *Envelope, q Query, format string) {

@@ -8,6 +8,17 @@ import (
 	"github.com/karust/openserp/core"
 )
 
+func TestRawEngineCachesRateLimiter(t *testing.T) {
+	engine := &rawEngine{name: "google"}
+	first := engine.GetRateLimiter()
+	if first == nil {
+		t.Fatal("expected limiter")
+	}
+	if second := engine.GetRateLimiter(); second != first {
+		t.Fatal("expected rawEngine to return the cached limiter")
+	}
+}
+
 func TestBrowserPoolKey(t *testing.T) {
 	cases := []struct {
 		name string

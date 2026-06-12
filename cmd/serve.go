@@ -27,7 +27,9 @@ import (
 
 // rawEngine implements SearchEngine interface for raw HTTP requests
 type rawEngine struct {
-	name string
+	name      string
+	limiterMu sync.Mutex
+	limiter   *rate.Limiter
 }
 
 func (r *rawEngine) Search(ctx context.Context, q core.Query) ([]core.SearchResult, error) {
@@ -60,8 +62,13 @@ func (r *rawEngine) IsInitialized() bool {
 }
 
 func (r *rawEngine) GetRateLimiter() *rate.Limiter {
-	// Use default rate limiter for raw requests
-	return rate.NewLimiter(rate.Every(time.Second), 5)
+	r.limiterMu.Lock()
+	defer r.limiterMu.Unlock()
+	if r.limiter == nil {
+		// Use default rate limiter for raw requests.
+		r.limiter = rate.NewLimiter(rate.Every(time.Second), 5)
+	}
+	return r.limiter
 }
 
 var serveCMD = &cobra.Command{
@@ -534,7 +541,6 @@ func (p *browserPool) close() error {
 
 type pooledBrowserEngine struct {
 	name    string
-	limiter *rate.Limiter
 	opts    core.SearchEngineOptions
 	factory func(core.Browser, core.SearchEngineOptions) core.SearchEngine
 	pool    *browserPool
@@ -578,7 +584,7 @@ func (e *pooledBrowserEngine) Name() string {
 }
 
 func (e *pooledBrowserEngine) GetRateLimiter() *rate.Limiter {
-	return e.limiter
+	return e.opts.GetRateLimiter()
 }
 
 func (e *pooledBrowserEngine) DropProxyLaneCookies(ctx context.Context, q core.Query) {
@@ -703,7 +709,6 @@ func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) (
 		opts.Init()
 		base := &pooledBrowserEngine{
 			name:            spec.name,
-			limiter:         rate.NewLimiter(rate.Every(opts.GetRatelimit()), opts.RateBurst),
 			opts:            opts,
 			factory:         spec.factory,
 			pool:            pool,

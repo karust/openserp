@@ -45,6 +45,11 @@ func DrainAndCloseResponse(resp *http.Response) {
 // derived from the query locale. The caller owns the returned response and
 // must drain/close it (see DrainAndCloseResponse).
 func RawSearchRequest(ctx context.Context, searchURL string, query Query) (*http.Response, error) {
+	if query.GuardPrivateNetworks {
+		if err := ValidatePublicHTTPURL(ctx, searchURL); err != nil {
+			return nil, err
+		}
+	}
 	client, err := NewRawHTTPClient(query)
 	if err != nil {
 		return nil, err
@@ -96,15 +101,26 @@ func NewRawHTTPClient(query Query) (*http.Client, error) {
 		roundTripper = proxyErrorTransport{base: roundTripper}
 	}
 
-	return &http.Client{
+	client := &http.Client{
 		Transport: roundTripper,
 		Timeout:   rawHTTPTimeout,
-	}, nil
+	}
+	if query.GuardPrivateNetworks {
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return ValidatePublicHTTPURL(req.Context(), req.URL.String())
+		}
+	}
+	return client, nil
 }
 
 func newRawTransport(query Query) (*http.Transport, error) {
+	dialContext := dialNetworkUsageConn
+	if query.GuardPrivateNetworks {
+		dialContext = guardedDialNetworkUsageConn
+	}
+
 	transport := &http.Transport{
-		DialContext: dialNetworkUsageConn,
+		DialContext: dialContext,
 	}
 	if query.Insecure {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
@@ -122,12 +138,15 @@ func newRawTransport(query Query) (*http.Transport, error) {
 
 		// Keep proxied requests on the standard transport path so SOCKS5/SOCKS5H
 		// resolution and routing are handled by the configured proxy correctly.
+		// The extract SSRF guard validates the target URL before the request and
+		// on redirects; the proxy address itself may legitimately be local.
+		transport.DialContext = dialNetworkUsageConn
 		transport.Proxy = http.ProxyURL(parsed)
 		return transport, nil
 	}
 
 	transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		rawConn, err := dialNetworkUsageConn(ctx, network, addr)
+		rawConn, err := dialContext(ctx, network, addr)
 		if err != nil {
 			return nil, err
 		}
@@ -169,6 +188,14 @@ func forceHTTP1ALPN(conn *utls.UConn) {
 func dialNetworkUsageConn(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := &net.Dialer{}
 	conn, err := dialer.DialContext(ctx, network, addr)
+	if err != nil {
+		return nil, err
+	}
+	return networkUsageConn{Conn: conn, ctx: ctx}, nil
+}
+
+func guardedDialNetworkUsageConn(ctx context.Context, network, addr string) (net.Conn, error) {
+	conn, err := GuardedDialContext(ctx, network, addr)
 	if err != nil {
 		return nil, err
 	}

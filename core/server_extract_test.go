@@ -30,11 +30,12 @@ func TestEnrichEnvelopeWithExtractionRetriesThinAndFailedCandidates(t *testing.T
 
 	opts := DefaultServerOptions()
 	opts.Extract = extractpkg.Config{
-		Enabled:       true,
-		DefaultMode:   string(extractpkg.ModeFast),
-		Timeout:       time.Second,
-		MaxBytes:      256 * 1024,
-		MaxConcurrent: 2,
+		Enabled:              true,
+		DefaultMode:          string(extractpkg.ModeFast),
+		Timeout:              time.Second,
+		MaxBytes:             256 * 1024,
+		MaxConcurrent:        2,
+		AllowPrivateNetworks: true,
 	}
 	s := &Server{opts: opts}
 	env := &Envelope{Results: []Result{
@@ -57,5 +58,54 @@ func TestEnrichEnvelopeWithExtractionRetriesThinAndFailedCandidates(t *testing.T
 	}
 	if !strings.Contains(env.Results[2].Extracted.Content, "Useful page") {
 		t.Fatalf("third candidate content = %q", env.Results[2].Extracted.Content)
+	}
+}
+
+func TestExtractRejectsLinkLocalAddressByDefault(t *testing.T) {
+	opts := DefaultServerOptions()
+	opts.Extract = extractpkg.DefaultConfig()
+	s := NewServerWithOptions("127.0.0.1", 0, opts)
+
+	req, err := http.NewRequest(http.MethodPost, "/extract", strings.NewReader(`{"url":"http://169.254.169.254/latest/meta-data/"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestExtractRejectsLocalhostByDefault(t *testing.T) {
+	opts := DefaultServerOptions()
+	opts.Extract = extractpkg.DefaultConfig()
+	s := NewServerWithOptions("127.0.0.1", 0, opts)
+
+	req, err := http.NewRequest(http.MethodGet, "/extract?url=http://localhost/private", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := s.app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestValidateExtractTargetURLNormalizesBarePublicIP(t *testing.T) {
+	if err := validateExtractTargetURL(context.Background(), "1.1.1.1", false); err != nil {
+		t.Fatalf("expected bare public IP target to validate after scheme normalization: %v", err)
 	}
 }
