@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
 	browserprofile "github.com/karust/openserp/core/browser"
 	"github.com/karust/openserp/core/fpcheck"
 	"github.com/karust/openserp/core/fpcheck/detectors"
@@ -155,6 +156,10 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 		}).Info("Response cache enabled")
 	}
 
+	// Defense-in-depth: engine panics are recovered in the resilient layer
+	// (invokeEngine); this catches panics in handlers that bypass it (parse,
+	// extract, stats) so the process survives.
+	app.Use(fiberrecover.New(fiberrecover.Config{EnableStackTrace: true}))
 	app.Use(RequestContextMiddleware())
 	if opts.EnableCORS {
 		app.Use(CORSMiddleware(opts.CORS))

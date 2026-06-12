@@ -87,12 +87,6 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 	baid = &scoped
 
 	baid.logger.Debug("Starting search, query: %+v", query)
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanicWithContext(ctx, baid.Name(), recovered, baid.logger)
-			results = nil
-		}
-	}()
 
 	// Build URL from query struct to open in browser
 	url, err := BuildURL(query)

@@ -128,12 +128,6 @@ func classifyGoogleRawHTML(body []byte) error {
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.PrepareEngineContext(ctx, query, "google", false)
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanicWithContext(ctx, "google", recovered, nil)
-			results = nil
-		}
-	}()
 
 	googleURL, err := BuildURL(query)
 	if err != nil {

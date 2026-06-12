@@ -189,13 +189,6 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 	gogl = &scoped
 
 	gogl.logger.Debug("Starting search, query: %+v", query)
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanicWithContext(ctx, gogl.Name(), recovered, gogl.logger)
-			results = nil
-		}
-	}()
-
 	searchResults := []core.SearchResult{}
 
 	// Build URL from query struct to open in browser

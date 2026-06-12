@@ -202,16 +202,8 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 			attemptMeta.Used = MaskProxyURL(proxyURL)
 		}
 
-		var (
-			results []SearchResult
-			err     error
-		)
 		requestCtx := proxyRequestContext(callCtx, engine.Name(), attemptQuery)
-		if isImage {
-			results, err = engine.SearchImage(requestCtx, attemptQuery)
-		} else {
-			results, err = engine.Search(requestCtx, attemptQuery)
-		}
+		results, err := invokeEngine(requestCtx, engine, attemptQuery, isImage)
 
 		if reportToRegistry {
 			rs.reportProxyAttempt(engineCtx, proxyURL, err)
@@ -239,6 +231,23 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 
 	cb.RecordSuccessDuration(engineCtx, time.Since(startedAt))
 	return result.Results, attemptMeta, nil
+}
+
+// invokeEngine is the single panic-recovery point for every engine call made
+// through the resilient pipeline (browser, raw, and any future engine method).
+// A rod/CDP panic surfaces as ErrEngineInternal instead of killing the process.
+func invokeEngine(ctx context.Context, engine SearchEngine, q Query, isImage bool) (results []SearchResult, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			results = nil
+			err = RecoverEnginePanicWithContext(ctx, engine.Name(), recovered, nil)
+		}
+	}()
+
+	if isImage {
+		return engine.SearchImage(ctx, q)
+	}
+	return engine.Search(ctx, q)
 }
 
 // SearchAllParallel applies retry/circuit protections per engine for mega search.

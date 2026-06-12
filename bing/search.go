@@ -151,12 +151,6 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 	bing = &scoped
 
 	bing.logger.Debug("Starting search, query: %+v", query)
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanicWithContext(ctx, bing.Name(), recovered, bing.logger)
-			results = nil
-		}
-	}()
 
 	searchResults := []core.SearchResult{}
 

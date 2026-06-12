@@ -26,12 +26,6 @@ func classifyYandexRawHTML(body []byte) error {
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
 	ctx = core.PrepareEngineContext(ctx, query, "yandex", false)
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = core.RecoverEnginePanicWithContext(ctx, "yandex", recovered, nil)
-			results = nil
-		}
-	}()
 
 	startPage, skipOnFirstPage, err := core.ComputePagination(query.Start, 10)
 	if err != nil {
