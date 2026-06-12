@@ -5,7 +5,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/karust/openserp)](https://goreportcard.com/report/github.com/karust/openserp)
 [![Go Reference](https://pkg.go.dev/badge/github/karust/openserp?style=for-the-badge)](https://pkg.go.dev/github.com/karust/openserp)
 [![release](https://img.shields.io/github/v/release/karust/openserp)](https://github.com/karust/openserp/releases)
-[![Docker Pulls](https://img.shields.io/docker/v/karust/openserp)](https://hub.docker.com/repository/docker/karust/openserp)
+[![Docker Pulls](https://img.shields.io/docker/v/karust/openserp)](https://hub.docker.com/r/karust/openserp)
 [![CI](https://github.com/karust/openserp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/karust/openserp/actions/workflows/ci.yml)
 
 **OpenSERP** is a free, open-source API and CLI for accessing normalized search engine results from **Google, Yandex, Baidu, Bing, DuckDuckGo, and Ecosia**.
@@ -38,10 +38,10 @@ Run it locally, self-host it, or use the optional hosted API when you do not wan
 
 ```bash
 # Run the API server via prebuilt image
-docker run -p 127.0.0.1:7000:7000 -it karust/openserp serve -a 0.0.0.0 -p 7000
+docker run --rm -p 127.0.0.1:7000:7000 karust/openserp:latest serve -a 0.0.0.0 -p 7000
 
-# Or use docker-compose
-docker compose up --build
+# Or use docker-compose (pulls the prebuilt image)
+docker compose up
 ```
 
 ### From Source

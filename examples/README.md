@@ -32,12 +32,12 @@ curl "http://localhost:7000/mega/search?text=open+source+search+api&engines=bing
 
 ## SDKs and integrations
 
-| Tool | Package | Install |
-| --- | --- | --- |
-| JavaScript / TypeScript | [`@openserp/sdk`](https://www.npmjs.com/package/@openserp/sdk) | `npm install @openserp/sdk` |
-| Python | [`openserp`](https://pypi.org/project/openserp/) | `pip install openserp` |
-| MCP server (AI agents) | [`@openserp/mcp`](https://www.npmjs.com/package/@openserp/mcp) | `npx @openserp/mcp` |
-| n8n community node | [`@openserp/n8n-nodes-openserp`](https://www.npmjs.com/package/@openserp/n8n-nodes-openserp) | Install via n8n community nodes |
+| Tool                    | Package                                                                                      | Install                         |
+| ----------------------- | -------------------------------------------------------------------------------------------- | ------------------------------- |
+| JavaScript / TypeScript | [`@openserp/sdk`](https://www.npmjs.com/package/@openserp/sdk)                               | `npm install @openserp/sdk`     |
+| Python                  | [`openserp`](https://pypi.org/project/openserp/)                                             | `pip install openserp`          |
+| MCP server (AI agents)  | [`@openserp/mcp`](https://www.npmjs.com/package/@openserp/mcp)                               | `npx @openserp/mcp`             |
+| n8n community node      | [`@openserp/n8n-nodes-openserp`](https://www.npmjs.com/package/@openserp/n8n-nodes-openserp) | Install via n8n community nodes |
 
 ## Examples by question
 
