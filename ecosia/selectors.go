@@ -2,6 +2,7 @@ package ecosia
 
 // Selectors is the single source of truth for Ecosia SERP CSS selectors.
 var Selectors = struct {
+	Captcha     string
 	Mainline    string
 	Result      string
 	Ad          string
@@ -13,6 +14,10 @@ var Selectors = struct {
 	ImageSource string
 	ImageDims   string
 }{
+	// Captcha matches Ecosia's Cloudflare Turnstile interstitial. The hidden
+	// cf-turnstile-response input is present on every challenge page and never
+	// on a real SERP, so it's a precise marker for the raw (browserless) path.
+	Captcha:     "input[name='cf-turnstile-response']",
 	Mainline:    "[data-test-id='mainline']",
 	Result:      "[data-test-id='mainline-result-web']",
 	Ad:          "[data-test-id='mainline-result-ad']",

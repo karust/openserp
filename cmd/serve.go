@@ -13,13 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/karust/openserp/baidu"
-	"github.com/karust/openserp/bing"
 	"github.com/karust/openserp/core"
-	"github.com/karust/openserp/duckduckgo"
-	"github.com/karust/openserp/ecosia"
-	"github.com/karust/openserp/google"
-	"github.com/karust/openserp/yandex"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"golang.org/x/time/rate"
@@ -35,18 +29,11 @@ type rawEngine struct {
 func (r *rawEngine) Search(ctx context.Context, q core.Query) ([]core.SearchResult, error) {
 	q.Insecure = config.Server.Insecure
 
-	switch r.name {
-	case "google":
-		return google.Search(ctx, q)
-	case "yandex":
-		return yandex.Search(ctx, q)
-	case "baidu":
-		return baidu.Search(ctx, q)
-	case "ecosia":
-		return ecosia.Search(ctx, q)
-	default:
+	spec, ok := resolveEngineSpec(r.name)
+	if !ok || spec.rawSearchFn == nil {
 		return nil, fmt.Errorf("unsupported engine: %s", r.name)
 	}
+	return spec.rawSearchFn(ctx, q)
 }
 
 func (r *rawEngine) SearchImage(_ context.Context, _ core.Query) ([]core.SearchResult, error) {
@@ -626,56 +613,17 @@ type browserEngineSpec struct {
 }
 
 func browserEngineSpecs() []browserEngineSpec {
-	return []browserEngineSpec{
-		{
-			name: "google",
-			opts: config.GoogleConfig.SearchEngineOptions,
-			factory: func(browser core.Browser, opts core.SearchEngineOptions) core.SearchEngine {
-				return google.New(browser, opts)
-			},
-			parseHTMLFn: google.ParseHTML,
-		},
-		{
-			name: "yandex",
-			opts: config.YandexConfig.SearchEngineOptions,
-			factory: func(browser core.Browser, opts core.SearchEngineOptions) core.SearchEngine {
-				return yandex.New(browser, opts)
-			},
-			parseHTMLFn: yandex.ParseHTML,
-		},
-		{
-			name: "baidu",
-			opts: config.BaiduConfig.SearchEngineOptions,
-			factory: func(browser core.Browser, opts core.SearchEngineOptions) core.SearchEngine {
-				return baidu.New(browser, opts)
-			},
-			parseHTMLFn: baidu.ParseHTML,
-		},
-		{
-			name: "bing",
-			opts: config.BingConfig.SearchEngineOptions,
-			factory: func(browser core.Browser, opts core.SearchEngineOptions) core.SearchEngine {
-				return bing.New(browser, opts)
-			},
-			parseHTMLFn: bing.ParseHTML,
-		},
-		{
-			name: "duckduckgo",
-			opts: config.DuckDuckGoConfig.SearchEngineOptions,
-			factory: func(browser core.Browser, opts core.SearchEngineOptions) core.SearchEngine {
-				return duckduckgo.New(browser, opts)
-			},
-			parseHTMLFn: duckduckgo.ParseHTML,
-		},
-		{
-			name: "ecosia",
-			opts: config.EcosiaConfig.SearchEngineOptions,
-			factory: func(browser core.Browser, opts core.SearchEngineOptions) core.SearchEngine {
-				return ecosia.New(browser, opts)
-			},
-			parseHTMLFn: ecosia.ParseHTML,
-		},
+	specs := engineSpecs()
+	out := make([]browserEngineSpec, 0, len(specs))
+	for _, s := range specs {
+		out = append(out, browserEngineSpec{
+			name:        s.name,
+			opts:        s.opts(),
+			factory:     s.factory,
+			parseHTMLFn: s.parseHTMLFn,
+		})
 	}
+	return out
 }
 
 func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) ([]core.SearchEngine, func() error, core.BrowserResolver, error) {

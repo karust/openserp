@@ -252,7 +252,18 @@ type browserConnection struct {
 	laneProfiles map[string]browserprofile.Profile
 	authCancel   context.CancelFunc
 	authStopped  chan struct{}
+	// lastOK is when a CDP call last succeeded; the health ping is skipped while
+	// it is within healthPingSkipWindow.
+	lastOK time.Time
 }
+
+const (
+	// healthPingTimeout bounds the per-call connection ping so a wedged Chrome
+	// can't stall navigations while holding the connection lock.
+	healthPingTimeout = 3 * time.Second
+	// healthPingSkipWindow skips the ping when a CDP call succeeded this recently.
+	healthPingSkipWindow = 5 * time.Second
+)
 
 // NewBrowser launches a new Chromium process via Rod launcher and returns a
 // Browser wrapper configured with proxy and captcha solver settings.
@@ -272,6 +283,9 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	// headless=new uses the full Chrome renderer; legacy --headless disables the
 	// GPU process entirely, making WebGL context creation fail even with SwiftShader.
 	// use-angle=swiftshader-webgl (Chrome ≥112) enables a software WebGL renderer.
+	// Rod enables leakless by default, so always pass the configured value
+	// through. OpenSERP defaults it to false because the helper binary is
+	// commonly flagged by antivirus on Windows.
 	l := launcher.New().Leakless(opts.IsLeakless).
 		Set("disable-blink-features", "AutomationControlled").
 		Delete("enable-automation").
@@ -557,18 +571,18 @@ func (b *Browser) ensureConnectedBrowser(ctx context.Context, forceReconnect boo
 			return nil, err
 		}
 		state.browser = connected
+		state.lastOK = time.Now()
 		return state.browser, nil
 	}
 
-	// Bound just this health-ping with a per-call timeout so a wedged browser
-	// can't block the connection lock forever. Use a fresh derived context each
-	// call (not browser.Timeout, which would bake a permanent deadline into the
-	// persistent connection — see newRodBrowser).
-	pingTimeout := b.Timeout
-	if pingTimeout <= 0 {
-		pingTimeout = 30 * time.Second
+	// A recent successful CDP call means the connection is alive; skip the ping.
+	if !state.lastOK.IsZero() && time.Since(state.lastOK) < healthPingSkipWindow {
+		return state.browser, nil
 	}
-	pingCtx, cancelPing := context.WithTimeout(EnsureContext(ctx), pingTimeout)
+
+	// Fresh derived context per call (not browser.Timeout, which would bake a
+	// permanent deadline into the persistent connection — see newRodBrowser).
+	pingCtx, cancelPing := context.WithTimeout(EnsureContext(ctx), healthPingTimeout)
 	_, pingErr := state.browser.Context(pingCtx).Version()
 	cancelPing()
 	if pingErr != nil {
@@ -579,6 +593,7 @@ func (b *Browser) ensureConnectedBrowser(ctx context.Context, forceReconnect boo
 		}
 		state.browser = connected
 	}
+	state.lastOK = time.Now()
 
 	return state.browser, nil
 }
@@ -1503,18 +1518,22 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 		wait()
 	}
 
-	// WaitStable internally waits for page load too, so cap it separately.
-	// Selector parsing still decides whether a partially loaded page is usable.
-	stableWaitTimeout := minPositiveDuration(b.Timeout, b.WaitLoadTime+time.Second)
-	if err := page.Timeout(stableWaitTimeout).WaitStable(800 * time.Millisecond); err != nil {
-		WithRequest(ctx).WithError(err).Debug("WaitStable returned early; continuing")
-	}
 	if err := classifyMainDocumentStatus(statusWatcher.Status()); err != nil {
 		closeOnErr()
 		return nil, err
 	}
 	b.saveLaneCookies(ctx, page, URL)
+	b.markConnectionOK()
 	return page, nil
+}
+
+// markConnectionOK records a successful CDP round trip so the next
+// ensureConnectedBrowser can skip its health ping (see healthPingSkipWindow).
+func (b *Browser) markConnectionOK() {
+	state := b.connectionState()
+	state.mu.Lock()
+	state.lastOK = time.Now()
+	state.mu.Unlock()
 }
 
 // Close closes the active browser connection.

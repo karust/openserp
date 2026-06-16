@@ -102,8 +102,49 @@ func HasAttribute(el *rod.Element, attr string) bool {
 	return err == nil && v != nil
 }
 
-// FirstNonEmptyText returns the trimmed text of the first selector under root
-// that yields non-empty content. Empty string if none match.
+// NormalizeWhitespace collapses runs of whitespace (newlines, source
+// indentation) into single spaces and trims the result.
+func NormalizeWhitespace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// ElementText returns el's visible text, falling back to textContent (for nodes
+// rod's Text() leaves empty), normalized. Empty string if el is nil or blank.
+func ElementText(el *rod.Element) string {
+	if el == nil {
+		return ""
+	}
+	if text, err := el.Text(); err == nil {
+		if normalized := NormalizeWhitespace(text); normalized != "" {
+			return normalized
+		}
+	}
+	if value, err := el.Property("textContent"); err == nil {
+		return NormalizeWhitespace(value.String())
+	}
+	return ""
+}
+
+// ElementAttribute returns the first non-empty value among attrs on el,
+// normalized. Empty string if el is nil or none are set.
+func ElementAttribute(el *rod.Element, attrs ...string) string {
+	if el == nil {
+		return ""
+	}
+	for _, attr := range attrs {
+		value, err := el.Attribute(attr)
+		if err != nil || value == nil {
+			continue
+		}
+		if normalized := NormalizeWhitespace(*value); normalized != "" {
+			return normalized
+		}
+	}
+	return ""
+}
+
+// FirstNonEmptyText returns the text (see ElementText) of the first selector
+// under root that yields non-empty content. Empty string if none match.
 func FirstNonEmptyText(root *rod.Element, selectors ...string) string {
 	if root == nil {
 		return ""
@@ -113,12 +154,8 @@ func FirstNonEmptyText(root *rod.Element, selectors ...string) string {
 		if err != nil {
 			continue
 		}
-		text, err := el.Text()
-		if err != nil {
-			continue
-		}
-		if trimmed := strings.TrimSpace(text); trimmed != "" {
-			return trimmed
+		if text := ElementText(el); text != "" {
+			return text
 		}
 	}
 	return ""

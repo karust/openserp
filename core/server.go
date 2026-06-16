@@ -1451,6 +1451,9 @@ func (s *Server) applyProxyHeaders(c *fiber.Ctx, meta ProxyExecutionMeta) {
 		c.Set("X-Proxy-Tag", tag)
 	}
 	c.Set("X-Proxy-Used", used)
+	if meta.Attempts > 1 {
+		c.Set("X-Proxy-Attempts", strconv.Itoa(meta.Attempts))
+	}
 }
 
 func setNetworkBytesHeader(c *fiber.Ctx, ctx context.Context) {

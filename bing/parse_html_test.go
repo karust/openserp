@@ -145,3 +145,49 @@ func TestParseBingHTMLTitleFallback(t *testing.T) {
 		t.Fatalf("title = %q, want fallback", results[0].Title)
 	}
 }
+
+func TestParseBingHTMLPrefersTitleAttribute(t *testing.T) {
+	t.Parallel()
+
+	html := `
+<ol id="b_results">
+  <li class="b_algo">
+    <h2><a aria-label="Real SERP Title" href="https://example.com/result">example.com</a></h2>
+    <div class="b_caption"><p>Snippet</p></div>
+  </li>
+</ol>`
+
+	results, err := ParseHTML(bytes.NewReader([]byte(html)))
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Title != "Real SERP Title" {
+		t.Fatalf("title = %q, want attribute title", results[0].Title)
+	}
+}
+
+func TestParseBingHTMLDescriptionFallsThroughEmptyPrimary(t *testing.T) {
+	t.Parallel()
+
+	html := `
+<ol id="b_results">
+  <li class="b_algo">
+    <h2><a href="https://example.com/result">Result title</a></h2>
+    <div class="b_caption"><p>   </p><div>Useful snippet text</div></div>
+  </li>
+</ol>`
+
+	results, err := ParseHTML(bytes.NewReader([]byte(html)))
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Description != "Useful snippet text" {
+		t.Fatalf("description = %q, want fallback snippet", results[0].Description)
+	}
+}

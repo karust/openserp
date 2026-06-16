@@ -140,6 +140,41 @@ func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.Searc
 	return searchResults
 }
 
+// Yandex hydrates the results list progressively, so the first parse can be
+// short. After the list selector appears, re-poll briefly until we have the
+// requested number of organic results or the grace period elapses.
+const (
+	resultHydrationGrace = 2 * time.Second
+	resultPollInterval   = 120 * time.Millisecond
+)
+
+func (yand *Yandex) waitForParsedResults(ctx context.Context, page *rod.Page, pageNum, wantOrganic int) ([]core.SearchResult, error) {
+	elements, _, err := core.WaitForElements(ctx, page, []string{Selectors.Results}, yand.GetSelectorTimeout())
+	if err != nil {
+		return nil, err
+	}
+
+	results := yand.parseResults(elements, pageNum)
+	if wantOrganic <= 0 {
+		return results, nil
+	}
+
+	deadline := time.Now().Add(resultHydrationGrace)
+	for core.CountOrganicResults(results) < wantOrganic && time.Now().Before(deadline) {
+		if err := core.SleepContext(ctx, resultPollInterval); err != nil {
+			return results, err
+		}
+		nextElements, eerr := page.Elements(Selectors.Results)
+		if eerr != nil || len(nextElements) <= len(elements) {
+			continue
+		}
+		elements = nextElements
+		results = yand.parseResults(nextElements, pageNum)
+	}
+
+	return results, nil
+}
+
 func yandexElementHasAdMarker(el *rod.Element) bool {
 	if el == nil {
 		return false
@@ -212,7 +247,14 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 		}
 		defer core.DeferClosePage(ctx, page, &yand.Browser)()
 
-		elements, _, err := core.WaitForElements(ctx, page, []string{Selectors.Results}, yand.GetSelectorTimeout())
+		wantOrganic := query.Limit
+		if wantOrganic <= 0 || wantOrganic > pageSize {
+			wantOrganic = pageSize
+		}
+		if searchPage == startPage && skipOnFirstPage > 0 {
+			wantOrganic += skipOnFirstPage
+		}
+		r, err := yand.waitForParsedResults(ctx, page, searchPage, wantOrganic)
 		if err != nil {
 			if yand.isCaptcha(page) {
 				yand.logger.Error("Captcha detected: %s", url)
@@ -226,7 +268,6 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 			return false, core.ErrSearchTimeout
 		}
 
-		r := yand.parseResults(elements, searchPage)
 		if searchPage == startPage && skipOnFirstPage > 0 {
 			r = skipOrganicResults(r, skipOnFirstPage)
 		}

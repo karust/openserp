@@ -2,7 +2,7 @@ server:
   host: 0.0.0.0 # API host to bind
   port: 7000 # API port to bind
   debug: false # Enable debug logs and force browser UI mode
-  verbose: true # Enable info-level request logs
+  verbose: false # Enable debug-level request logs
   raw_requests: false # true = raw HTTP mode, false = browser mode
   insecure: true # Allow insecure TLS connections
 
@@ -18,8 +18,6 @@ app:
   idle_ttl: 5m # close a Chrome that has not served traffic for this long
 
   mega_timeout: 90s # max total wait for /mega/* requests; slow engines return partial results
-  block_trackers: true
-  block_resources: "image,font,css,media"
 
 extract:
   enabled: true

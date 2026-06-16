@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	version               = "0.8.3"
+	version               = "0.8.4"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -51,6 +51,7 @@ type ServerConfig struct {
 	ConfigPath    string `mapstructure:"config_path"`
 	IsDebug       bool   `mapstructure:"debug"`
 	IsVerbose     bool   `mapstructure:"verbose"`
+	IsQuiet       bool   `mapstructure:"quiet"`
 	IsRawRequests bool   `mapstructure:"raw_requests"`
 	Insecure      bool   `mapstructure:"insecure"`
 }
@@ -115,6 +116,7 @@ var flagToConfigKey = map[string]string{
 	"profiles-json":           "app.profiles",
 	"verbose":                 "server.verbose",
 	"debug":                   "server.debug",
+	"quiet":                   "server.quiet",
 	"head":                    "app.head",
 	"leakless":                "app.leakless",
 	"raw":                     "server.raw_requests",
@@ -154,10 +156,22 @@ var RootCmd = &cobra.Command{
 		}
 		config.App.LogFormat = logFormat
 
-		core.InitLogger(config.Server.IsVerbose, config.Server.IsDebug, config.App.LogFormat)
+		// One-shot CLI commands default to quiet so stdout is payload-only.
+		// Server mode keeps request logs unless server.quiet is set.
+		quiet := config.Server.IsQuiet
+		if commandDefaultsToQuiet(cmd) && !cmd.Flags().Changed("quiet") {
+			quiet = true
+		}
+		config.Server.IsQuiet = quiet
+
+		core.InitLogger(config.Server.IsVerbose, config.Server.IsDebug, quiet, config.App.LogFormat)
 		logrus.WithField("config", sanitizedConfigForLog(config)).Debug("Final config")
 		return nil
 	},
+}
+
+func commandDefaultsToQuiet(cmd *cobra.Command) bool {
+	return cmd != nil && cmd.Name() != serveCMD.Name()
 }
 
 func sanitizedConfigForLog(cfg Config) map[string]interface{} {
@@ -380,6 +394,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("server.port", 7070)
 	v.SetDefault("server.debug", false)
 	v.SetDefault("server.verbose", false)
+	v.SetDefault("server.quiet", false)
 	v.SetDefault("server.raw_requests", false)
 	v.SetDefault("server.insecure", false)
 	v.SetDefault("app.log_format", "")
@@ -436,8 +451,9 @@ func init() {
 	RootCmd.PersistentFlags().StringVar(&config.App.ProfilesJSON, "profiles", "", "Path to browser profile catalog JSON")
 	RootCmd.PersistentFlags().BoolVarP(&config.Server.IsVerbose, "verbose", "v", false, "Use verbose output")
 	RootCmd.PersistentFlags().BoolVarP(&config.Server.IsDebug, "debug", "d", false, "Use debug output. Disable headless browser")
+	RootCmd.PersistentFlags().BoolVarP(&config.Server.IsQuiet, "quiet", "q", false, "Suppress info logs on stderr (default for CLI commands)")
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsBrowserHead, "head", "", false, "Enable browser UI")
-	RootCmd.PersistentFlags().BoolVarP(&config.App.IsLeakless, "leakless", "l", false, "Use leakless mode to insure browser instances are closed after search")
+	RootCmd.PersistentFlags().BoolVarP(&config.App.IsLeakless, "leakless", "l", false, "Use leakless mode to ensure browser instances are closed after search")
 	RootCmd.PersistentFlags().BoolVarP(&config.Server.IsRawRequests, "raw", "r", false, "Disable browser usage, use HTTP requests")
 	RootCmd.PersistentFlags().BoolVarP(&config.App.IsLeaveHead, "leave", "", false, "Leave browser and tabs opened after search is made")
 	RootCmd.PersistentFlags().StringVarP(&config.Config2Capcha.ApiKey, "2captcha_key", "", "", "2 captcha api key")

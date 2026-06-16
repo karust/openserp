@@ -35,12 +35,16 @@ func startPage(start int) (pageNum, startRank int, err error) {
 	return pageNum, startRank, nil
 }
 
-// Cloudflare interstitial markers. URL/title are CF defaults.
+// Cloudflare interstitial markers. URL/title are CF defaults; cfBodyMarkers are
+// challenge-page phrases absent from a real SERP, shared by the browser
+// (isCaptcha) and raw (isCaptchaDoc) paths. Bare "captcha" is omitted — too
+// broad (appears in SERP snippets) and not on the interstitial anyway.
 const (
-	cfURLPath    = "cdn-cgi"
-	cfPageTitle  = "just a moment"
-	cfBodyMarker = "not a bot"
+	cfURLPath   = "cdn-cgi"
+	cfPageTitle = "just a moment"
 )
+
+var cfBodyMarkers = []string{"not a robot", "not a bot", "unusual traffic"}
 
 // Ecosia implements core.SearchEngine for Ecosia SERP pages. Additional
 // documentation at https://support.ecosia.org/article/447-search-features.
@@ -80,7 +84,16 @@ func (e *Ecosia) isCaptcha(page *rod.Page) bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(strings.ToLower(html), cfBodyMarker)
+	lower := strings.ToLower(html)
+	if strings.Contains(lower, "cf-turnstile-response") {
+		return true
+	}
+	for _, m := range cfBodyMarkers {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Ecosia) parseResult(elem *rod.Element, rank int, ad bool) (core.SearchResult, bool) {

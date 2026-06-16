@@ -42,6 +42,12 @@ func (gogl *Google) getTotalResults(page *rod.Page) (int, error) {
 		return 0, core.ErrParser
 	}
 
+	// Stats div is absent on many locales; probe first so .Search doesn't block
+	// the full selector timeout.
+	if has, _, err := page.Has(Selectors.ResultStats); err != nil || !has {
+		return 0, nil
+	}
+
 	resultsStats, err := page.Timeout(gogl.GetSelectorTimeout()).Search(Selectors.ResultStats)
 	if err != nil {
 		return 0, errors.New("Result stats not found: " + err.Error())
@@ -147,7 +153,33 @@ func (gogl *Google) preparePage(page *rod.Page) {
 	}
 }
 
+// waitAnswersExpanded polls until the first PAA entry has expanded to a
+// title+body (≥2 text lines) or maxWait elapses, replacing a flat 2s sleep.
+func (gogl *Google) waitAnswersExpanded(ctx context.Context, answers rod.Elements, maxWait time.Duration) error {
+	if len(answers) == 0 || maxWait <= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(maxWait)
+	for {
+		text, err := answers[0].Text()
+		if err == nil && len(strings.Split(text, "\n")) >= 2 {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			return nil
+		}
+		if err := core.SleepContext(ctx, 100*time.Millisecond); err != nil {
+			return err
+		}
+	}
+}
+
 func (gogl *Google) acceptCookies(page *rod.Page) {
+	// Probe with Has first so a banner-less SERP doesn't block on .Search's full
+	// timeout (AGENTS.md: use Has for existence).
+	if has, _, err := page.Has(Selectors.CookieBtn); err != nil || !has {
+		return
+	}
 	diaglogBtns, err := page.Timeout(gogl.Timeout / 10).Search(Selectors.CookieBtn)
 	if err != nil {
 		gogl.logger.Debug("Cookie consent not found: %s", err)
@@ -331,7 +363,8 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 				}
 
 			}
-			if err := core.SleepContext(ctx, 2*time.Second); err != nil {
+			// Poll for expansion (usually 200-400ms) instead of a flat 2s sleep.
+			if err := gogl.waitAnswersExpanded(ctx, answers, 2*time.Second); err != nil {
 				return nil, err
 			}
 

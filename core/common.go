@@ -15,6 +15,14 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// Extraction depth bounds for the unified extract=N query param. The default
+// is 1 (extract=true == extract=1 == "extract one result"); callers raise it up
+// to maxExtractTop. These mirror the CLI's --extract flag limits.
+const (
+	defaultExtractTop = 1
+	maxExtractTop     = 5
+)
+
 // ErrCaptcha is returned when the engine detects a captcha challenge page.
 // This error is treated as non-retryable by resilient search policies.
 var ErrCaptcha = errors.New("captcha detected")
@@ -385,33 +393,12 @@ func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 	if err != nil {
 		return errInvalidParam(fmt.Sprintf("features: %v", err))
 	}
-	searchQuery.Extract, err = strconv.ParseBool(reqCtx.Query("extract", "0"))
-	if err != nil {
-		return errInvalidParam(fmt.Sprintf("extract: %v", err))
-	}
-	searchQuery.ExtractTop = 3
-	if raw := strings.TrimSpace(reqCtx.Query("extract_top")); raw != "" {
-		extractTop, err := strconv.Atoi(raw)
-		if err != nil {
-			return errInvalidParam("extract_top must be an integer")
-		}
-		if extractTop < 1 {
-			extractTop = 1
-		}
-		if extractTop > 5 {
-			extractTop = 5
-		}
-		searchQuery.ExtractTop = extractTop
-	}
-	searchQuery.ExtractMode = strings.ToLower(strings.TrimSpace(reqCtx.Query("extract_mode", "auto")))
-	switch searchQuery.ExtractMode {
-	case "auto", "fast", "rendered":
-	default:
-		return errInvalidParam("extract_mode must be one of auto, fast, rendered")
-	}
-	searchQuery.ExtractMinRunes, err = parseNonNegativeIntQuery(reqCtx.Query("min_runes"), 0)
-	if err != nil {
-		return errInvalidParam("min_runes must be a non-negative integer")
+	// extract is a unified bool-or-int knob: extract=0/false disables, extract=N
+	// (or true/1) extracts the top N results. The tuning params extract_mode and
+	// min_runes also imply extraction (extract=0 still overrides them). The
+	// default depth is 1 — true == 1 == "extract one result".
+	if err := parseExtractParams(reqCtx, searchQuery); err != nil {
+		return err
 	}
 
 	searchQuery.ProxyOverride, err = NormalizeProxyRequestOverride(reqCtx.Get("X-Use-Proxy"))
@@ -435,6 +422,72 @@ func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 		return errEmptyQuery()
 	}
 	return nil
+}
+
+// parseExtractParams reads the unified extract knob plus its tuning params onto
+// q. The extract param is bool-or-int:
+//
+//	extract=0 / extract=false  → extraction off
+//	extract=true / extract=1   → on, top 1
+//	extract=N (1..5)           → on, top N (clamped to maxExtractTop)
+//
+// extract_mode and min_runes tune how extraction runs and imply extraction when
+// present, unless extract is explicitly set (extract=0 wins over them). When
+// extraction is on but no depth is given, ExtractTop defaults to 1.
+func parseExtractParams(reqCtx *fiber.Ctx, q *Query) error {
+	q.ExtractTop = defaultExtractTop
+
+	// extract accepts both bool spellings (true/false/1/0) and an integer depth.
+	// Try bool first so legacy true/false keep working, then fall back to int.
+	extractExplicit := false
+	if raw := strings.TrimSpace(reqCtx.Query("extract")); raw != "" {
+		extractExplicit = true
+		if b, err := strconv.ParseBool(raw); err == nil {
+			q.Extract = b
+			if b {
+				q.ExtractTop = 1
+			}
+		} else if n, err := strconv.Atoi(raw); err == nil {
+			q.Extract = n > 0
+			if n > 0 {
+				q.ExtractTop = clampExtractTop(n)
+			}
+		} else {
+			return errInvalidParam("extract must be a boolean or an integer (0 disables, N extracts top N)")
+		}
+	}
+
+	q.ExtractMode = strings.ToLower(strings.TrimSpace(reqCtx.Query("extract_mode", "auto")))
+	switch q.ExtractMode {
+	case "auto", "fast", "rendered":
+	default:
+		return errInvalidParam("extract_mode must be one of auto, fast, rendered")
+	}
+	if !extractExplicit && strings.TrimSpace(reqCtx.Query("extract_mode")) != "" {
+		q.Extract = true
+	}
+
+	minRunes, err := parseNonNegativeIntQuery(reqCtx.Query("min_runes"), 0)
+	if err != nil {
+		return errInvalidParam("min_runes must be a non-negative integer")
+	}
+	q.ExtractMinRunes = minRunes
+	if !extractExplicit && strings.TrimSpace(reqCtx.Query("min_runes")) != "" {
+		q.Extract = true
+	}
+
+	return nil
+}
+
+// clampExtractTop bounds a requested extraction depth to [1, maxExtractTop].
+func clampExtractTop(n int) int {
+	if n < 1 {
+		return 1
+	}
+	if n > maxExtractTop {
+		return maxExtractTop
+	}
+	return n
 }
 
 // SearchEngineOptions controls engine pacing, selector waits, and captcha

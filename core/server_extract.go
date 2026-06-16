@@ -116,14 +116,21 @@ func (s *Server) newExtractor() extractpkg.Extractor {
 }
 
 func (s *Server) rawExtractFetch(ctx context.Context, req extractpkg.ExtractRequest) (*extractpkg.FetchResponse, error) {
-	cfg := s.opts.Extract.Normalized()
+	return RawExtractFetch(ctx, req, s.opts.Extract, s.opts.FingerprintBrowserOpts.Insecure)
+}
+
+// RawExtractFetch performs the browserless extraction fetch: validate the
+// target, issue a guarded HTTP GET, classify the status, and return the body
+// capped to the byte budget. Shared by the HTTP server and the CLI.
+func RawExtractFetch(ctx context.Context, req extractpkg.ExtractRequest, cfg extractpkg.Config, insecure bool) (*extractpkg.FetchResponse, error) {
+	cfg = cfg.Normalized()
 	if err := validateExtractTargetURL(ctx, req.URL, cfg.AllowPrivateNetworks); err != nil {
 		return nil, err
 	}
 	resp, err := RawSearchRequest(ctx, req.URL, Query{
 		ProxyURL:             req.ProxyURL,
 		LangCode:             req.LangCode,
-		Insecure:             s.opts.FingerprintBrowserOpts.Insecure,
+		Insecure:             insecure,
 		GuardPrivateNetworks: !cfg.AllowPrivateNetworks,
 	})
 	if err != nil {
@@ -135,7 +142,7 @@ func (s *Server) rawExtractFetch(ctx context.Context, req extractpkg.ExtractRequ
 	}
 	limit := int64(req.MaxBytes)
 	if limit <= 0 {
-		limit = int64(s.opts.Extract.Normalized().MaxBytes)
+		limit = int64(cfg.MaxBytes)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
@@ -159,7 +166,15 @@ func (s *Server) renderedExtractFetch(ctx context.Context, req extractpkg.Extrac
 	if err != nil {
 		return nil, err
 	}
-	page, err := browser.Navigate(WithRequestProxyURL(ctx, req.ProxyURL), req.URL)
+	return RenderExtractHTML(WithRequestProxyURL(ctx, req.ProxyURL), browser, req)
+}
+
+// RenderExtractHTML navigates an already-resolved browser to the target,
+// returns its rendered HTML capped to the byte budget, and always closes the
+// page. Shared by the HTTP server's BrowserResolver path and the CLI's
+// one-shot browser. Callers own target validation and proxy gating.
+func RenderExtractHTML(ctx context.Context, browser *Browser, req extractpkg.ExtractRequest) (*extractpkg.FetchResponse, error) {
+	page, err := browser.Navigate(ctx, req.URL)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +235,17 @@ func validateExtractTargetURL(ctx context.Context, rawURL string, allowPrivateNe
 }
 
 func (s *Server) enrichEnvelopeWithExtraction(ctx context.Context, env *Envelope, q Query, format string) {
-	cfg := s.opts.Extract.Normalized()
+	EnrichEnvelopeWithExtraction(ctx, env, q, format, s.newExtractor(), s.opts.Extract)
+}
+
+// EnrichEnvelopeWithExtraction fills env.Results[*].Extracted by running the
+// extractor over the top organic results, with candidate fill-in when a top
+// result fails. It is shared by the HTTP search handler and the CLI so both
+// apply the same depth bounds, batch deadline, and result selection. The
+// extractor and cfg are supplied by the caller (the server reuses its
+// long-lived browser pool; the CLI builds a one-shot browser).
+func EnrichEnvelopeWithExtraction(ctx context.Context, env *Envelope, q Query, format string, extractor extractpkg.Extractor, cfg extractpkg.Config) {
+	cfg = cfg.Normalized()
 	if env == nil || !q.Extract || !cfg.Enabled {
 		return
 	}
@@ -231,11 +256,7 @@ func (s *Server) enrichEnvelopeWithExtraction(ctx context.Context, env *Envelope
 	if format == "text" {
 		contentFormat = "text"
 	}
-	extractor := s.newExtractor()
-	limit := q.ExtractTop
-	if limit <= 0 || limit > 5 {
-		limit = 3
-	}
+	limit := clampExtractTop(q.ExtractTop)
 	if limit > len(env.Results) {
 		limit = len(env.Results)
 	}
@@ -245,7 +266,7 @@ func (s *Server) enrichEnvelopeWithExtraction(ctx context.Context, env *Envelope
 	}
 
 	// Per-fetch timeouts bound a single URL; this aggregate deadline bounds the
-	// whole batch so a few slow/hanging targets can't stretch the search request
+	// whole batch so a few slow/hanging targets can't stretch the request
 	// open-endedly. The ceiling is derived from the per-URL budget (see
 	// Config.BatchTimeout) rather than a separate knob. When it fires, in-flight
 	// fetches are cancelled and any not yet started record a timeout error instead
@@ -256,7 +277,7 @@ func (s *Server) enrichEnvelopeWithExtraction(ctx context.Context, env *Envelope
 	extractOne := func(idx int) {
 		// Skip the fetch entirely if the batch budget is already spent.
 		if err := ctx.Err(); err != nil {
-			env.Results[idx].Extracted = &ExtractedContent{Error: sanitizeExtractError(err)}
+			env.Results[idx].Extracted = &ExtractedContent{Error: SanitizeExtractError(err)}
 			return
 		}
 		req := extractpkg.ExtractRequest{
@@ -270,14 +291,14 @@ func (s *Server) enrichEnvelopeWithExtraction(ctx context.Context, env *Envelope
 		}
 		result, err := extractor.Extract(ctx, req)
 		if err != nil {
-			env.Results[idx].Extracted = &ExtractedContent{Error: sanitizeExtractError(err)}
+			env.Results[idx].Extracted = &ExtractedContent{Error: SanitizeExtractError(err)}
 			return
 		}
 		content := result.Markdown
 		if contentFormat == "text" {
 			content = result.Text
 		}
-		if !extractedContentLooksUseful(content) {
+		if !ExtractedContentLooksUseful(content) {
 			env.Results[idx].Extracted = &ExtractedContent{Error: "empty extracted content"}
 			return
 		}
@@ -320,7 +341,10 @@ func (s *Server) enrichEnvelopeWithExtraction(ctx context.Context, env *Envelope
 
 const minUsefulExtractRunes = 80
 
-func extractedContentLooksUseful(content string) bool {
+// ExtractedContentLooksUseful reports whether extracted page content is long
+// enough to keep, rather than an empty/boilerplate shell. Shared by the HTTP
+// server and the CLI so both apply the same threshold.
+func ExtractedContentLooksUseful(content string) bool {
 	return len([]rune(strings.TrimSpace(content))) >= minUsefulExtractRunes
 }
 
@@ -337,7 +361,7 @@ func extractedSuccessCount(results []Result) int {
 func extractedResultSucceeded(result Result) bool {
 	return result.Extracted != nil &&
 		result.Extracted.Error == "" &&
-		extractedContentLooksUseful(result.Extracted.Content)
+		ExtractedContentLooksUseful(result.Extracted.Content)
 }
 
 func sendExtractResult(c *fiber.Ctx, format string, result *extractpkg.ExtractResult) error {
@@ -379,7 +403,9 @@ func parseBoolDefault(raw string, fallback bool) bool {
 	return raw == "1" || strings.EqualFold(raw, "true") || strings.EqualFold(raw, "yes")
 }
 
-func sanitizeExtractError(err error) string {
+// SanitizeExtractError trims and length-bounds an extraction error for safe
+// inclusion in a response payload. Shared by the HTTP server and the CLI.
+func SanitizeExtractError(err error) string {
 	if err == nil {
 		return ""
 	}

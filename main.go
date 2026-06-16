@@ -11,7 +11,7 @@ func main() {
 	defer recoverPanic()
 
 	if err := cmd.RootCmd.Execute(); err != nil {
-		logrus.Info(err)
+		// Cobra already prints the error to stderr; just set the exit code.
 		os.Exit(1)
 	}
 }

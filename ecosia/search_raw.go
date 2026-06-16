@@ -12,12 +12,28 @@ import (
 	"github.com/karust/openserp/core"
 )
 
+// isCaptchaDoc reports whether a parsed Ecosia document is a Cloudflare
+// challenge rather than a SERP. Prefers the hidden Turnstile input, then falls
+// back to the shared challenge-page body phrases (see cfBodyMarkers).
+func isCaptchaDoc(doc *goquery.Document) bool {
+	if doc.Find(Selectors.Captcha).Length() > 0 {
+		return true
+	}
+	text := strings.ToLower(doc.Text())
+	for _, m := range cfBodyMarkers {
+		if strings.Contains(text, m) {
+			return true
+		}
+	}
+	return false
+}
+
 func classifyEcosiaRawHTML(body []byte) error {
 	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	if strings.Contains(strings.ToLower(doc.Text()), "captcha") {
+	if isCaptchaDoc(doc) {
 		return core.ErrCaptcha
 	}
 	if doc.Find("[data-test-id='web-no-results']").Length() > 0 ||

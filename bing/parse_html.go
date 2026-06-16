@@ -47,7 +47,10 @@ func parseBingDocument(doc *goquery.Document) []core.SearchResult {
 			return
 		}
 
-		title := titleTag.Text()
+		title := firstNonEmptyAttr(titleTag, "aria-label", "title")
+		if title == "" {
+			title = normalizeWhitespace(titleTag.Text())
+		}
 		if title == "" {
 			title = extractFirstText(item, Selectors.TitleFallbacks)
 		}
@@ -82,14 +85,25 @@ func parseBingDocument(doc *goquery.Document) []core.SearchResult {
 func extractFirstText(item *goquery.Selection, selectors []string) string {
 	for _, selector := range selectors {
 		if tag := item.Find(selector).First(); tag.Length() > 0 {
-			if text := strings.TrimSpace(tag.Text()); text != "" {
+			if text := normalizeWhitespace(tag.Text()); text != "" {
 				return text
 			}
-			if label, exists := tag.Attr("aria-label"); exists {
-				if label = strings.TrimSpace(label); label != "" {
-					return label
-				}
+			if label := firstNonEmptyAttr(tag, "aria-label", "title"); label != "" {
+				return label
 			}
+		}
+	}
+	return ""
+}
+
+func firstNonEmptyAttr(item *goquery.Selection, attrs ...string) string {
+	for _, attr := range attrs {
+		value, exists := item.Attr(attr)
+		if !exists {
+			continue
+		}
+		if value = normalizeWhitespace(value); value != "" {
+			return value
 		}
 	}
 	return ""
@@ -118,8 +132,8 @@ func descriptionFromItem(item *goquery.Selection, title string) string {
 	return normalizeWhitespace(strings.Replace(item.Text(), title, "", 1))
 }
 
-// normalizeWhitespace collapses runs of whitespace (including the newlines and
-// indentation Bing leaves in snippet markup) into single spaces.
+// normalizeWhitespace collapses Bing's snippet-markup whitespace into single
+// spaces (see core.NormalizeWhitespace).
 func normalizeWhitespace(s string) string {
-	return strings.Join(strings.Fields(s), " ")
+	return core.NormalizeWhitespace(s)
 }

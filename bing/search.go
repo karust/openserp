@@ -66,6 +66,11 @@ func (bing *Bing) checkCaptcha(page *rod.Page) bool {
 }
 
 func (bing *Bing) acceptCookies(ctx context.Context, page *rod.Page) error {
+	// Probe first so a banner-less SERP returns immediately instead of blocking
+	// .Element for the full Timeout/10.
+	if has, _, err := page.Has(Selectors.CookieBtn); err != nil || !has {
+		return nil
+	}
 	consentBtn, err := page.Timeout(bing.Timeout / 10).Element(Selectors.CookieBtn)
 	if err != nil {
 		return nil
@@ -107,8 +112,10 @@ func (bing *Bing) parseResultElement(el *rod.Element, isAd bool, rank, absoluteR
 		return core.SearchResult{}, false
 	}
 
-	title, _ := titleElem.Text()
-	title = strings.TrimSpace(title)
+	title := core.ElementAttribute(titleElem, "aria-label", "title")
+	if title == "" {
+		title = core.ElementText(titleElem)
+	}
 	if title == "" {
 		title = core.FirstNonEmptyText(el, Selectors.TitleFallbacks...)
 	}
@@ -120,16 +127,10 @@ func (bing *Bing) parseResultElement(el *rod.Element, isAd bool, rank, absoluteR
 		return core.SearchResult{}, false
 	}
 
-	desc := ""
-	if descElem, err := el.Element(Selectors.DescPrimary); err == nil {
-		desc, _ = descElem.Text()
-	} else if descElem, err := el.Element(Selectors.DescFallback); err == nil {
-		desc, _ = descElem.Text()
-	} else if descElem, err := el.Element(Selectors.DescAny); err == nil {
-		desc, _ = descElem.Text()
-	} else {
+	desc := core.FirstNonEmptyText(el, Selectors.DescPrimary, Selectors.DescFallback, Selectors.DescAny)
+	if desc == "" {
 		fullText, _ := el.Text()
-		desc = strings.TrimSpace(strings.Replace(fullText, title, "", 1))
+		desc = core.NormalizeWhitespace(strings.Replace(fullText, title, "", 1))
 	}
 
 	return core.SearchResult{
@@ -137,7 +138,7 @@ func (bing *Bing) parseResultElement(el *rod.Element, isAd bool, rank, absoluteR
 		AbsoluteRank: absoluteRank,
 		URL:          url,
 		Title:        title,
-		Description:  strings.TrimSpace(desc),
+		Description:  desc,
 		Ad:           isAd,
 	}, true
 }

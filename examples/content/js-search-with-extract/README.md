@@ -8,4 +8,4 @@ npm install
 node index.js
 ```
 
-Edit the `text`, `extractTop`, or `extractMode` in [index.js](index.js) to tune it.
+Edit the `text`, `extract` depth, or `extractMode` in [index.js](index.js) to tune it.

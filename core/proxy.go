@@ -24,6 +24,10 @@ const (
 	// ProxyPoolQuarantineDuration is how long an exhausted tag pool stays quarantined
 	// before a single probe proxy is re-enabled for recovery testing.
 	ProxyPoolQuarantineDuration = 5 * time.Minute
+	// ProxyChallengeCooldown is how long a captcha/blocked proxy is deprioritized
+	// in rotation. It does not degrade health, so the proxy is still served if
+	// it's the only one left.
+	ProxyChallengeCooldown = 2 * time.Minute
 )
 
 var supportedProxySchemes = map[string]struct{}{
@@ -99,6 +103,9 @@ type proxyState struct {
 	tags     []string
 	failures int
 	disabled bool
+	// challengedUntil deprioritizes (but does not disable) this proxy in
+	// rotation after a captcha/block. See ReportChallenged.
+	challengedUntil time.Time
 }
 
 type ProxyRegistry struct {
@@ -411,21 +418,29 @@ func (r *ProxyRegistry) NextByTagWithContext(ctx context.Context, tag string) st
 		}
 	}
 
+	now := time.Now()
 	start := r.nextByTag[tag]
-	for i := 0; i < len(urls); i++ {
-		idx := (start + i) % len(urls)
-		proxyURL := urls[idx]
-		state := r.states[proxyURL]
-		if state.disabled {
-			continue
-		}
+	// First pass skips challenged proxies; second pass relaxes that so a
+	// challenged-but-healthy proxy is still served rather than failing.
+	for _, skipChallenged := range []bool{true, false} {
+		for i := 0; i < len(urls); i++ {
+			idx := (start + i) % len(urls)
+			proxyURL := urls[idx]
+			state := r.states[proxyURL]
+			if state.disabled {
+				continue
+			}
+			if skipChallenged && now.Before(state.challengedUntil) {
+				continue
+			}
 
-		r.nextByTag[tag] = (idx + 1) % len(urls)
-		WithRequest(ctx).WithFields(logrus.Fields{
-			"proxy_tag": tag,
-			"proxy":     MaskProxyURL(proxyURL),
-		}).Debugf("Selected proxy for tag=%s: %s", tag, MaskProxyURL(proxyURL))
-		return proxyURL
+			r.nextByTag[tag] = (idx + 1) % len(urls)
+			WithRequest(ctx).WithFields(logrus.Fields{
+				"proxy_tag": tag,
+				"proxy":     MaskProxyURL(proxyURL),
+			}).Debugf("Selected proxy for tag=%s: %s", tag, MaskProxyURL(proxyURL))
+			return proxyURL
+		}
 	}
 
 	// All proxies are disabled and no probe could be selected.
@@ -498,22 +513,50 @@ func (r *ProxyRegistry) ReportSuccess(_ context.Context, proxyURL string) {
 	}
 }
 
-func (r *ProxyRegistry) HasHealthyProxyForTag(tag string) bool {
-	tag = normalizeTag(tag)
-	if tag == "" {
-		return false
+// ReportChallenged deprioritizes a captcha/blocked proxy for
+// ProxyChallengeCooldown without degrading its health (unlike ReportFailure, it
+// never disables the proxy or trips quarantine), so the next attempt prefers a
+// different IP.
+func (r *ProxyRegistry) ReportChallenged(ctx context.Context, proxyURL string) {
+	proxyURL, err := NormalizeProxyURL(proxyURL)
+	if err != nil || proxyURL == "" {
+		return
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	for _, proxyURL := range r.tagIndex[tag] {
-		if state, ok := r.states[proxyURL]; ok && !state.disabled {
-			return true
-		}
+	state, ok := r.states[proxyURL]
+	if !ok {
+		return
+	}
+	state.challengedUntil = time.Now().Add(ProxyChallengeCooldown)
+	WithRequest(ctx).WithField("proxy", MaskProxyURL(proxyURL)).
+		Debugf("Deprioritized challenged proxy for %s: %s", ProxyChallengeCooldown, MaskProxyURL(proxyURL))
+}
+
+func (r *ProxyRegistry) HasHealthyProxyForTag(tag string) bool {
+	return r.HealthyCountForTag(tag) > 0
+}
+
+// HealthyCountForTag returns how many non-disabled proxies the tag pool holds
+// (a challenged proxy still counts — it's usable, just deprioritized).
+func (r *ProxyRegistry) HealthyCountForTag(tag string) int {
+	tag = normalizeTag(tag)
+	if tag == "" {
+		return 0
 	}
 
-	return false
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	count := 0
+	for _, proxyURL := range r.tagIndex[tag] {
+		if state, ok := r.states[proxyURL]; ok && !state.disabled {
+			count++
+		}
+	}
+	return count
 }
 
 func (r *ProxyRegistry) BuildStats() ProxyStats {

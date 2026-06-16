@@ -28,6 +28,9 @@ type ProxyExecutionMeta struct {
 	Mode string `json:"mode"`
 	Tag  string `json:"tag,omitempty"`
 	Used string `json:"used"`
+	// Attempts is how many proxies were tried; >1 means a challenged proxy was
+	// rotated out in tag-pool mode.
+	Attempts int `json:"attempts,omitempty"`
 }
 
 type ResilientConfig struct {
@@ -171,56 +174,83 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 	attemptMeta := rs.baseProxyMeta(policy)
 
 	startedAt := time.Now()
-	result := RetryableSearch(ctx, rs.retryCfg, engine.Name(), func(callCtx context.Context) ([]SearchResult, error) {
-		limiter := engine.GetRateLimiter()
-		if limiter != nil {
-			if err := limiter.Wait(callCtx); err != nil {
-				return nil, normalizeLimiterWaitErr(callCtx, err)
-			}
-		}
 
-		attemptQuery := q
-		proxyURL := ""
-		reportToRegistry := false
-		attemptMeta = rs.baseProxyMeta(policy)
-
-		switch policy.Mode {
-		case ProxyModeOff:
-			attemptQuery.ProxyURL = ""
-			attemptMeta.Used = "direct"
-		case ProxyModeRequestURL:
-			proxyURL = q.ProxyURL
-			attemptQuery.ProxyURL = proxyURL
-			attemptMeta.Used = MaskProxyURL(proxyURL)
-		case ProxyModeTagPool:
-			proxyURL = rs.selectProxyForQuery(policy, q, engineCtx)
-			if proxyURL == "" {
-				return nil, fmt.Errorf("%w: no healthy proxy available for tag %q", ErrProxyUnavailable, policy.Tag)
-			}
-			attemptQuery.ProxyURL = proxyURL
-			reportToRegistry = policy.Tag != ""
-			attemptMeta.Used = MaskProxyURL(proxyURL)
-		}
-
-		requestCtx := proxyRequestContext(callCtx, engine.Name(), attemptQuery)
-		results, err := invokeEngine(requestCtx, engine, attemptQuery, isImage)
-
-		if reportToRegistry {
-			rs.reportProxyAttempt(engineCtx, proxyURL, err)
-		}
-		if err != nil && errors.Is(err, ErrCaptcha) && rs.proxyCfg.Proxies.Lanes.DropCookiesOnChallenge {
-			// Recompute lane key only to gate the call: empty key means we have no
-			// session to drop cookies for. The dropper recomputes the key itself
-			// when it actually needs to mutate lane state.
-			if !ProxyLaneKeyForTenant(engine.Name(), TenantFromContext(callCtx), attemptQuery, attemptQuery.ProxyURL).Empty() {
-				if dropper, ok := engine.(proxyLaneCookieDropper); ok {
-					dropper.DropProxyLaneCookies(callCtx, attemptQuery)
+	// lastProxyURL is the unmasked proxy of the last attempt, for rotation below.
+	lastProxyURL := ""
+	runOnce := func() RetryResult {
+		return RetryableSearch(ctx, rs.retryCfg, engine.Name(), func(callCtx context.Context) ([]SearchResult, error) {
+			limiter := engine.GetRateLimiter()
+			if limiter != nil {
+				if err := limiter.Wait(callCtx); err != nil {
+					return nil, normalizeLimiterWaitErr(callCtx, err)
 				}
 			}
-		}
 
-		return results, err
-	})
+			attemptQuery := q
+			proxyURL := ""
+			reportToRegistry := false
+			attemptMeta = rs.baseProxyMeta(policy)
+
+			switch policy.Mode {
+			case ProxyModeOff:
+				attemptQuery.ProxyURL = ""
+				attemptMeta.Used = "direct"
+			case ProxyModeRequestURL:
+				proxyURL = q.ProxyURL
+				attemptQuery.ProxyURL = proxyURL
+				attemptMeta.Used = MaskProxyURL(proxyURL)
+			case ProxyModeTagPool:
+				proxyURL = rs.selectProxyForQuery(policy, q, engineCtx)
+				if proxyURL == "" {
+					return nil, fmt.Errorf("%w: no healthy proxy available for tag %q", ErrProxyUnavailable, policy.Tag)
+				}
+				attemptQuery.ProxyURL = proxyURL
+				reportToRegistry = policy.Tag != ""
+				attemptMeta.Used = MaskProxyURL(proxyURL)
+			}
+			lastProxyURL = proxyURL
+
+			requestCtx := proxyRequestContext(callCtx, engine.Name(), attemptQuery)
+			results, err := invokeEngine(requestCtx, engine, attemptQuery, isImage)
+
+			if reportToRegistry {
+				rs.reportProxyAttempt(engineCtx, proxyURL, err)
+			}
+			if err != nil && errors.Is(err, ErrCaptcha) && rs.proxyCfg.Proxies.Lanes.DropCookiesOnChallenge {
+				// Recompute lane key only to gate the call: empty key means we have no
+				// session to drop cookies for. The dropper recomputes the key itself
+				// when it actually needs to mutate lane state.
+				if !ProxyLaneKeyForTenant(engine.Name(), TenantFromContext(callCtx), attemptQuery, attemptQuery.ProxyURL).Empty() {
+					if dropper, ok := engine.(proxyLaneCookieDropper); ok {
+						dropper.DropProxyLaneCookies(callCtx, attemptQuery)
+					}
+				}
+			}
+
+			return results, err
+		})
+	}
+
+	result := runOnce()
+	attemptMeta.Attempts = 1
+
+	// On a captcha/block/rate-limit (non-retryable inside RetryableSearch), if
+	// the tag pool has another healthy proxy, deprioritize the burned one and
+	// retry once with the next. Tag-pool only — direct/request-url/global can't
+	// rotate.
+	if result.Err != nil &&
+		policy.Mode == ProxyModeTagPool &&
+		policy.Tag != "" &&
+		rs.proxyRegistry != nil &&
+		IsProxyChallengeError(result.Err) &&
+		rs.proxyRegistry.HealthyCountForTag(policy.Tag) >= 2 &&
+		ctx.Err() == nil {
+		rs.proxyRegistry.ReportChallenged(engineCtx, lastProxyURL)
+		WithRequestEngine(ctx, engine.Name()).WithError(result.Err).
+			Debug("Challenged proxy rotated out, retrying once with next proxy")
+		result = runOnce()
+		attemptMeta.Attempts = 2
+	}
 
 	if result.Err != nil {
 		if shouldRecordCircuitFailure(result.Err) {
@@ -231,6 +261,14 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 
 	cb.RecordSuccessDuration(engineCtx, time.Since(startedAt))
 	return result.Results, attemptMeta, nil
+}
+
+// IsProxyChallengeError reports whether err is a captcha/block/rate-limit — an
+// IP-reputation problem another proxy might dodge.
+func IsProxyChallengeError(err error) bool {
+	return errors.Is(err, ErrCaptcha) ||
+		errors.Is(err, ErrBlocked) ||
+		errors.Is(err, ErrRateLimited)
 }
 
 func shouldRecordCircuitFailure(err error) bool {

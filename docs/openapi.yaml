@@ -48,7 +48,6 @@ paths:
         - $ref: "#/components/parameters/FilterQuery"
         - $ref: "#/components/parameters/FeaturesQuery"
         - $ref: "#/components/parameters/ExtractQuery"
-        - $ref: "#/components/parameters/ExtractTopQuery"
         - $ref: "#/components/parameters/ExtractModeQuery"
         - $ref: "#/components/parameters/MinRunesQuery"
         - $ref: "#/components/parameters/FormatQuery"
@@ -330,7 +329,6 @@ paths:
         - $ref: "#/components/parameters/MegaDedupeQuery"
         - $ref: "#/components/parameters/MegaMergeQuery"
         - $ref: "#/components/parameters/ExtractQuery"
-        - $ref: "#/components/parameters/ExtractTopQuery"
         - $ref: "#/components/parameters/ExtractModeQuery"
         - $ref: "#/components/parameters/MinRunesQuery"
         - $ref: "#/components/parameters/FormatQuery"
@@ -834,25 +832,27 @@ components:
       name: extract
       in: query
       required: false
-      description: Fetch and embed cleaned target-page content for top web results.
+      description: >
+        Fetch and embed cleaned target-page content for the top web results.
+        Accepts a boolean or an integer depth: `extract=0`/`false` disables
+        extraction; `extract=true`/`1` enriches the top result; `extract=N`
+        (1-5) enriches the top N results. The tuning params `extract_mode` and
+        `min_runes` imply `extract=true` (top 1) when present, unless
+        `extract=0` is set explicitly.
       schema:
-        type: boolean
+        oneOf:
+          - type: boolean
+          - type: integer
+            minimum: 0
+            maximum: 5
         default: false
-    ExtractTopQuery:
-      name: extract_top
-      in: query
-      required: false
-      description: Number of top organic results to enrich when `extract=true`.
-      schema:
-        type: integer
-        minimum: 1
-        maximum: 5
-        default: 3
     ExtractModeQuery:
       name: extract_mode
       in: query
       required: false
-      description: Extraction strategy for target pages.
+      description: >
+        Extraction strategy for target pages. Its presence implies
+        `extract=true` unless `extract=0` is set explicitly.
       schema:
         type: string
         enum: [auto, fast, rendered]

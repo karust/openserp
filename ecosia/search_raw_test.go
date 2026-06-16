@@ -44,13 +44,34 @@ func TestEcosiaImageResultParser(t *testing.T) {
 func TestEcosiaClassifyRawHTML(t *testing.T) {
 	t.Parallel()
 
-	body, err := io.ReadAll(testutil.ResponseFromFixture(t, "search_no_results.html").Body)
-	if err != nil {
-		t.Fatalf("read fixture body: %v", err)
+	tests := []struct {
+		fixture string
+		want    error
+	}{
+		{"search_no_results.html", core.ErrEmptyResult},
+		{"search_captcha.html", core.ErrCaptcha},
+		{"search_results.html", nil},
 	}
 
-	err = classifyEcosiaRawHTML(body)
-	if !errors.Is(err, core.ErrEmptyResult) {
-		t.Fatalf("expected %v for search_no_results.html, got %v", core.ErrEmptyResult, err)
+	for _, tt := range tests {
+		t.Run(tt.fixture, func(t *testing.T) {
+			t.Parallel()
+
+			body, err := io.ReadAll(testutil.ResponseFromFixture(t, tt.fixture).Body)
+			if err != nil {
+				t.Fatalf("read fixture body: %v", err)
+			}
+
+			got := classifyEcosiaRawHTML(body)
+			if tt.want == nil {
+				if got != nil {
+					t.Fatalf("expected nil for %s, got %v", tt.fixture, got)
+				}
+				return
+			}
+			if !errors.Is(got, tt.want) {
+				t.Fatalf("expected %v for %s, got %v", tt.want, tt.fixture, got)
+			}
+		})
 	}
 }

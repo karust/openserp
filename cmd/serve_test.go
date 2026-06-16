@@ -19,6 +19,15 @@ func TestRawEngineCachesRateLimiter(t *testing.T) {
 	}
 }
 
+func TestCommandDefaultsToQuiet(t *testing.T) {
+	if !commandDefaultsToQuiet(searchCMD) {
+		t.Fatal("expected search command to default to quiet")
+	}
+	if commandDefaultsToQuiet(serveCMD) {
+		t.Fatal("expected serve command to keep server logging by default")
+	}
+}
+
 func TestBrowserPoolKey(t *testing.T) {
 	cases := []struct {
 		name string

@@ -251,7 +251,7 @@ func quoteIfNeeded(s string) string {
 	return s
 }
 
-func InitLogger(isVerbose, isDebug bool, format string) {
+func InitLogger(isVerbose, isDebug, isQuiet bool, format string) {
 	switch format {
 	case LogFormatText:
 		logrus.SetFormatter(&bracketFormatter{TimestampFormat: "2006-01-02 15:04:05"})
@@ -261,16 +261,22 @@ func InitLogger(isVerbose, isDebug bool, format string) {
 		})
 	}
 
-	if isDebug {
-		logrus.SetOutput(io.MultiWriter(os.Stdout))
+	// Logs go to stderr (+ optional file) so stdout carries only the payload.
+	switch {
+	case isDebug:
+		logrus.SetOutput(io.MultiWriter(os.Stderr))
 		logrus.SetReportCaller(true)
-	} else {
+	case isQuiet:
+		// One-shot CLI default: stderr only, no ./logs.txt in the user's CWD.
+		logrus.SetOutput(os.Stderr)
+		logrus.SetReportCaller(false)
+	default:
 		f, err := os.OpenFile("./logs.txt", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to open logs file ./logs.txt: %v\n", err)
-			logrus.SetOutput(io.MultiWriter(os.Stdout))
+			logrus.SetOutput(io.MultiWriter(os.Stderr))
 		} else {
-			logrus.SetOutput(io.MultiWriter(f, os.Stdout))
+			logrus.SetOutput(io.MultiWriter(f, os.Stderr))
 		}
 		logrus.SetReportCaller(false)
 	}
@@ -281,6 +287,10 @@ func InitLogger(isVerbose, isDebug bool, format string) {
 	}
 	if isDebug {
 		level = logrus.TraceLevel
+	}
+	if isQuiet && !isVerbose && !isDebug {
+		// Quiet keeps only warnings/errors on stderr.
+		level = logrus.WarnLevel
 	}
 	logrus.SetLevel(level)
 }
