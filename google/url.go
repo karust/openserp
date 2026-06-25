@@ -262,7 +262,7 @@ func BuildURL(q core.Query) (string, error) {
 	if q.DateInterval != "" {
 		intervals := strings.Split(q.DateInterval, "..")
 		if len(intervals) != 2 {
-			return "", errors.New("incorrect data interval provided")
+			return "", errors.New("incorrect date interval provided")
 		}
 
 		dataParam := fmt.Sprintf("cdr:1,cd_min:%s,cd_max:%s", intervals[0], intervals[1])
@@ -343,7 +343,7 @@ func BuildImageURL(q core.Query) (string, error) {
 	if q.DateInterval != "" {
 		intervals := strings.Split(q.DateInterval, "..")
 		if len(intervals) != 2 {
-			return "", errors.New("incorrect data interval provided")
+			return "", errors.New("incorrect date interval provided")
 		}
 
 		dataParam := fmt.Sprintf("cdr:1,cd_min:%s,cd_max:%s", intervals[0], intervals[1])

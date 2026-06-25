@@ -335,6 +335,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			srchRes.AbsoluteRank = absoluteRank
 			adRank++
 			absoluteRank++
+			searchResults = append(searchResults, srchRes)
 
 		} else if isAnswerBox {
 			// 2. Parse answer boxes
@@ -463,18 +464,6 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 		} else {
 			continue
 		}
-
-		if srchRes.Ad && srchRes.Rank == 0 {
-			srchRes.Rank = adRank
-			adRank++
-		} else if !srchRes.Ad {
-			srchRes.Rank = rank
-		}
-		if srchRes.AbsoluteRank == 0 {
-			srchRes.AbsoluteRank = absoluteRank
-			absoluteRank++
-		}
-		searchResults = append(searchResults, srchRes)
 	}
 
 	deduped := core.DeduplicateResults(searchResults)

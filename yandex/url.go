@@ -54,7 +54,6 @@ func BuildURL(q core.Query, page int) (string, error) {
 // BuildImageURL builds a Yandex image search URL for the provided query and
 // page index. It returns an error when the resulting query text is empty.
 func BuildImageURL(q core.Query, page int) (string, error) {
-	// TODO: Add other parameters
 	base, _ := url.Parse(baseURL)
 	base.Path += "images/search/"
 

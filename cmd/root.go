@@ -293,7 +293,7 @@ func initializeConfig(cmd *cobra.Command) error {
 		envKey := envPrefix + "_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
 		err := v.BindEnv(key, envKey)
 		if err != nil {
-			logrus.WithError(err).Error(fmt.Sprintf("Unable to bind ENV valye: %v", err))
+			logrus.WithError(err).Error(fmt.Sprintf("Unable to bind ENV value: %v", err))
 		}
 	}
 

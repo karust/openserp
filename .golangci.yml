@@ -1,6 +1,19 @@
 run:
   tests: true
   timeout: 5m
+  go: "1.24"
+
+# Pinned set so CI and local runs agree
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - staticcheck
+    - gosimple
+    - errcheck
+    - ineffassign
+    - unused
+    - misspell
 
 issues:
   max-issues-per-linter: 0
