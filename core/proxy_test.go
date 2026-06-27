@@ -344,7 +344,7 @@ func TestNewRawHTTPClientSocks5hUsesProxyDNS(t *testing.T) {
 	}
 }
 
-func TestNewRawHTTPClientDirectTLSUsesHTTP1(t *testing.T) {
+func TestNewRawHTTPClientDirectTLSNegotiatesHTTP2(t *testing.T) {
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(r.Proto))
 	}))
@@ -367,8 +367,8 @@ func TestNewRawHTTPClientDirectTLSUsesHTTP1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read response body: %v", err)
 	}
-	if string(body) != "HTTP/1.1" {
-		t.Fatalf("expected raw client to use HTTP/1.1, got %q", string(body))
+	if string(body) != "HTTP/2.0" {
+		t.Fatalf("expected raw client to negotiate HTTP/2, got %q", string(body))
 	}
 }
 

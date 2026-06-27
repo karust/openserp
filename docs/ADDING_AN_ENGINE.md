@@ -36,10 +36,15 @@ Raw engines should expose a `ParseHTML(io.Reader)` path so tests and
 
 Update:
 
-- `cmd/serve.go` for server wiring.
-- CLI search dispatch when the engine is CLI-visible.
+- `cmd/engines.go` with one `engineSpec` row. This central registry drives
+  server wiring, CLI dispatch, aliases, parser endpoints, and raw-mode support.
 - `config.yaml` with rate limits and optional proxy tag.
 - `README.md` and `docs/openapi.yaml` when public endpoints or parameters change.
+
+Set `rawSearchFn` only when the engine has raw HTTP support, and set
+`parseHTMLFn` when `POST /{engine}/parse` should be available. Touch
+`cmd/serve.go` or `cmd/root.go` only for new global behavior or flags, not for
+ordinary engine registration.
 
 ## 4. Add tests
 

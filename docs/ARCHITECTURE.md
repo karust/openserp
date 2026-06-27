@@ -2,12 +2,12 @@
 
 ## Overview
 
-OpenSERP is a Go API + CLI for search result extraction from Google, Yandex, Baidu, Bing, and DuckDuckGo.
+OpenSERP is a Go API + CLI for search result extraction from Google, Yandex, Baidu, Bing, DuckDuckGo, and Ecosia.
 
 Execution modes:
 
 - **Browser mode**: default path, headless Chromium via `go-rod`, supported by all engines.
-- **Raw HTTP mode**: direct HTTP + `goquery`, currently supported by Google, Yandex, and Baidu.
+- **Raw HTTP mode**: direct HTTP + `goquery`, currently supported by Google, Yandex, Baidu, and Ecosia.
 
 Browser mode is the primary compatibility path.
 
@@ -54,6 +54,7 @@ openserp/
 ├── baidu/
 ├── bing/
 ├── duckduckgo/
+├── ecosia/
 └── testutil/
 ```
 
