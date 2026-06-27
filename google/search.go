@@ -273,9 +273,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 	}
 	gogl.logger.Info("Found %d total results", totalResults)
 
-	rank := query.Start
-	adRank := 1
-	absoluteRank := query.Start + 1
+	rank := core.NewRankStateAt(query.Start, query.Start+1)
 	// When matched by the canonical organic selector (div.tF2Cxc) every element
 	// is already an organic result, but the wrapper itself often lacks data-ved
 	// (it sits on the outer .g/data-hveid container). Only require data-ved when
@@ -331,10 +329,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			} else {
 				srchRes.Description = strings.TrimSpace(text)
 			}
-			srchRes.Rank = adRank
-			srchRes.AbsoluteRank = absoluteRank
-			adRank++
-			absoluteRank++
+			srchRes.Rank, srchRes.AbsoluteRank = rank.Next(true)
 			searchResults = append(searchResults, srchRes)
 
 		} else if isAnswerBox {
@@ -454,10 +449,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			}
 			srchRes.Description = desc
 
-			rank += 1
-			srchRes.Rank = rank
-			srchRes.AbsoluteRank = absoluteRank
-			absoluteRank++
+			srchRes.Rank, srchRes.AbsoluteRank = rank.Next(false)
 			searchResults = append(searchResults, srchRes)
 			continue
 

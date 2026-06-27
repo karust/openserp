@@ -20,9 +20,7 @@ func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
 
 func parseDDGDocument(doc *goquery.Document) []core.SearchResult {
 	var results []core.SearchResult
-	rank := 1
-	adRank := 1
-	absoluteRank := 1
+	rank := core.NewRankState(0)
 
 	resultSel := firstMatchingSelector(doc, Selectors.Results)
 	if resultSel == "" {
@@ -30,42 +28,49 @@ func parseDDGDocument(doc *goquery.Document) []core.SearchResult {
 	}
 
 	doc.Find(resultSel).Each(func(_ int, item *goquery.Selection) {
-		href := extractFirstAttr(item, Selectors.Link, "href")
+		href := ddgDocumentHref(item)
 		if href == "" || href == "#" || strings.HasPrefix(href, "javascript:") {
 			return
 		}
 
-		title := extractFirstText(item, Selectors.Title)
+		title := firstText(item, Selectors.Title...)
 		if title == "" {
 			return
 		}
 
-		desc := extractFirstText(item, Selectors.Desc)
+		desc := firstText(item, Selectors.Desc...)
+		isAd := ddgSelectionHasAdMarker(item)
 
-		isAd := duckduckgoSelectionHasAdMarker(item)
-
-		r := core.SearchResult{
-			Rank:         rank,
+		resultRank, absoluteRank := rank.Next(isAd)
+		results = append(results, core.SearchResult{
+			Rank:         resultRank,
 			AbsoluteRank: absoluteRank,
 			URL:          href,
 			Title:        title,
 			Description:  desc,
 			Ad:           isAd,
-		}
-		if !isAd {
-			rank++
-		} else {
-			r.Rank = adRank
-			adRank++
-		}
-		results = append(results, r)
-		absoluteRank++
+		})
 	})
 
 	return core.AttachFeaturesToFirstResult(core.DeduplicateResults(results), extractDDGFeatures(doc))
 }
 
-func duckduckgoSelectionHasAdMarker(item *goquery.Selection) bool {
+// firstText returns the normalized text of the first selector that matches a
+// non-empty element.
+func firstText(item *goquery.Selection, selectors ...string) string {
+	for _, sel := range selectors {
+		if tag := item.Find(sel).First(); tag.Length() > 0 {
+			if text := core.NormalizeWhitespace(tag.Text()); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
+}
+
+// ddgSelectionHasAdMarker reports whether the row self-or-descendant matches any
+// DuckDuckGo ad-badge selector.
+func ddgSelectionHasAdMarker(item *goquery.Selection) bool {
 	for _, sel := range Selectors.AdBadge {
 		if item.Is(sel) || item.Find(sel).Length() > 0 {
 			return true
@@ -74,43 +79,28 @@ func duckduckgoSelectionHasAdMarker(item *goquery.Selection) bool {
 	return false
 }
 
-// firstMatchingSelector returns the first selector from the list that matches
-// at least one element in the document.
-func firstMatchingSelector(doc *goquery.Document, selectors []string) string {
-	for _, sel := range selectors {
-		if doc.Find(sel).Length() > 0 {
-			return sel
-		}
-	}
-	return ""
-}
-
-// extractFirstAttr tries each selector in order and returns the named attribute
-// of the first match, or "".
-func extractFirstAttr(item *goquery.Selection, selectors []string, attr string) string {
-	for _, sel := range selectors {
+// ddgDocumentHref returns the first non-empty href among the link selectors,
+// trimmed. It skips a selector whose anchor has an absent/empty href and tries
+// the next (the pre-refactor extractFirstAttr behavior).
+func ddgDocumentHref(item *goquery.Selection) string {
+	for _, sel := range Selectors.Link {
 		tag := item.Find(sel).First()
 		if tag.Length() == 0 {
 			continue
 		}
-		val, exists := tag.Attr(attr)
-		if exists && val != "" {
+		if val, exists := tag.Attr("href"); exists && val != "" {
 			return strings.TrimSpace(val)
 		}
 	}
 	return ""
 }
 
-// extractFirstText tries each selector in order and returns the trimmed text of
-// the first match, or "".
-func extractFirstText(item *goquery.Selection, selectors []string) string {
+// firstMatchingSelector returns the first selector from the list that matches
+// at least one element in the document.
+func firstMatchingSelector(doc *goquery.Document, selectors []string) string {
 	for _, sel := range selectors {
-		tag := item.Find(sel).First()
-		if tag.Length() == 0 {
-			continue
-		}
-		if text := strings.TrimSpace(tag.Text()); text != "" {
-			return text
+		if doc.Find(sel).Length() > 0 {
+			return sel
 		}
 	}
 	return ""

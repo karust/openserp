@@ -69,9 +69,7 @@ func (ddg *DuckDuckGo) isNoResults(page *rod.Page) bool {
 
 func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.SearchResult {
 	searchResults := []core.SearchResult{}
-	organicRank := pageNum * 10
-	adRank := 1
-	absoluteRank := pageNum*10 + 1
+	rank := core.NewRankState(pageNum)
 
 	for _, r := range results {
 		// Get URL - try multiple selectors
@@ -116,15 +114,8 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 		desc := core.FirstNonEmptyText(r, Selectors.Desc...)
 
 		// Check if it's an ad
-		isAd := duckduckgoElementHasAdMarker(r)
-		resultRank := 0
-		if isAd {
-			resultRank = adRank
-			adRank++
-		} else {
-			organicRank++
-			resultRank = organicRank
-		}
+		isAd := ddgElementHasAdMarker(r)
+		resultRank, absoluteRank := rank.Next(isAd)
 
 		result := core.SearchResult{
 			Rank:         resultRank,
@@ -135,19 +126,17 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 			Ad:           isAd,
 		}
 		searchResults = append(searchResults, result)
-		absoluteRank++
 	}
 
 	return searchResults
 }
 
-func duckduckgoElementHasAdMarker(el *rod.Element) bool {
+func ddgElementHasAdMarker(el *rod.Element) bool {
 	if el == nil {
 		return false
 	}
 	for _, selector := range Selectors.AdBadge {
-		matches, err := el.Matches(selector)
-		if err == nil && matches {
+		if matches, err := el.Matches(selector); err == nil && matches {
 			return true
 		}
 		if adIndicator, err := el.Element(selector); err == nil && adIndicator != nil {

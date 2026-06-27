@@ -41,9 +41,7 @@ func baiduResultSelector() string {
 
 func parseBaiduSelection(sel *goquery.Selection) []core.SearchResult {
 	var results []core.SearchResult
-	rank := 1
-	adRank := 1
-	absoluteRank := 1
+	rank := core.NewRankState(0)
 
 	sel.Each(func(_ int, item *goquery.Selection) {
 		isAd := baiduSelectionHasAdMarker(item)
@@ -120,14 +118,7 @@ func parseBaiduSelection(sel *goquery.Selection) []core.SearchResult {
 			desc = strings.TrimSpace(strings.Replace(full, title, "", 1))
 		}
 
-		resultRank := rank
-		if isAd {
-			resultRank = adRank
-			adRank++
-		} else {
-			rank++
-		}
-
+		resultRank, absoluteRank := rank.Next(isAd)
 		results = append(results, core.SearchResult{
 			Rank:         resultRank,
 			AbsoluteRank: absoluteRank,
@@ -136,7 +127,6 @@ func parseBaiduSelection(sel *goquery.Selection) []core.SearchResult {
 			Description:  desc,
 			Ad:           isAd,
 		})
-		absoluteRank++
 	})
 
 	// Re-rank sequentially after dedup so callers get a clean 1..N sequence

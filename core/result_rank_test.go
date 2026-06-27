@@ -101,6 +101,54 @@ func TestEnrichResultUsesExplicitResultType(t *testing.T) {
 	}
 }
 
+func TestRankStateInterleavesAdsAndSeedsPages(t *testing.T) {
+	t.Parallel()
+
+	// Page 1 (0-based): organic ranks continue at 11, ad ranks always restart at
+	// 1, and the absolute rank counts every emitted row regardless of kind.
+	rank := NewRankState(1)
+
+	steps := []struct {
+		isAd           bool
+		rank, absolute int
+	}{
+		{true, 1, 11},   // ad
+		{false, 11, 12}, // organic (seeded from page*10)
+		{false, 12, 13}, // organic
+		{true, 2, 14},   // ad interleaved after organics
+		{false, 13, 15}, // organic
+	}
+	for i, s := range steps {
+		gotRank, gotAbs := rank.Next(s.isAd)
+		if gotRank != s.rank || gotAbs != s.absolute {
+			t.Fatalf("step %d (ad=%v): got rank=%d absolute=%d, want rank=%d absolute=%d",
+				i, s.isAd, gotRank, gotAbs, s.rank, s.absolute)
+		}
+	}
+}
+
+func TestSetSeparatedAdAbsoluteRanks(t *testing.T) {
+	t.Parallel()
+
+	// Ecosia collects ads and organics in separate passes (each rank-1-based),
+	// then this assigns one mixed absolute order: ads first, then organics.
+	results := []SearchResult{
+		{Rank: 1, URL: "https://organic.example.com/one"},
+		{Rank: 2, URL: "https://organic.example.com/two"},
+		{Rank: 1, Ad: true, URL: "https://ads.example.com/one"},
+		{Rank: 2, Ad: true, URL: "https://ads.example.com/two"},
+	}
+
+	SetSeparatedAdAbsoluteRanks(results, 0)
+
+	want := []int{3, 4, 1, 2} // ads (passes 1,2) precede organics (3,4) in absolute order
+	for i, r := range results {
+		if r.AbsoluteRank != want[i] {
+			t.Fatalf("%s absolute rank = %d, want %d", r.URL, r.AbsoluteRank, want[i])
+		}
+	}
+}
+
 func TestEnvelopePaginationCountsOrganicResults(t *testing.T) {
 	t.Parallel()
 

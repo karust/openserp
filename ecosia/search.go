@@ -9,7 +9,6 @@ package ecosia
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -109,30 +108,10 @@ func (e *Ecosia) parseResult(elem *rod.Element, rank int, ad bool) (core.SearchR
 	if err != nil {
 		return core.SearchResult{}, false
 	}
-	hrefStr := strings.TrimSpace(href.String())
-	if hrefStr == "" || strings.HasPrefix(hrefStr, "javascript:") {
-		return core.SearchResult{}, false
-	}
 
-	title := ""
-	if t, err := elem.Element(Selectors.Title); err == nil {
-		title, _ = t.Text()
-	} else if t, err := elem.Element("h2, h3"); err == nil {
-		title, _ = t.Text()
-	}
-
-	desc := ""
-	if d, err := elem.Element(Selectors.Desc); err == nil {
-		desc, _ = d.Text()
-	}
-
-	return core.SearchResult{
-		Rank:        rank,
-		URL:         hrefStr,
-		Title:       strings.TrimSpace(title),
-		Description: strings.TrimSpace(desc),
-		Ad:          ad,
-	}, true
+	title := core.FirstNonEmptyText(elem, Selectors.Title, "h2, h3")
+	desc := core.FirstNonEmptyText(elem, Selectors.Desc)
+	return assembleEcosiaRow(href.String(), title, desc, rank, ad)
 }
 
 // Search executes an Ecosia web search and returns normalized search results.
@@ -223,7 +202,7 @@ func (e *Ecosia) Search(ctx context.Context, query core.Query) (results []core.S
 		}
 	}
 
-	setSeparatedAdAbsoluteRanks(all, query.Start)
+	core.SetSeparatedAdAbsoluteRanks(all, query.Start)
 	deduped := core.DeduplicateResults(all)
 	if query.Limit > 0 {
 		deduped = core.LimitOrganicResults(deduped, query.Limit)
@@ -243,10 +222,6 @@ func (e *Ecosia) parseImageResult(el *rod.Element, rank int) (core.SearchResult,
 	if err != nil {
 		return core.SearchResult{}, false
 	}
-	imgURL := strings.TrimSpace(href.String())
-	if imgURL == "" {
-		return core.SearchResult{}, false
-	}
 
 	title := ""
 	if img, err := link.Element("img"); err == nil {
@@ -254,33 +229,19 @@ func (e *Ecosia) parseImageResult(el *rod.Element, rank int) (core.SearchResult,
 			title = strings.TrimSpace(*alt)
 		}
 	}
+	source := elementText(el, Selectors.ImageSource)
+	dims := elementText(el, Selectors.ImageDims)
+	return assembleEcosiaImageRow(href.String(), title, source, dims, rank)
+}
 
-	source := ""
-	if s, err := el.Element(Selectors.ImageSource); err == nil {
-		source, _ = s.Text()
-		source = strings.TrimSpace(source)
+// elementText returns the trimmed text of the first descendant matching
+// selector, or "" if absent.
+func elementText(el *rod.Element, selector string) string {
+	if e, err := el.Element(selector); err == nil {
+		text, _ := e.Text()
+		return strings.TrimSpace(text)
 	}
-	dims := ""
-	if d, err := el.Element(Selectors.ImageDims); err == nil {
-		dims, _ = d.Text()
-		dims = strings.TrimSpace(dims)
-	}
-
-	desc := source
-	if dims != "" {
-		if source != "" {
-			desc = fmt.Sprintf("%s (%s)", source, dims)
-		} else {
-			desc = dims
-		}
-	}
-
-	return core.SearchResult{
-		Rank:        rank,
-		URL:         imgURL,
-		Title:       title,
-		Description: desc,
-	}, true
+	return ""
 }
 
 // SearchImage executes an Ecosia image search and returns normalized image

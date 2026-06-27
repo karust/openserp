@@ -57,31 +57,15 @@ func imageResultParser(response *http.Response) ([]core.SearchResult, error) {
 		rank    = 1
 	)
 	doc.Find(Selectors.ImageResult).Each(func(_ int, s *goquery.Selection) {
-		href, ok := s.Find(Selectors.ImageLink).Attr("href")
-		if !ok || strings.TrimSpace(href) == "" {
-			return
+		link := s.Find(Selectors.ImageLink)
+		href, _ := link.Attr("href")
+		title, _ := link.Find("img").Attr("alt")
+		source := strings.TrimSpace(s.Find(Selectors.ImageSource).Text())
+		dims := strings.TrimSpace(s.Find(Selectors.ImageDims).Text())
+		if res, ok := assembleEcosiaImageRow(href, strings.TrimSpace(title), source, dims, rank); ok {
+			results = append(results, res)
+			rank++
 		}
-		title, _ := s.Find(Selectors.ImageLink).Find("img").Attr("alt")
-		title = strings.TrimSpace(title)
-		var (
-			source = strings.TrimSpace(s.Find(Selectors.ImageSource).Text())
-			dims   = strings.TrimSpace(s.Find(Selectors.ImageDims).Text())
-			desc   = source
-		)
-		if dims != "" {
-			if source != "" {
-				desc = source + " (" + dims + ")"
-			} else {
-				desc = dims
-			}
-		}
-		results = append(results, core.SearchResult{
-			Rank:        rank,
-			URL:         href,
-			Title:       title,
-			Description: desc,
-		})
-		rank++
 	})
 	return results, nil
 }
@@ -140,7 +124,7 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 		parsedResults[i].Rank = startRank + organicIdx
 		organicIdx++
 	}
-	setSeparatedAdAbsoluteRanks(parsedResults, pageNum*10)
+	core.SetSeparatedAdAbsoluteRanks(parsedResults, pageNum*10)
 
 	core.WithRequest(ctx).WithField("results_count", len(parsedResults)).Debug(
 		fmt.Sprintf("Ecosia Raw results : %v", parsedResults),

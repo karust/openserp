@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -72,9 +71,7 @@ func (yand *Yandex) isNoResults(page *rod.Page) bool {
 
 func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.SearchResult {
 	searchResults := []core.SearchResult{}
-	organicRank := pageNum * 10
-	adRank := 1
-	absoluteRank := pageNum*10 + 1
+	rank := core.NewRankState(pageNum)
 
 	for _, r := range results {
 		titleTag, err := r.Element(Selectors.Title)
@@ -82,62 +79,60 @@ func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.Searc
 			yand.logger.Debug("Missing h2 title")
 			continue
 		}
-		title, err := titleTag.Text()
-		if err != nil || strings.TrimSpace(title) == "" {
-			yand.logger.Debug("Failed to extract title")
+		href, ok := yand.elementHref(r, titleTag)
+		if !ok {
 			continue
 		}
-		title = strings.TrimSpace(title)
-
-		link, err := r.Element(Selectors.LinkPrimary)
-		if err != nil {
-			if closest := core.ClosestMatching(titleTag, Selectors.Link, 4); closest != nil {
-				link = closest
-				err = nil
-			}
-		}
-		if err != nil {
-			link, err = r.Element(Selectors.Link)
-			if err != nil {
-				yand.logger.Debug("Missing link")
-				continue
-			}
-		}
-		linkText, err := link.Property("href")
-		if err != nil {
-			yand.logger.Debug("Missing href")
-			continue
-		}
-		hrefStr := strings.TrimSpace(linkText.String())
-		if hrefStr == "" || hrefStr == "#" || strings.HasPrefix(hrefStr, "javascript:") {
-			continue
-		}
-
+		title := core.ElementText(titleTag)
 		desc := core.FirstNonEmptyText(r, Selectors.Desc, Selectors.DescFallback)
+		isAd := yandexElementHasAdMarker(r) || yandexURLLooksAd(href)
 
-		isAd := yandexElementHasAdMarker(r) || yandexURLLooksAd(hrefStr)
-		resultRank := 0
-		if isAd {
-			resultRank = adRank
-			adRank++
-		} else {
-			organicRank++
-			resultRank = organicRank
+		if res, ok := assembleYandexRow(href, title, desc, isAd, rank); ok {
+			searchResults = append(searchResults, res)
 		}
-
-		res := core.SearchResult{
-			Rank:         resultRank,
-			AbsoluteRank: absoluteRank,
-			URL:          hrefStr,
-			Title:        title,
-			Description:  desc,
-			Ad:           isAd,
-		}
-		searchResults = append(searchResults, res)
-		absoluteRank++
 	}
 
 	return searchResults
+}
+
+// elementHref resolves a result row's link href in the rod path: the canonical
+// organic-title link, then the <a> wrapping the title, then any <a> in the
+// block. ok=false (with a debug log) when no usable anchor is found.
+func (yand *Yandex) elementHref(r, titleTag *rod.Element) (string, bool) {
+	link, err := r.Element(Selectors.LinkPrimary)
+	if err != nil {
+		if closest := core.ClosestMatching(titleTag, Selectors.Link, 4); closest != nil {
+			link, err = closest, nil
+		}
+	}
+	if err != nil {
+		link, err = r.Element(Selectors.Link)
+		if err != nil {
+			yand.logger.Debug("Missing link")
+			return "", false
+		}
+	}
+	linkText, err := link.Property("href")
+	if err != nil {
+		yand.logger.Debug("Missing href")
+		return "", false
+	}
+	return linkText.String(), true
+}
+
+func yandexElementHasAdMarker(el *rod.Element) bool {
+	if el == nil {
+		return false
+	}
+	for _, selector := range Selectors.AdMarkers {
+		if matches, err := el.Matches(selector); err == nil && matches {
+			return true
+		}
+		if child, err := el.Element(selector); err == nil && child != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Yandex hydrates the results list progressively, so the first parse can be
@@ -173,22 +168,6 @@ func (yand *Yandex) waitForParsedResults(ctx context.Context, page *rod.Page, pa
 	}
 
 	return results, nil
-}
-
-func yandexElementHasAdMarker(el *rod.Element) bool {
-	if el == nil {
-		return false
-	}
-	for _, selector := range Selectors.AdMarkers {
-		matches, err := el.Matches(selector)
-		if err == nil && matches {
-			return true
-		}
-		if child, err := el.Element(selector); err == nil && child != nil {
-			return true
-		}
-	}
-	return false
 }
 
 func (yand *Yandex) parseImageEntities(items rod.Elements) map[string]ImageEntity {

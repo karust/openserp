@@ -25,9 +25,7 @@ func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
 
 func parseGoogleDocument(doc *goquery.Document) []core.SearchResult {
 	results := []core.SearchResult{}
-	rank := 1
-	adRank := 1
-	absoluteRank := 1
+	rank := core.NewRankState(0)
 
 	// Prefer the canonical organic result block (div.tF2Cxc, innermost). Fall
 	// back to the broad attribute selector only when no tF2Cxc blocks exist, so
@@ -81,14 +79,7 @@ func parseGoogleDocument(doc *goquery.Document) []core.SearchResult {
 		desc := descTag.Text()
 
 		if link != "" && link != "#" {
-			resultRank := rank
-			if isAd {
-				resultRank = adRank
-				adRank++
-			} else {
-				rank++
-			}
-
+			resultRank, absoluteRank := rank.Next(isAd)
 			result := core.SearchResult{
 				Rank:         resultRank,
 				AbsoluteRank: absoluteRank,
@@ -99,7 +90,6 @@ func parseGoogleDocument(doc *goquery.Document) []core.SearchResult {
 			}
 
 			results = append(results, result)
-			absoluteRank++
 		}
 	}
 

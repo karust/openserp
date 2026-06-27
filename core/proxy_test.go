@@ -15,7 +15,6 @@ import (
 	"time"
 
 	socks5 "github.com/armon/go-socks5"
-	xcontext "golang.org/x/net/context"
 )
 
 type timeoutTestError struct{}
@@ -438,7 +437,7 @@ type staticResolver struct {
 	ip   net.IP
 }
 
-func (r staticResolver) Resolve(ctx xcontext.Context, name string) (xcontext.Context, net.IP, error) {
+func (r staticResolver) Resolve(ctx context.Context, name string) (context.Context, net.IP, error) {
 	if name == r.host {
 		return ctx, r.ip, nil
 	}

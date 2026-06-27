@@ -90,7 +90,7 @@ func bingElementMatches(el *rod.Element, selector string) bool {
 	return err == nil && matches
 }
 
-func (bing *Bing) parseResultElement(el *rod.Element, isAd bool, rank, absoluteRank int) (core.SearchResult, bool) {
+func (bing *Bing) parseResultElement(el *rod.Element, isAd bool, rank *core.RankState) (core.SearchResult, bool) {
 	titleSelector := Selectors.Title
 	if isAd {
 		titleSelector = Selectors.AdTitle
@@ -101,14 +101,9 @@ func (bing *Bing) parseResultElement(el *rod.Element, isAd bool, rank, absoluteR
 		bing.logger.Debug("Missing title")
 		return core.SearchResult{}, false
 	}
-
 	href, err := titleElem.Property("href")
 	if err != nil {
 		bing.logger.Debug("Missing URL")
-		return core.SearchResult{}, false
-	}
-	url := strings.TrimSpace(href.String())
-	if url == "" || url == "#" || strings.HasPrefix(url, "javascript:") {
 		return core.SearchResult{}, false
 	}
 
@@ -122,10 +117,6 @@ func (bing *Bing) parseResultElement(el *rod.Element, isAd bool, rank, absoluteR
 	if title == "" {
 		title = core.FirstNonEmptyAttribute(el, "aria-label", Selectors.TitleFallbacks...)
 	}
-	if title == "" {
-		bing.logger.Debug("Missing title text")
-		return core.SearchResult{}, false
-	}
 
 	desc := core.FirstNonEmptyText(el, Selectors.DescPrimary, Selectors.DescFallback, Selectors.DescAny)
 	if desc == "" {
@@ -133,14 +124,7 @@ func (bing *Bing) parseResultElement(el *rod.Element, isAd bool, rank, absoluteR
 		desc = core.NormalizeWhitespace(strings.Replace(fullText, title, "", 1))
 	}
 
-	return core.SearchResult{
-		Rank:         rank,
-		AbsoluteRank: absoluteRank,
-		URL:          url,
-		Title:        title,
-		Description:  desc,
-		Ad:           isAd,
-	}, true
+	return assembleBingRow(href.String(), title, desc, isAd, rank)
 }
 
 // Search executes a Bing web search and returns normalized search results.
@@ -192,9 +176,7 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 	}
 	bing.logger.Info("Found %d organic result containers", totalResults)
 
-	rank := query.Start
-	adRank := 1
-	absoluteRank := query.Start + 1
+	rank := core.NewRankStateAt(query.Start, query.Start+1)
 	for _, result := range resultElements {
 		isAd := bingElementMatches(result, Selectors.Ads)
 		isOrganic := bingElementMatches(result, Selectors.Results)
@@ -202,21 +184,11 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 			continue
 		}
 
-		resultRank := rank + 1
-		if isAd {
-			resultRank = adRank
-		}
-		srchRes, ok := bing.parseResultElement(result, isAd, resultRank, absoluteRank)
+		srchRes, ok := bing.parseResultElement(result, isAd, rank)
 		if !ok {
 			continue
 		}
 		searchResults = append(searchResults, srchRes)
-		absoluteRank++
-		if isAd {
-			adRank++
-		} else {
-			rank++
-		}
 	}
 
 	// Deduplicate results

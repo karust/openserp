@@ -195,10 +195,7 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 	for _, engine := range searchEngines {
 		locEngine := engine
 
-		endpointName := strings.ToLower(locEngine.Name())
-		if endpointName == "duckduckgo" {
-			endpointName = "duck"
-		}
+		endpointName := engineEndpointName(locEngine.Name())
 
 		serv.app.Get(fmt.Sprintf("/%s/search", endpointName), func(c *fiber.Ctx) error {
 			return serv.handleDedicatedEndpoint(c, locEngine, false)
@@ -215,15 +212,15 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 			continue
 		}
 		locParser := parser
-		parserEndpointName := strings.ToLower(parser.Name())
-		serv.app.Post(fmt.Sprintf("/%s/parse", parserEndpointName),
-			func(c *fiber.Ctx) error {
-				return serv.handleParseEndpoint(c, locParser)
-			})
-		if parserEndpointName == "duckduckgo" {
-			serv.app.Post("/duck/parse", func(c *fiber.Ctx) error {
-				return serv.handleParseEndpoint(c, locParser)
-			})
+		// Parse registers the canonical-name path, plus the endpoint slug when it
+		// differs (e.g. /duckduckgo/parse and /duck/parse both resolve).
+		parserName := strings.ToLower(parser.Name())
+		parseHandler := func(c *fiber.Ctx) error {
+			return serv.handleParseEndpoint(c, locParser)
+		}
+		serv.app.Post(fmt.Sprintf("/%s/parse", parserName), parseHandler)
+		if slug := engineEndpointName(parser.Name()); slug != parserName {
+			serv.app.Post(fmt.Sprintf("/%s/parse", slug), parseHandler)
 		}
 	}
 
@@ -1216,12 +1213,20 @@ func (s *Server) resolveEngines(ctx context.Context, enginesParam string) []Sear
 	return enginesToUse
 }
 
+func engineEndpointName(name string) string {
+	name = strings.ToLower(name)
+	if name == "duckduckgo" {
+		return "duck"
+	}
+	return name
+}
+
 func resolveEngineAlias(name string) string {
-	switch name {
+	switch strings.ToLower(name) {
 	case "duck", "ddg":
 		return "duckduckgo"
 	default:
-		return name
+		return strings.ToLower(name)
 	}
 }
 
