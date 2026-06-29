@@ -33,9 +33,6 @@ func TestBuildURL(t *testing.T) {
 				if got := params.Get("q"); got != "golang тест site:example.com filetype:pdf" {
 					t.Fatalf("unexpected q value: %q", got)
 				}
-				if got := params.Get("pq"); got != params.Get("q") {
-					t.Fatalf("pq should match q, got %q vs %q", got, params.Get("q"))
-				}
 				if got := params.Get("setlang"); got != "ru" {
 					t.Fatalf("unexpected setlang value: %q", got)
 				}
@@ -54,14 +51,10 @@ func TestBuildURL(t *testing.T) {
 				if got := params.Get("first"); got != "" {
 					t.Fatalf("first should be omitted when Start=0, got %q", got)
 				}
-				if got := params.Get("form"); got != "QBLH" {
-					t.Fatalf("unexpected form value: %q", got)
-				}
-				if got := params.Get("qs"); got != "HS" {
-					t.Fatalf("unexpected qs value: %q", got)
-				}
-				if got := params.Get("sp"); got != "-1" {
-					t.Fatalf("unexpected sp value: %q", got)
+				for _, key := range []string{"form", "qs", "sp", "pq"} {
+					if got := params.Get(key); got != "" {
+						t.Fatalf("expected %s to be omitted, got %q", key, got)
+					}
 				}
 			},
 		},
@@ -75,9 +68,6 @@ func TestBuildURL(t *testing.T) {
 				t.Helper()
 				if got := params.Get("q"); got != "megadeth tickets" {
 					t.Fatalf("unexpected q value: %q", got)
-				}
-				if got := params.Get("pq"); got != "megadeth tickets" {
-					t.Fatalf("unexpected pq value: %q", got)
 				}
 				if got := params.Get("filters"); got != `ex1:"ez5_20454_20570"` {
 					t.Fatalf("unexpected filters value: %q", got)

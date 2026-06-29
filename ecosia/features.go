@@ -7,7 +7,7 @@ import (
 )
 
 func extractEcosiaFeatures(doc *goquery.Document) []core.SerpFeature {
-	features := core.ExtractSerpFeaturesBySelectors(doc, []core.SerpFeatureSelector{
+	return core.ExtractSerpFeaturesBySelectors(doc, []core.SerpFeatureSelector{
 		{
 			Type:          core.ResultTypeAnswerBox,
 			Title:         "Answer",
@@ -27,7 +27,6 @@ func extractEcosiaFeatures(doc *goquery.Document) []core.SerpFeature {
 			Confidence:   0.8,
 		},
 	})
-	return core.DeduplicateSerpFeatures(features)
 }
 
 func extractEcosiaFeaturesFromPage(page *rod.Page) []core.SerpFeature {

@@ -153,6 +153,17 @@ func AttachFeaturesToFirstResult(results []SearchResult, features []SerpFeature)
 	return results
 }
 
+// StripResultFeatures drops parser-attached features unless keep is true.
+func StripResultFeatures(results []SearchResult, keep bool) []SearchResult {
+	if keep {
+		return results
+	}
+	for i := range results {
+		results[i].Features = nil
+	}
+	return results
+}
+
 // DeduplicateSerpFeatures removes duplicate modules emitted by overlapping
 // selectors while preserving original order.
 func DeduplicateSerpFeatures(features []SerpFeature) []SerpFeature {
@@ -188,18 +199,20 @@ func selectedFeatureItems(container *goquery.Selection, selectors []string) []Fe
 	for _, selector := range selectors {
 		container.Find(selector).Each(func(_ int, item *goquery.Selection) {
 			text := cleanFeatureText(item.Text())
-			title := firstAttr(item, "data-q", "data-title", "aria-label", "title")
-			// Some modules (e.g. Google PAA) carry the question in an attribute
-			// and render the answer lazily, so the element text can be empty.
+			title := cleanFeatureText(firstAttr(item, "data-q", "data-title", "aria-label", "title"))
+			// Some modules keep the question in an attr and fill text lazily.
 			if text == "" {
-				text = cleanFeatureText(title)
+				text = title
 			}
 			if text == "" {
 				return
 			}
+			if title == "" {
+				title = text
+			}
 			link := firstAttr(item, "href", "data-url", "data-link")
 			items = append(items, FeatureItem{
-				Title: strings.TrimSpace(title),
+				Title: title,
 				Text:  text,
 				Link:  strings.TrimSpace(link),
 			})
@@ -251,8 +264,15 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+var invisibleFormatChars = strings.NewReplacer(
+	"\u00AD", "",
+	"\u200B", "",
+	"\u2060", "",
+	"\uFEFF", "",
+)
+
 func cleanFeatureText(value string) string {
-	return strings.Join(strings.Fields(value), " ")
+	return strings.Join(strings.Fields(invisibleFormatChars.Replace(value)), " ")
 }
 
 func serpFeatureKey(feature SerpFeature) string {

@@ -472,7 +472,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 		return nil, core.ErrSearchTimeout
 	}
 	if query.Features {
-		deduped = core.AttachFeaturesToFirstResult(deduped, extractGoogleFeaturesFromPage(page))
+		deduped = core.AttachFeaturesToFirstResult(deduped, extractGoogleFeaturesFromPage(ctx, page))
 	}
 	return deduped, nil
 }

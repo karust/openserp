@@ -114,6 +114,7 @@ func (baid *Baidu) Search(ctx context.Context, query core.Query) (results []core
 		}
 		searchResults[i].Rank = query.Start + searchResults[i].Rank
 	}
+	searchResults = core.StripResultFeatures(searchResults, query.Features)
 	return searchResults, nil
 }
 

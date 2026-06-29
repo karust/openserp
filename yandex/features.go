@@ -7,7 +7,7 @@ import (
 )
 
 func extractYandexFeatures(doc *goquery.Document) []core.SerpFeature {
-	features := core.ExtractSerpFeaturesBySelectors(doc, []core.SerpFeatureSelector{
+	return core.ExtractSerpFeaturesBySelectors(doc, []core.SerpFeatureSelector{
 		{
 			// Neuro/AI answer card (data-fast-name='neuro_answer'). Most of the
 			// answer body renders client-side from a data-state JSON blob, so the
@@ -42,7 +42,6 @@ func extractYandexFeatures(doc *goquery.Document) []core.SerpFeature {
 			Confidence:   0.7,
 		},
 	})
-	return core.DeduplicateSerpFeatures(features)
 }
 
 func extractYandexFeaturesFromPage(page *rod.Page) []core.SerpFeature {

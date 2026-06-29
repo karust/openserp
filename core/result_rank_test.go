@@ -101,6 +101,40 @@ func TestEnrichResultUsesExplicitResultType(t *testing.T) {
 	}
 }
 
+func TestValidateResultTypeAcceptsFullTaxonomy(t *testing.T) {
+	t.Parallel()
+
+	types := []ResultType{
+		ResultTypeOrganic,
+		ResultTypeAd,
+		ResultTypeFeaturedSnippet,
+		ResultTypeKnowledgePanel,
+		ResultTypePeopleAlsoAsk,
+		ResultTypeVideo,
+		ResultTypeImage,
+		ResultTypeNews,
+		ResultTypeShopping,
+		ResultTypeLocal,
+		ResultTypeAnswerBox,
+		ResultTypeAISummary,
+		ResultTypeRelatedQuestions,
+		ResultTypeRelatedSearches,
+		ResultTypeSitelinks,
+		ResultTypeVideos,
+		ResultTypeImagesInline,
+		ResultTypeCalculator,
+		ResultTypeWeather,
+		ResultTypeDictionary,
+	}
+
+	for _, typ := range types {
+		got, warning := ValidateResultType(typ)
+		if got != typ || warning != "" {
+			t.Fatalf("ValidateResultType(%q) = (%q, %q), want (%q, empty)", typ, got, warning, typ)
+		}
+	}
+}
+
 func TestRankStateInterleavesAdsAndSeedsPages(t *testing.T) {
 	t.Parallel()
 

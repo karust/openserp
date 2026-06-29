@@ -12,9 +12,7 @@
 
 Use it as a search tool for **LLMs, agents, and RAG pipelines**, or as a scraper backend for **SEO rank tracking across Google, Yandex, Baidu, and more**. It is especially useful when your workflow needs RU/CN web coverage instead of another Google-only API.
 
-Run it locally, self-host it, or use [OpenSERP Cloud](https://openserp.org/cloud) when you want the same public API shape without operating the server.
-
-**Official website:** [openserp.org](https://openserp.org)
+Run it locally, self-host it, or use [cloud version](https://openserp.org/cloud) when you want the same public API shape without operating the server.
 
 ## Features
 

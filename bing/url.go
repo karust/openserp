@@ -101,11 +101,7 @@ func BuildURL(q core.Query) (string, error) {
 		params.Add("filters", filter)
 	}
 
-	// Bing-specific parameters for consistent results
-	params.Add("form", "QBLH")        // Standard search form
-	params.Add("qs", "HS")            // Query suggestions
-	params.Add("sp", "-1")            // Search provider
-	params.Add("pq", params.Get("q")) // Previous query
+	// Omit autosuggest state; fresh sessions can reuse stale q otherwise.
 
 	base.RawQuery = params.Encode()
 	return base.String(), nil

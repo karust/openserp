@@ -210,6 +210,9 @@ func FirstNonEmptyAttribute(root *rod.Element, attr string, selectors ...string)
 // (page.HTML -> goquery doc -> extract), so it lives here rather than being
 // copied per engine. Returns nil on any rendering/parse error.
 func FeaturesFromPage(page *rod.Page, extract func(*goquery.Document) []SerpFeature) []SerpFeature {
+	if page == nil {
+		return nil
+	}
 	html, err := page.HTML()
 	if err != nil {
 		return nil
@@ -219,4 +222,17 @@ func FeaturesFromPage(page *rod.Page, extract func(*goquery.Document) []SerpFeat
 		return nil
 	}
 	return extract(doc)
+}
+
+const featureHydrationWait = 2000 * time.Millisecond
+
+// FeaturesFromPageWithWait lets async feature modules render before snapshotting.
+func FeaturesFromPageWithWait(ctx context.Context, page *rod.Page, extract func(*goquery.Document) []SerpFeature) []SerpFeature {
+	if page != nil {
+		_, _ = page.Eval(`() => window.scrollTo(0, document.body.scrollHeight)`)
+		if err := SleepContext(ctx, featureHydrationWait); err != nil {
+			return nil
+		}
+	}
+	return FeaturesFromPage(page, extract)
 }

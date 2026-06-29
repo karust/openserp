@@ -130,5 +130,6 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 		fmt.Sprintf("Ecosia Raw results : %v", parsedResults),
 	)
 
-	return core.DeduplicateResults(parsedResults), nil
+	deduped := core.StripResultFeatures(core.DeduplicateResults(parsedResults), query.Features)
+	return deduped, nil
 }

@@ -19,6 +19,17 @@ var imageDimensionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b(\d+)x(\d+)\b`),
 }
 
+var featureBaseURLs = map[string]string{
+	"google":     "https://www.google.com/",
+	"bing":       "https://www.bing.com/",
+	"duckduckgo": "https://duckduckgo.com/",
+	"duck":       "https://duckduckgo.com/",
+	"ddg":        "https://duckduckgo.com/",
+	"ecosia":     "https://www.ecosia.org/",
+	"yandex":     "https://www.yandex.com/",
+	"baidu":      "https://www.baidu.com/",
+}
+
 // EnrichContext carries request-scoped values needed to enrich a raw result.
 type EnrichContext struct {
 	Engine string
@@ -124,10 +135,16 @@ func EnrichSerpFeature(raw SerpFeature, engine string, sourceResultID string, ex
 		feature.SourceResultIDs = append(feature.SourceResultIDs, sourceResultID)
 	}
 	for i := range feature.Links {
-		feature.Links[i].URL = normalizeURL(feature.Links[i].URL)
+		feature.Links[i].Title = cleanFeatureText(feature.Links[i].Title)
+		feature.Links[i].URL = normalizeFeatureURL(feature.Links[i].URL, engine)
 	}
 	for i := range feature.Items {
-		feature.Items[i].Link = normalizeURL(feature.Items[i].Link)
+		feature.Items[i].Title = cleanFeatureText(feature.Items[i].Title)
+		feature.Items[i].Text = cleanFeatureText(feature.Items[i].Text)
+		if feature.Items[i].Title == "" {
+			feature.Items[i].Title = feature.Items[i].Text
+		}
+		feature.Items[i].Link = normalizeFeatureURL(feature.Items[i].Link, engine)
 	}
 	if feature.ID == "" {
 		feature.ID = buildFeatureID(feature)
@@ -136,6 +153,37 @@ func EnrichSerpFeature(raw SerpFeature, engine string, sourceResultID string, ex
 		feature.ExtractedAt = extractedAt.UTC().Format(time.RFC3339)
 	}
 	return feature
+}
+
+func normalizeFeatureURL(raw string, engine string) string {
+	raw = strings.TrimSpace(invisibleFormatChars.Replace(raw))
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "//") {
+		raw = "https:" + raw
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	if parsed.IsAbs() {
+		if strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https") {
+			return normalizeURL(raw)
+		}
+		return raw
+	}
+
+	base, ok := featureBaseURLs[strings.ToLower(strings.TrimSpace(engine))]
+	if !ok {
+		return normalizeURL(raw)
+	}
+	baseURL, err := url.Parse(base)
+	if err != nil {
+		return normalizeURL(raw)
+	}
+	return normalizeURL(baseURL.ResolveReference(parsed).String())
 }
 
 func buildFeatureID(feature SerpFeature) string {
@@ -444,7 +492,10 @@ func ValidateResultType(t ResultType) (ResultType, string) {
 	case ResultTypeOrganic, ResultTypeAd, ResultTypeFeaturedSnippet,
 		ResultTypeKnowledgePanel, ResultTypePeopleAlsoAsk, ResultTypeVideo,
 		ResultTypeImage, ResultTypeNews, ResultTypeShopping,
-		ResultTypeLocal, ResultTypeAnswerBox:
+		ResultTypeLocal, ResultTypeAnswerBox, ResultTypeAISummary,
+		ResultTypeRelatedQuestions, ResultTypeRelatedSearches,
+		ResultTypeSitelinks, ResultTypeVideos, ResultTypeImagesInline,
+		ResultTypeCalculator, ResultTypeWeather, ResultTypeDictionary:
 		return t, ""
 	}
 	return ResultTypeOrganic, fmt.Sprintf("unknown result type %q, defaulting to organic", t)

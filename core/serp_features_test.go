@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 func TestEnvelopeAlwaysIncludesSerpFeatures(t *testing.T) {
@@ -87,6 +89,95 @@ func TestAppendEnrichedSearchResultMirrorsExistingAnswerResultAsFeature(t *testi
 	}
 	if len(env.SerpFeatures[0].SourceResultIDs) != 1 || env.SerpFeatures[0].SourceResultIDs[0] != env.Results[0].ID {
 		t.Fatalf("mirrored feature did not reference result: %#v", env.SerpFeatures[0].SourceResultIDs)
+	}
+}
+
+func TestStripResultFeatures(t *testing.T) {
+	results := []SearchResult{
+		{
+			Rank:  1,
+			URL:   "https://example.com",
+			Title: "Example",
+			Features: []SerpFeature{{
+				Type: ResultTypeRelatedSearches,
+				Items: []FeatureItem{
+					{Text: "example search"},
+				},
+			}},
+		},
+		{
+			Rank:  2,
+			URL:   "https://example.org",
+			Title: "Example Org",
+		},
+	}
+
+	if kept := StripResultFeatures(results, true); len(kept[0].Features) != 1 {
+		t.Fatalf("keep=true must preserve features, got %#v", kept[0].Features)
+	}
+
+	stripped := StripResultFeatures(results, false)
+
+	if len(stripped) != 2 {
+		t.Fatalf("expected result count to be preserved, got %d", len(stripped))
+	}
+	for i, result := range stripped {
+		if len(result.Features) != 0 {
+			t.Fatalf("result %d kept features: %#v", i, result.Features)
+		}
+	}
+	if stripped[0].URL != "https://example.com" || stripped[1].Rank != 2 {
+		t.Fatalf("non-feature fields changed: %#v", stripped)
+	}
+}
+
+func TestFeatureItemsUseTextAsTitleAndStripInvisibleCharacters(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`
+<div class="related">
+  <a href="?q=python+coding">python coding&#8203;</a>
+</div>`))
+	if err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+
+	features := ExtractSerpFeaturesBySelectors(doc, []SerpFeatureSelector{{
+		Type:         ResultTypeRelatedSearches,
+		Title:        "Related searches",
+		Container:    []string{".related"},
+		ItemSelector: []string{"a"},
+		LinkSelector: []string{"a"},
+	}})
+
+	if len(features) != 1 || len(features[0].Items) != 1 {
+		t.Fatalf("expected one feature item, got %#v", features)
+	}
+	item := features[0].Items[0]
+	if item.Title != "python coding" || item.Text != "python coding" {
+		t.Fatalf("unexpected item text/title: %#v", item)
+	}
+}
+
+func TestEnrichSerpFeatureNormalizesRelativeLinks(t *testing.T) {
+	feature := EnrichSerpFeature(SerpFeature{
+		Type: ResultTypeRelatedSearches,
+		Items: []FeatureItem{{
+			Text: "python coding\u200b",
+			Link: "?q=python+coding&t=h",
+		}},
+		Links: []FeatureLink{{
+			Title: "baidu related",
+			URL:   "/s?wd=python",
+		}},
+	}, "duckduckgo", "", time.Unix(0, 0))
+
+	if feature.Items[0].Title != "python coding" || feature.Items[0].Text != "python coding" {
+		t.Fatalf("unexpected enriched item: %#v", feature.Items[0])
+	}
+	if got, want := feature.Items[0].Link, "https://duckduckgo.com/?q=python+coding&t=h"; got != want {
+		t.Fatalf("item link = %q, want %q", got, want)
+	}
+	if got, want := feature.Links[0].URL, "https://duckduckgo.com/s?wd=python"; got != want {
+		t.Fatalf("feature link = %q, want %q", got, want)
 	}
 }
 

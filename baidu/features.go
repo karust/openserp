@@ -6,7 +6,7 @@ import (
 )
 
 func extractBaiduFeatures(doc *goquery.Document) []core.SerpFeature {
-	features := core.ExtractSerpFeaturesBySelectors(doc, []core.SerpFeatureSelector{
+	return core.ExtractSerpFeaturesBySelectors(doc, []core.SerpFeatureSelector{
 		{
 			Type:          core.ResultTypeAISummary,
 			Title:         "AI summary",
@@ -36,5 +36,4 @@ func extractBaiduFeatures(doc *goquery.Document) []core.SerpFeature {
 			Confidence:   0.75,
 		},
 	})
-	return core.DeduplicateSerpFeatures(features)
 }

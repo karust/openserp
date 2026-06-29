@@ -9,12 +9,7 @@ import (
 	"github.com/karust/openserp/core"
 )
 
-// TestParseHTMLFixtureExtractsRealFeatures guards against selectors drifting
-// away from the real-SERP fixture (a JavaScript "fetch API" query). The fixture
-// renders Google's AI Overview into the main-col streaming container, so the
-// raw parser must emit exactly one ai_summary carrying the full multi-paragraph
-// answer (not just the heading) plus its cited source links. The data-mcpr
-// fallback container must not also fire and leak inline CSS as a second summary.
+// TestParseHTMLFixtureExtractsRealFeatures guards the live AI Overview fixture.
 func TestParseHTMLFixtureExtractsRealFeatures(t *testing.T) {
 	t.Parallel()
 	f, err := os.Open("testdata/search_results.html")
@@ -27,26 +22,25 @@ func TestParseHTMLFixtureExtractsRealFeatures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseHTML() error = %v", err)
 	}
-	assertFeatureType(t, results, core.ResultTypeAISummary)
 
-	summaries := 0
+	var summaries int
 	for _, r := range results {
 		for _, ft := range r.Features {
 			if ft.Type != core.ResultTypeAISummary {
 				continue
 			}
 			summaries++
-			// The full answer body must be captured, not just the heading.
 			if len(ft.Text) < 200 {
 				t.Fatalf("ai_summary text looks truncated (%d chars): %q", len(ft.Text), ft.Text)
 			}
-			// A fallback container that swept a <style> block would surface CSS
-			// rule syntax rather than prose.
+			if strings.Contains(strings.ToLower(ft.Text), "недоступен") {
+				t.Fatalf("ai_summary captured the 'not available' placeholder: %q", ft.Text)
+			}
 			if strings.Contains(ft.Text, "@keyframes") || strings.Contains(ft.Text, "} .") {
 				t.Fatalf("ai_summary text contains CSS, not prose: %q", ft.Text)
 			}
 			if len(ft.Links) == 0 {
-				t.Fatal("expected the ai_summary to carry cited source links")
+				t.Fatal("expected ai_summary to carry cited source links")
 			}
 		}
 	}

@@ -173,5 +173,5 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 		fmt.Sprintf("Google Raw results : %v", parsedResults),
 	)
 
-	return parsedResults, nil
+	return core.StripResultFeatures(parsedResults, query.Features), nil
 }
