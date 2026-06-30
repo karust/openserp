@@ -15,13 +15,7 @@ func classifyBaiduRawHTML(body []byte) error {
 	if err != nil {
 		return err
 	}
-	if doc.Find(Selectors.Captcha).Length() > 0 || doc.Find(Selectors.Timeout).Length() > 0 {
-		return core.ErrCaptcha
-	}
-	if doc.Find("div.content_none, div.nors").Length() > 0 {
-		return core.ErrEmptyResult
-	}
-	return nil
+	return classifyBaiduDocument(doc)
 }
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {

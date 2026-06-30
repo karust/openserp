@@ -87,6 +87,29 @@ func TestParseEndpointParserErrorReturns400(t *testing.T) {
 	}
 }
 
+func TestParseEndpointSearchErrorReturnsTypedError(t *testing.T) {
+	engine := &parserMock{
+		engineMock: engineMock{name: "google", initialized: true},
+		parseHTMLFn: func(_ io.Reader) ([]SearchResult, error) {
+			return nil, ErrCaptcha
+		},
+	}
+	srv := NewServerWithOptions("127.0.0.1", 7126, DefaultServerOptions(), engine)
+
+	resp := postHTML(t, srv, "/google/parse", "<html>captcha</html>")
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if body["error"] != "captcha_detected" {
+		t.Fatalf("expected captcha_detected, got %#v", body["error"])
+	}
+}
+
 func TestParseEndpointNotRegisteredForNonParserEngine(t *testing.T) {
 	// engineMock does NOT implement HTMLParser so no /mock/parse route is registered.
 	engine := &engineMock{name: "mock", initialized: true}

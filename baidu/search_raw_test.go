@@ -17,12 +17,12 @@ func TestBaiduParseHTMLFixtures(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		fixture  string
-		wantZero bool
+		name    string
+		fixture string
+		wantErr error
 	}{
-		{name: "no results", fixture: "search_no_results.html", wantZero: true},
-		{name: "captcha page", fixture: "search_captcha.html", wantZero: true},
+		{name: "no results", fixture: "search_no_results.html"},
+		{name: "captcha page", fixture: "search_captcha.html", wantErr: core.ErrCaptcha},
 	}
 
 	for _, tt := range tests {
@@ -30,10 +30,16 @@ func TestBaiduParseHTMLFixtures(t *testing.T) {
 			t.Parallel()
 
 			results, err := ParseHTML(testutil.ResponseFromFixture(t, tt.fixture).Body)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("expected %v for %s, got %v", tt.wantErr, tt.fixture, err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("ParseHTML() error = %v", err)
 			}
-			if tt.wantZero && len(results) != 0 {
+			if len(results) != 0 {
 				t.Fatalf("expected zero results for %s, got %d", tt.fixture, len(results))
 			}
 		})

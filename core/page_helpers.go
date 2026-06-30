@@ -64,6 +64,56 @@ func WaitForElements(ctx context.Context, page *rod.Page, selectors []string, ti
 	return nil, "", ErrSearchTimeout
 }
 
+// DocSignals is the per-engine selector/text-marker config for
+// ClassifyChallengeDocument.
+type DocSignals struct {
+	CaptchaSelectors []string
+	CaptchaMarkers   []string
+	EmptySelectors   []string
+	EmptyMarkers     []string
+}
+
+// ClassifyChallengeDocument is the shared captcha/empty-result check behind
+// every engine's classify*Document. Selectors are checked before markers
+// since they're cheaper (no doc.Text() walk).
+func ClassifyChallengeDocument(doc *goquery.Document, s DocSignals) error {
+	if anySelectorMatches(doc, s.CaptchaSelectors) {
+		return ErrCaptcha
+	}
+	var text string
+	if len(s.CaptchaMarkers)+len(s.EmptyMarkers) > 0 {
+		text = strings.ToLower(doc.Text())
+	}
+	if anyMarkerMatches(text, s.CaptchaMarkers) {
+		return ErrCaptcha
+	}
+	if anySelectorMatches(doc, s.EmptySelectors) {
+		return ErrEmptyResult
+	}
+	if anyMarkerMatches(text, s.EmptyMarkers) {
+		return ErrEmptyResult
+	}
+	return nil
+}
+
+func anySelectorMatches(doc *goquery.Document, selectors []string) bool {
+	for _, selector := range selectors {
+		if doc.Find(selector).Length() > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func anyMarkerMatches(text string, markers []string) bool {
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // HasAnySelector returns true if at least one of the supplied selectors
 // currently matches in the page DOM. It does not wait — pair with
 // WaitForElements when hydration may be in flight.

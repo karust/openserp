@@ -4,6 +4,7 @@ package baidu
 var Selectors = struct {
 	Captcha       string
 	Timeout       string
+	NoResults     string
 	Results       string
 	ResultsAlt    []string
 	AdMarkers     []string
@@ -16,6 +17,7 @@ var Selectors = struct {
 }{
 	Captcha:       "div.passMod_dialog-wrapper",
 	Timeout:       "button.timeout-button",
+	NoResults:     "div.content_none, div.nors",
 	Results:       "#content_left div.result.c-container",
 	ResultsAlt:    []string{"#content_left div.result-op.c-container", "div.c-container.new-pmd"},
 	AdMarkers:     []string{"[data-tuiguang]", "[data-click*='tuiguang']", ".ec-tuiguang", ".c-icon-bear-p"},

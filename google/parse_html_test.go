@@ -2,11 +2,13 @@ package google
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/karust/openserp/core"
 )
 
 func TestParseHTML(t *testing.T) {
@@ -123,6 +125,40 @@ func TestParseHTMLNoResults(t *testing.T) {
 	}
 	if len(results) != 0 {
 		t.Fatalf("expected zero results, got %d", len(results))
+	}
+}
+
+func TestParseHTMLCaptcha(t *testing.T) {
+	t.Parallel()
+
+	for _, fixture := range []string{"search_captcha.html", "search_captcha_new.html"} {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+
+			data, err := os.ReadFile("testdata/" + fixture)
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+
+			results, err := ParseHTML(bytes.NewReader(data))
+			if !errors.Is(err, core.ErrCaptcha) {
+				t.Fatalf("expected ErrCaptcha, got results=%d err=%v", len(results), err)
+			}
+		})
+	}
+}
+
+func TestParseHTMLSoftBlock(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("testdata/search_soft_block.html")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	results, err := ParseHTML(bytes.NewReader(data))
+	if !errors.Is(err, core.ErrBlocked) {
+		t.Fatalf("expected ErrBlocked, got results=%d err=%v", len(results), err)
 	}
 }
 

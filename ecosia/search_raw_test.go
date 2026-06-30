@@ -75,3 +75,35 @@ func TestEcosiaClassifyRawHTML(t *testing.T) {
 		})
 	}
 }
+
+func TestEcosiaParseHTMLClassifiesCaptchaAndNoResults(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		fixture string
+		wantErr error
+	}{
+		{"search_captcha.html", core.ErrCaptcha},
+		{"search_no_results.html", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.fixture, func(t *testing.T) {
+			t.Parallel()
+
+			results, err := ParseHTML(testutil.ResponseFromFixture(t, tt.fixture).Body)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("expected %v for %s, got %v", tt.wantErr, tt.fixture, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseHTML() error = %v", err)
+			}
+			if len(results) != 0 {
+				t.Fatalf("expected zero results for %s, got %d", tt.fixture, len(results))
+			}
+		})
+	}
+}

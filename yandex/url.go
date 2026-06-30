@@ -44,7 +44,9 @@ func BuildURL(q core.Query, page int) (string, error) {
 
 	if lr := yandexLR(q.Region); lr != "" {
 		params.Add("lr", lr)
-		params.Add("rstr", "true")
+		// rstr (strict region) dropped - it makes Yandex captcha far more
+		// often. lr alone still ranks toward the region, just less precisely.
+		// params.Add("rstr", "true")
 	}
 
 	base.RawQuery = params.Encode()
@@ -83,7 +85,9 @@ func BuildImageURL(q core.Query, page int) (string, error) {
 
 	if lr := yandexLR(q.Region); lr != "" {
 		params.Add("lr", lr)
-		params.Add("rstr", "true")
+		// rstr (strict region) dropped - it makes Yandex captcha far more
+		// often. lr alone still ranks toward the region, just less precisely.
+		// params.Add("rstr", "true")
 	}
 
 	base.RawQuery = params.Encode()

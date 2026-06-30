@@ -1,6 +1,7 @@
 package bing
 
 import (
+	"errors"
 	"io"
 	"strings"
 
@@ -16,7 +17,22 @@ func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	pageStatus := classifyBingDocument(doc)
+	if errors.Is(pageStatus, core.ErrEmptyResult) {
+		return []core.SearchResult{}, nil
+	}
+	if pageStatus != nil {
+		return nil, pageStatus
+	}
 	return parseBingDocument(doc), nil
+}
+
+func classifyBingDocument(doc *goquery.Document) error {
+	return core.ClassifyChallengeDocument(doc, core.DocSignals{
+		CaptchaSelectors: Selectors.Captcha,
+		CaptchaMarkers:   Selectors.CaptchaMarkers,
+		EmptyMarkers:     Selectors.NoResultsMarkers,
+	})
 }
 
 func parseBingDocument(doc *goquery.Document) []core.SearchResult {

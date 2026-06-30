@@ -27,7 +27,7 @@ extract:
   max_concurrent: 2
 
 proxies:
-  allow_request_proxy_url: false
+  allow_request_proxy_url: true
   # Force a single proxy for all engines.
   # Same behavior as passing --proxy on the CLI.
   #global: http://127.0.0.1:8080

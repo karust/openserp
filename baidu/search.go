@@ -3,6 +3,7 @@ package baidu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -133,6 +134,10 @@ func (baid *Baidu) waitForParsedSearchResults(ctx context.Context, page *rod.Pag
 			results, parseErr := ParseHTML(strings.NewReader(html))
 			if parseErr == nil && len(results) > 0 {
 				return results, nil
+			}
+			if errors.Is(parseErr, core.ErrCaptcha) {
+				baid.logger.Error("Captcha detected: %s", url)
+				return nil, core.ErrCaptcha
 			}
 			lastErr = parseErr
 		} else {

@@ -73,12 +73,10 @@ func TestBuildURLRegionLR(t *testing.T) {
 			if gotLR := parsed.Query().Get("lr"); gotLR != tt.wantLR {
 				t.Fatalf("unexpected lr value: %q want %q", gotLR, tt.wantLR)
 			}
-			wantRstr := ""
-			if tt.wantLR != "" {
-				wantRstr = "true"
-			}
-			if gotRstr := parsed.Query().Get("rstr"); gotRstr != wantRstr {
-				t.Fatalf("unexpected rstr value: %q for lr %q", gotRstr, tt.wantLR)
+			// rstr (strict region) is intentionally never set - it makes Yandex
+			// captcha far more often. lr alone still ranks toward the region.
+			if gotRstr := parsed.Query().Get("rstr"); gotRstr != "" {
+				t.Fatalf("rstr should never be set, got %q for lr %q", gotRstr, tt.wantLR)
 			}
 		})
 	}
@@ -97,7 +95,7 @@ func TestBuildImageURLRegionLR(t *testing.T) {
 	if gotLR := parsed.Query().Get("lr"); gotLR != "2" {
 		t.Fatalf("unexpected lr value: %q", gotLR)
 	}
-	if gotRstr := parsed.Query().Get("rstr"); gotRstr != "true" {
-		t.Fatalf("unexpected rstr value: %q", gotRstr)
+	if gotRstr := parsed.Query().Get("rstr"); gotRstr != "" {
+		t.Fatalf("rstr should never be set, got %q", gotRstr)
 	}
 }

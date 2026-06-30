@@ -1446,6 +1446,16 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 			WithRequest(ctx).WithError(derr).Debug("Dispose browser context after navigate error failed")
 		}
 	}
+	// LeavePageOpen keeps the Chrome tab open for manual inspection, but the
+	// background watchers attached to it must still stop or they leak goroutines.
+	stopWatchersOnErr := func() {
+		if b.LeavePageOpen {
+			stopWorkerPatchWatcher(page)
+			stopNetworkUsageWatcher(page)
+		} else {
+			closeOnErr()
+		}
+	}
 
 	profile, laneKey := b.laneProfile(ctx, browser)
 	SetBrowserProfileID(ctx, profile.ID)
@@ -1493,7 +1503,7 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	timedPage := page.Timeout(b.Timeout)
 
 	if err := timedPage.Navigate(URL); err != nil {
-		closeOnErr()
+		stopWatchersOnErr()
 		return nil, classifyProxyNetworkError(err)
 	}
 
@@ -1519,7 +1529,7 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	}
 
 	if err := classifyMainDocumentStatus(statusWatcher.Status()); err != nil {
-		closeOnErr()
+		stopWatchersOnErr()
 		return nil, err
 	}
 	b.saveLaneCookies(ctx, page, URL)

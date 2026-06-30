@@ -2,9 +2,12 @@ package bing
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/karust/openserp/core"
 )
 
 func TestParseBingHTML(t *testing.T) {
@@ -53,6 +56,29 @@ func TestParseBingHTMLEmpty(t *testing.T) {
 	}
 	if len(results) != 0 {
 		t.Fatalf("expected zero results for empty HTML, got %d", len(results))
+	}
+}
+
+func TestParseBingHTMLCaptcha(t *testing.T) {
+	t.Parallel()
+
+	html := `<html><body><div class="captcha">Enter the characters you see</div></body></html>`
+	results, err := ParseHTML(bytes.NewReader([]byte(html)))
+	if !errors.Is(err, core.ErrCaptcha) {
+		t.Fatalf("expected ErrCaptcha, got results=%d err=%v", len(results), err)
+	}
+}
+
+func TestParseBingHTMLNoResults(t *testing.T) {
+	t.Parallel()
+
+	html := `<html><body><main>There are no results for this search.</main></body></html>`
+	results, err := ParseHTML(bytes.NewReader([]byte(html)))
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected zero results, got %d", len(results))
 	}
 }
 

@@ -399,6 +399,18 @@ func (s *Server) handleParseEndpoint(c *fiber.Ctx, parser HTMLParser) error {
 
 	results, err := parser.ParseHTML(bytes.NewReader(body))
 	if err != nil {
+		if isParseEndpointSearchError(err) {
+			spec := mapSearchError(err)
+			return &APIError{
+				HTTPStatus: spec.status,
+				ErrorCode:  spec.code,
+				Message:    spec.message,
+				Meta: map[string]any{
+					"engine":       parser.Name(),
+					"error_detail": err.Error(),
+				},
+			}
+		}
 		return &APIError{
 			HTTPStatus: fiber.StatusBadRequest,
 			ErrorCode:  "parser_failure",
@@ -416,6 +428,14 @@ func (s *Server) handleParseEndpoint(c *fiber.Ctx, parser HTMLParser) error {
 	env.Finalize(startedAt, q)
 
 	return sendEnvelope(c, format, env)
+}
+
+func isParseEndpointSearchError(err error) bool {
+	return errors.Is(err, ErrCaptcha) ||
+		errors.Is(err, ErrBlocked) ||
+		errors.Is(err, ErrRateLimited) ||
+		errors.Is(err, ErrSearchTimeout) ||
+		errors.Is(err, ErrParser)
 }
 
 type searchErrorSpec struct {

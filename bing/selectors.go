@@ -2,21 +2,33 @@ package bing
 
 // Selectors is the single source of truth for Bing SERP CSS selectors.
 var Selectors = struct {
-	Captcha        []string
-	CookieBtn      string
-	ResultItems    string
-	Results        string
-	Ads            string
-	ImageResults   string
-	Title          string
-	TitleFallbacks []string
-	DescPrimary    string
-	DescFallback   string
-	DescAny        string
-	AdTitle        string
+	Captcha          []string
+	CaptchaMarkers   []string
+	NoResultsMarkers []string
+	CookieBtn        string
+	ResultItems      string
+	Results          string
+	Ads              string
+	ImageResults     string
+	Title            string
+	TitleFallbacks   []string
+	DescPrimary      string
+	DescFallback     string
+	DescAny          string
+	AdTitle          string
 }{
-	Captcha:      []string{"div.captcha", "div.captcha_header"},
-	CookieBtn:    "button#bnp_btn_accept",
+	Captcha: []string{"div.captcha", "div.captcha_header"},
+	// CaptchaMarkers/NoResultsMarkers are checked against lowercased page text
+	// as a fallback when the CSS selectors above don't match a challenge page.
+	CaptchaMarkers: []string{
+		"verify that you are not a robot",
+		"enter the characters you see",
+	},
+	NoResultsMarkers: []string{
+		"there are no results for",
+		"no results found for",
+	},
+	CookieBtn: "button#bnp_btn_accept",
 	// ResultItems matches the main-column children only, so carousels and
 	// "related searches" cards that reuse b_algo-style markup are excluded.
 	ResultItems:  "#b_results > li.b_algo, #b_results > li.b_ad",

@@ -16,16 +16,11 @@ import (
 // challenge rather than a SERP. Prefers the hidden Turnstile input, then falls
 // back to the shared challenge-page body phrases (see cfBodyMarkers).
 func isCaptchaDoc(doc *goquery.Document) bool {
-	if doc.Find(Selectors.Captcha).Length() > 0 {
-		return true
-	}
-	text := strings.ToLower(doc.Text())
-	for _, m := range cfBodyMarkers {
-		if strings.Contains(text, m) {
-			return true
-		}
-	}
-	return false
+	err := core.ClassifyChallengeDocument(doc, core.DocSignals{
+		CaptchaSelectors: []string{Selectors.Captcha},
+		CaptchaMarkers:   cfBodyMarkers,
+	})
+	return errors.Is(err, core.ErrCaptcha)
 }
 
 func classifyEcosiaRawHTML(body []byte) error {
@@ -33,16 +28,7 @@ func classifyEcosiaRawHTML(body []byte) error {
 	if err != nil {
 		return err
 	}
-	if isCaptchaDoc(doc) {
-		return core.ErrCaptcha
-	}
-	if doc.Find("[data-test-id='web-no-results']").Length() > 0 ||
-		(doc.Find(Selectors.Mainline).Length() > 0 &&
-			doc.Find(Selectors.Result).Length() == 0 &&
-			doc.Find(Selectors.Ad).Length() == 0) {
-		return core.ErrEmptyResult
-	}
-	return nil
+	return classifyEcosiaDocument(doc)
 }
 
 // imageResultParser parses an Ecosia image SERP HTML response into search

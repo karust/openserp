@@ -15,13 +15,7 @@ func classifyYandexRawHTML(body []byte) error {
 	if err != nil {
 		return err
 	}
-	if doc.Find(Selectors.Captcha).Length() > 0 {
-		return core.ErrCaptcha
-	}
-	if doc.Find(Selectors.NoResults).Length() > 0 {
-		return core.ErrEmptyResult
-	}
-	return nil
+	return classifyYandexDocument(doc)
 }
 
 func Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {

@@ -42,6 +42,8 @@ func (bing *Bing) getTotalResults(page *rod.Page) (int, error) {
 	return len(results), nil
 }
 
+// checkCaptcha classifies the live page the same way classifyBingDocument
+// (parse_html.go) classifies raw HTML, so /bing/search and /bing/parse agree.
 func (bing *Bing) checkCaptcha(page *rod.Page) bool {
 	if page == nil {
 		return false
@@ -62,6 +64,29 @@ func (bing *Bing) checkCaptcha(page *rod.Page) bool {
 		}
 	}
 
+	return pageTextContainsAny(page, Selectors.CaptchaMarkers)
+}
+
+// checkNoResults reports whether the page text matches Bing's no-results
+// phrasing, mirroring classifyBingDocument's text-marker check.
+func (bing *Bing) checkNoResults(page *rod.Page) bool {
+	return pageTextContainsAny(page, Selectors.NoResultsMarkers)
+}
+
+func pageTextContainsAny(page *rod.Page, markers []string) bool {
+	if page == nil || len(markers) == 0 {
+		return false
+	}
+	html, err := page.HTML()
+	if err != nil {
+		return false
+	}
+	text := strings.ToLower(html)
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
 	return false
 }
 
@@ -161,10 +186,14 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 
 	resultElements, _, err := core.WaitForElements(ctx, page, []string{Selectors.ResultItems, Selectors.Results}, bing.GetSelectorTimeout())
 	if err != nil {
-		// Re-check captcha on timeout - Bing interstitials can render after WaitLoad.
+		// Re-check captcha/no-results on timeout - Bing interstitials and
+		// no-results pages can both render after WaitLoad.
 		if bing.checkCaptcha(page) {
 			bing.logger.Error("Captcha detected: %s", url)
 			return nil, core.ErrCaptcha
+		}
+		if bing.checkNoResults(page) {
+			return []core.SearchResult{}, nil
 		}
 		bing.logger.Error("Cannot parse organic results: %s", err)
 		return nil, core.ErrSearchTimeout

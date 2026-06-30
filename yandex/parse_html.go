@@ -1,6 +1,7 @@
 package yandex
 
 import (
+	"errors"
 	"io"
 	"net/url"
 	"strings"
@@ -16,7 +17,21 @@ func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	pageStatus := classifyYandexDocument(doc)
+	if errors.Is(pageStatus, core.ErrEmptyResult) {
+		return []core.SearchResult{}, nil
+	}
+	if pageStatus != nil {
+		return nil, pageStatus
+	}
 	return parseYandexDocument(doc), nil
+}
+
+func classifyYandexDocument(doc *goquery.Document) error {
+	return core.ClassifyChallengeDocument(doc, core.DocSignals{
+		CaptchaSelectors: []string{Selectors.Captcha},
+		EmptySelectors:   []string{Selectors.NoResults},
+	})
 }
 
 func parseYandexDocument(doc *goquery.Document) []core.SearchResult {

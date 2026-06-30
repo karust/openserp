@@ -18,6 +18,7 @@ func TestGoogleParseHTMLFixtures(t *testing.T) {
 		minResultCount int
 		maxResultCount int
 		wantZero       bool
+		wantErr        error
 	}{
 		{
 			name:           "search results",
@@ -31,9 +32,19 @@ func TestGoogleParseHTMLFixtures(t *testing.T) {
 			wantZero: true,
 		},
 		{
-			name:     "captcha page",
-			fixture:  "search_captcha.html",
-			wantZero: true,
+			name:    "captcha page",
+			fixture: "search_captcha.html",
+			wantErr: core.ErrCaptcha,
+		},
+		{
+			name:    "new captcha page",
+			fixture: "search_captcha_new.html",
+			wantErr: core.ErrCaptcha,
+		},
+		{
+			name:    "soft block page",
+			fixture: "search_soft_block.html",
+			wantErr: core.ErrBlocked,
 		},
 	}
 
@@ -42,6 +53,12 @@ func TestGoogleParseHTMLFixtures(t *testing.T) {
 			t.Parallel()
 
 			results, err := ParseHTML(testutil.ResponseFromFixture(t, tt.fixture).Body)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("expected %v for %s, got %v", tt.wantErr, tt.fixture, err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("ParseHTML() error = %v", err)
 			}
@@ -88,6 +105,8 @@ func TestGoogleClassifyRawHTML(t *testing.T) {
 	}{
 		{name: "no results", fixture: "search_no_results.html", want: core.ErrEmptyResult},
 		{name: "captcha page", fixture: "search_captcha.html", want: core.ErrCaptcha},
+		{name: "new captcha page", fixture: "search_captcha_new.html", want: core.ErrCaptcha},
+		{name: "soft block page", fixture: "search_soft_block.html", want: core.ErrBlocked},
 	}
 
 	for _, tt := range tests {

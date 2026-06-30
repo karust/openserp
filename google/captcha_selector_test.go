@@ -18,13 +18,26 @@ func TestGooglePageTypeSelectors(t *testing.T) {
 		wantHit  bool
 	}{
 		{"search_captcha.html", Selectors.Captcha, true},
+		{"search_captcha.html", Selectors.CaptchaPage, true},
 		{"search_captcha.html", Selectors.ResultStats, false},
+
+		{"search_captcha_new.html", Selectors.Captcha, true},
+		{"search_captcha_new.html", Selectors.CaptchaPage, true},
+		{"search_captcha_new.html", Selectors.ResultStats, false},
+
+		{"search_soft_block.html", Selectors.SoftBlock, true},
+		{"search_soft_block.html", Selectors.Captcha, false},
+		{"search_soft_block.html", Selectors.CaptchaPage, false},
+		{"search_soft_block.html", Selectors.ResultStats, false},
 
 		{"search_results.html", Selectors.ResultStats, true},
 		{"search_results.html", Selectors.Captcha, false},
+		{"search_results.html", Selectors.CaptchaPage, false},
 
 		{"search_no_results.html", Selectors.ResultStats, true},
 		{"search_no_results.html", Selectors.Captcha, false},
+		{"search_no_results.html", Selectors.CaptchaPage, false},
+		{"search_no_results.html", Selectors.NoResults, true},
 	}
 
 	for _, tt := range tests {

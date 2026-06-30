@@ -1,6 +1,7 @@
 package duckduckgo
 
 import (
+	"errors"
 	"io"
 	"strings"
 
@@ -15,7 +16,22 @@ func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	pageStatus := classifyDDGDocument(doc)
+	if errors.Is(pageStatus, core.ErrEmptyResult) {
+		return []core.SearchResult{}, nil
+	}
+	if pageStatus != nil {
+		return nil, pageStatus
+	}
 	return parseDDGDocument(doc), nil
+}
+
+func classifyDDGDocument(doc *goquery.Document) error {
+	return core.ClassifyChallengeDocument(doc, core.DocSignals{
+		CaptchaSelectors: Selectors.CaptchaSelectors,
+		CaptchaMarkers:   Selectors.CaptchaMarkers,
+		EmptySelectors:   Selectors.NoResults,
+	})
 }
 
 func parseDDGDocument(doc *goquery.Document) []core.SearchResult {

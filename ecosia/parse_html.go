@@ -1,6 +1,7 @@
 package ecosia
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -16,7 +17,27 @@ func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	pageStatus := classifyEcosiaDocument(doc)
+	if errors.Is(pageStatus, core.ErrEmptyResult) {
+		return []core.SearchResult{}, nil
+	}
+	if pageStatus != nil {
+		return nil, pageStatus
+	}
 	return parseEcosiaDocument(doc), nil
+}
+
+func classifyEcosiaDocument(doc *goquery.Document) error {
+	if isCaptchaDoc(doc) {
+		return core.ErrCaptcha
+	}
+	if doc.Find(Selectors.NoResults).Length() > 0 ||
+		(doc.Find(Selectors.Mainline).Length() > 0 &&
+			doc.Find(Selectors.Result).Length() == 0 &&
+			doc.Find(Selectors.Ad).Length() == 0) {
+		return core.ErrEmptyResult
+	}
+	return nil
 }
 
 func parseEcosiaDocument(doc *goquery.Document) []core.SearchResult {

@@ -111,7 +111,7 @@ func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas, proxyURL string
 }
 
 func (gogl *Google) checkCaptcha(page *rod.Page, queryProxyURL string) bool {
-	has, _, _ := page.Has(Selectors.Captcha)
+	has, _, _ := page.Has(Selectors.CaptchaPage)
 	if !has {
 		return false
 	}
@@ -122,14 +122,14 @@ func (gogl *Google) checkCaptcha(page *rod.Page, queryProxyURL string) bool {
 	}
 
 	sitekey, err := captchaDiv.Attribute("data-sitekey")
-	if err != nil {
-		gogl.logger.Error("Cannot get captcha sitekey: %s", err)
+	if err != nil || sitekey == nil {
+		gogl.logger.Error("Cannot get captcha sitekey: %v", err)
 		return true
 	}
 
 	dataS, err := captchaDiv.Attribute("data-s")
-	if err != nil {
-		gogl.logger.Error("Cannot get captcha datas: %s", err)
+	if err != nil || dataS == nil {
+		gogl.logger.Error("Cannot get captcha datas: %v", err)
 		return true
 	}
 
@@ -141,6 +141,46 @@ func (gogl *Google) checkCaptcha(page *rod.Page, queryProxyURL string) bool {
 		return !gogl.solveCaptcha(page, *sitekey, *dataS, proxyURL)
 	}
 	return true
+}
+
+func (gogl *Google) checkNoResults(page *rod.Page) bool {
+	if has, _, err := page.Has(Selectors.ResultStats); err == nil && has {
+		statsEl, err := page.Element(Selectors.ResultStats)
+		if err == nil {
+			stats, _ := statsEl.Text()
+			if isZeroResultStats(strings.ToLower(stats)) {
+				return true
+			}
+		}
+	}
+	if has, _, err := page.Has(Selectors.NoResults); err == nil && has {
+		noResultsEl, err := page.Element(Selectors.NoResults)
+		if err == nil {
+			text, _ := noResultsEl.Text()
+			text = strings.ToLower(text)
+			return strings.Contains(text, "did not match any documents") || isZeroResultStats(text)
+		}
+	}
+	return false
+}
+
+func (gogl *Google) checkSoftBlock(page *rod.Page) bool {
+	if has, _, err := page.Has(Selectors.Results); err == nil && has {
+		return false
+	}
+	if has, _, err := page.Has(Selectors.ResultsBroad); err == nil && has {
+		return false
+	}
+
+	htmlTimeout := gogl.GetSelectorTimeout() / 2
+	if htmlTimeout <= 0 || htmlTimeout > time.Second {
+		htmlTimeout = time.Second
+	}
+	html, err := page.Timeout(htmlTimeout).HTML()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(html), "/httpservice/retry/enablejs")
 }
 
 func (gogl *Google) preparePage(page *rod.Page) {
@@ -241,6 +281,10 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 		gogl.logger.Error("Captcha detected: %s", url)
 		return nil, core.ErrCaptcha
 	}
+	if gogl.checkSoftBlock(page) {
+		gogl.logger.Error("Google soft block detected: %s", url)
+		return nil, core.ErrBlocked
+	}
 
 	// Accept cookie consent so Google renders its SERP feature modules
 	if query.Features {
@@ -256,12 +300,18 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			gogl.logger.Error("Captcha detected: %s", url)
 			return nil, core.ErrCaptcha
 		}
+		if gogl.checkSoftBlock(page) {
+			gogl.logger.Error("Google soft block detected: %s", url)
+			return nil, core.ErrBlocked
+		}
 		if core.IsContextDone(err) {
 			return nil, err
 		}
-		// Keep empty-SERP behavior for selector timeout only.
 		if errors.Is(err, core.ErrSearchTimeout) {
-			return nil, nil
+			if gogl.checkNoResults(page) {
+				return nil, nil
+			}
+			return nil, core.ErrSearchTimeout
 		}
 		return nil, core.ErrSearchTimeout
 	}
@@ -462,6 +512,12 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 	if len(deduped) == 0 {
 		if gogl.checkCaptcha(page, query.ProxyURL) {
 			return nil, core.ErrCaptcha
+		}
+		if gogl.checkSoftBlock(page) {
+			return nil, core.ErrBlocked
+		}
+		if gogl.checkNoResults(page) {
+			return nil, nil
 		}
 		// Result candidates were found by Selectors.Results but none parsed
 		// into usable rows: treat as a genuine no-results SERP rather than a
