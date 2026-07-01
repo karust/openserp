@@ -1094,14 +1094,15 @@ components:
                   engine: google
                   proxy_used: http://proxy.example:8080
                   proxy_session_id: sid-123
-            rateLimited:
+            upstreamBlocked:
               value:
-                error: rate_limited
+                error: blocked
                 code: 429
-                message: "search engine rate limited the request"
+                message: "search engine blocked the request (HTTP 429)"
                 meta:
                   engine: google
                   proxy_used: http://proxy.example:8080
+                  upstream_status: 429
     BadGatewayError:
       description: Engine internal failure, parser drift, or all-engine failure when fallback is enabled.
       content:
@@ -1710,13 +1711,14 @@ components:
           type: string
           description: >
             Stable machine-readable error class. Search-pipeline failures use the
-            following codes: `captcha_detected`, `blocked`, `rate_limited`,
+            following codes: `captcha_detected`, `blocked`,
             `search_timeout`, `proxy_connect`, `proxy_auth`, `proxy_timeout`,
             `proxy_unavailable`, `parser_failure`, `engine_internal`,
             `all_engines_failed`, `circuit_open`, `request_timeout`,
             `request_canceled`. Validation errors use `bad_request`. Other
-            generic codes (`not_found`, `service_unavailable`, `server_error`,
-            `client_error`, `error`) may appear for non-search routes.
+            generic codes (`not_found`, `rate_limited`, `service_unavailable`,
+            `server_error`, `client_error`, `error`) may appear for non-search
+            routes.
           enum:
             - bad_request
             - not_found

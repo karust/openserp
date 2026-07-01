@@ -263,15 +263,32 @@ func FeaturesFromPage(page *rod.Page, extract func(*goquery.Document) []SerpFeat
 	if page == nil {
 		return nil
 	}
-	html, err := page.HTML()
-	if err != nil {
-		return nil
-	}
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	doc, err := DocumentFromPage(page)
 	if err != nil {
 		return nil
 	}
 	return extract(doc)
+}
+
+// DocumentFromPage snapshots a live rod page to a goquery document, so the
+// browser path can reuse the same parsing/classification rules as the raw
+// HTTP path instead of reimplementing them against the rod API.
+func DocumentFromPage(page *rod.Page) (*goquery.Document, error) {
+	html, err := page.HTML()
+	if err != nil {
+		return nil, err
+	}
+	return goquery.NewDocumentFromReader(strings.NewReader(html))
+}
+
+// ClassifyFromPage snapshots page and runs classify over it, returning nil if
+// the page can't be read (caller treats that as "not classified").
+func ClassifyFromPage(page *rod.Page, classify func(*goquery.Document) error) error {
+	doc, err := DocumentFromPage(page)
+	if err != nil {
+		return nil
+	}
+	return classify(doc)
 }
 
 const featureHydrationWait = 2000 * time.Millisecond

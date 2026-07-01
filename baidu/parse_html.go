@@ -27,9 +27,14 @@ func ParseHTML(r io.Reader) ([]core.SearchResult, error) {
 }
 
 func classifyBaiduDocument(doc *goquery.Document) error {
+	if doc.Find(Selectors.Captcha).Length() > 0 {
+		return core.ErrCaptcha
+	}
+	if doc.Find(Selectors.Timeout).Length() > 0 {
+		return core.ErrSearchTimeout
+	}
 	return core.ClassifyChallengeDocument(doc, core.DocSignals{
-		CaptchaSelectors: []string{Selectors.Captcha, Selectors.Timeout},
-		EmptySelectors:   []string{Selectors.NoResults},
+		EmptySelectors: []string{Selectors.NoResults},
 	})
 }
 

@@ -129,6 +129,31 @@ func TestSearchWithProtection_NoRotationWithSingleProxy(t *testing.T) {
 	}
 }
 
+func TestSearchWithProtection_GlobalProxyChallengeReportsNoRotation(t *testing.T) {
+	engine := &captchaThenSuccessEngine{name: "google", goodProxy: "http://unused:8080"}
+	cfg := DefaultResilientConfig()
+	cfg.Retry.MaxRetries = 0
+	cfg.CircuitBreaker.FailureThreshold = 5
+	cfg.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeBrowser,
+		Proxies: ProxiesConfig{
+			Global: "http://global-proxy:8080",
+		},
+	}
+	rs := NewResilientSearcher([]SearchEngine{engine}, cfg)
+
+	_, _, meta, err := rs.SearchPrimary(context.Background(), engine, Query{Text: "global"})
+	if err == nil {
+		t.Fatal("expected captcha failure with a global proxy")
+	}
+	if meta.Attempts != 1 {
+		t.Fatalf("expected exactly 1 attempt with global proxy, got %d", meta.Attempts)
+	}
+	if got := engine.attempts(); got != 1 {
+		t.Fatalf("expected engine called once, got %d", got)
+	}
+}
+
 func TestSearchWithProtection_DirectModeFailsFastOnCaptcha(t *testing.T) {
 	// Direct mode (no proxy config): captcha is non-retryable and rotation must
 	// not kick in.

@@ -97,6 +97,18 @@ func TestRequestIDHeaderIsEchoedWhenProvided(t *testing.T) {
 	}
 }
 
+func TestDuckDuckGoDedicatedAliasRoutes(t *testing.T) {
+	engine := &engineMock{name: "duckduckgo", initialized: true}
+	srv := NewServerWithOptions("127.0.0.1", 7119, DefaultServerOptions(), engine)
+
+	for _, path := range []string{"/duck/search?text=golang", "/duckduckgo/search?text=golang", "/duck/image?text=golang", "/duckduckgo/image?text=golang"} {
+		resp := request(t, srv, path)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected %s to return 200, got %d", path, resp.StatusCode)
+		}
+	}
+}
+
 func TestRequestIDHeaderIsGeneratedWhenMissing(t *testing.T) {
 	engine := &engineMock{name: "google", initialized: true}
 	srv := NewServerWithOptions("127.0.0.1", 7111, DefaultServerOptions(), engine)
@@ -1820,7 +1832,7 @@ func TestStableSearchErrorJSONWithProxyMeta(t *testing.T) {
 	}{
 		{name: "captcha", err: ErrCaptcha, wantStatus: http.StatusTooManyRequests, wantError: "captcha_detected"},
 		{name: "blocked", err: ErrBlocked, wantStatus: http.StatusForbidden, wantError: "blocked"},
-		{name: "rate limited", err: ErrRateLimited, wantStatus: http.StatusTooManyRequests, wantError: "rate_limited"},
+		{name: "rate limited", err: ErrRateLimited, wantStatus: http.StatusTooManyRequests, wantError: "blocked"},
 		{name: "search timeout", err: ErrSearchTimeout, wantStatus: http.StatusGatewayTimeout, wantError: "search_timeout"},
 		{name: "proxy connect", err: ErrProxyConnect, wantStatus: http.StatusServiceUnavailable, wantError: "proxy_connect"},
 		{name: "proxy auth", err: ErrProxyAuth, wantStatus: http.StatusServiceUnavailable, wantError: "proxy_auth"},
@@ -1879,6 +1891,15 @@ func TestStableSearchErrorJSONWithProxyMeta(t *testing.T) {
 			if payload.Error != tt.wantError {
 				t.Fatalf("expected error=%q, got %q", tt.wantError, payload.Error)
 			}
+			if errors.Is(tt.err, ErrRateLimited) {
+				wantMessage := "search engine blocked the request (HTTP 429)"
+				if payload.Message != wantMessage {
+					t.Fatalf("expected HTTP 429 block message, got %q", payload.Message)
+				}
+				if payload.Meta["upstream_status"] != float64(http.StatusTooManyRequests) {
+					t.Fatalf("expected upstream_status=429, got %#v", payload.Meta["upstream_status"])
+				}
+			}
 			if payload.Meta["proxy_used"] != "http://proxy.example:8080" {
 				t.Fatalf("expected masked proxy_used, got %#v", payload.Meta["proxy_used"])
 			}
@@ -1887,6 +1908,42 @@ func TestStableSearchErrorJSONWithProxyMeta(t *testing.T) {
 				t.Fatalf("unexpected proxy meta: %#v", payload.Meta)
 			}
 		})
+	}
+}
+
+func TestSearchErrorWithGlobalProxyIncludesProxyUsed(t *testing.T) {
+	engine := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, _ Query) ([]SearchResult, error) {
+			return nil, ErrRateLimited
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	opts.Resilience.Proxy = ProxyConfig{
+		Runtime: ProxyRuntimeBrowser,
+		Proxies: ProxiesConfig{
+			Global: "http://global-proxy:8080",
+		},
+	}
+	srv := NewServerWithOptions("127.0.0.1", 7123, opts, engine)
+
+	resp := request(t, srv, "/google/search?text=golang")
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", resp.StatusCode)
+	}
+
+	var payload JSONErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if payload.Error != "blocked" {
+		t.Fatalf("expected blocked, got %q", payload.Error)
+	}
+	if payload.Meta["proxy_used"] != "http://global-proxy:8080" {
+		t.Fatalf("expected masked global proxy, got %#v", payload.Meta["proxy_used"])
 	}
 }
 
@@ -2459,6 +2516,36 @@ func TestMegaSearchAllFailuresReturnsDetails(t *testing.T) {
 	engineErrors, ok := payload.Meta["engine_errors"].([]interface{})
 	if !ok || len(engineErrors) != 2 {
 		t.Fatalf("expected two engine_errors, got %#v", payload.Meta["engine_errors"])
+	}
+}
+
+func TestMegaSearchSingleEngineFailureMessageIncludesCause(t *testing.T) {
+	google := &engineMock{
+		name:        "google",
+		initialized: true,
+		searchFn: func(_ context.Context, q Query) ([]SearchResult, error) {
+			return nil, fmt.Errorf("%w: selector timeout", ErrSearchTimeout)
+		},
+	}
+
+	opts := DefaultServerOptions()
+	opts.Resilience.Retry.MaxRetries = 0
+	srv := NewServerWithOptions("127.0.0.1", 7211, opts, google)
+
+	resp := request(t, srv, "/mega/search?text=golang&engines=google")
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", resp.StatusCode)
+	}
+
+	var payload JSONErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if payload.Error != "all_engines_failed" {
+		t.Fatalf("expected all_engines_failed, got %q", payload.Error)
+	}
+	if !strings.Contains(payload.Message, "google:") || !strings.Contains(payload.Message, "selector timeout") {
+		t.Fatalf("expected message to include google failure cause, got %q", payload.Message)
 	}
 }
 

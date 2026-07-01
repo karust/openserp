@@ -197,13 +197,19 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 
 		endpointName := engineEndpointName(locEngine.Name())
 
-		serv.app.Get(fmt.Sprintf("/%s/search", endpointName), func(c *fiber.Ctx) error {
+		searchHandler := func(c *fiber.Ctx) error {
 			return serv.handleDedicatedEndpoint(c, locEngine, false)
-		})
-
-		serv.app.Get(fmt.Sprintf("/%s/image", endpointName), func(c *fiber.Ctx) error {
+		}
+		imageHandler := func(c *fiber.Ctx) error {
 			return serv.handleDedicatedEndpoint(c, locEngine, true)
-		})
+		}
+
+		serv.app.Get(fmt.Sprintf("/%s/search", endpointName), searchHandler)
+		serv.app.Get(fmt.Sprintf("/%s/image", endpointName), imageHandler)
+		if canonicalName := strings.ToLower(locEngine.Name()); canonicalName != endpointName {
+			serv.app.Get(fmt.Sprintf("/%s/search", canonicalName), searchHandler)
+			serv.app.Get(fmt.Sprintf("/%s/image", canonicalName), imageHandler)
+		}
 	}
 
 	for _, engine := range searchEngines {
@@ -451,7 +457,7 @@ func mapSearchError(err error) searchErrorSpec {
 	case errors.Is(err, ErrBlocked):
 		return searchErrorSpec{status: fiber.StatusForbidden, code: "blocked", message: "search engine blocked the request"}
 	case errors.Is(err, ErrRateLimited):
-		return searchErrorSpec{status: fiber.StatusTooManyRequests, code: "rate_limited", message: "search engine rate limited the request"}
+		return searchErrorSpec{status: fiber.StatusTooManyRequests, code: "blocked", message: "search engine blocked the request (HTTP 429)"}
 	case errors.Is(err, ErrSearchTimeout):
 		return searchErrorSpec{status: fiber.StatusGatewayTimeout, code: "search_timeout", message: ErrSearchTimeout.Error()}
 	case errors.Is(err, ErrProxyAuth):
@@ -481,6 +487,9 @@ func mapSearchError(err error) searchErrorSpec {
 func searchAPIError(err error, engineName string, q Query, proxyMeta ProxyExecutionMeta) *APIError {
 	spec := mapSearchError(err)
 	meta := searchErrorMeta(engineName, q, proxyMeta)
+	if errors.Is(err, ErrRateLimited) {
+		meta["upstream_status"] = fiber.StatusTooManyRequests
+	}
 	addErrorDetail(meta, err, spec.message, q)
 	return &APIError{
 		HTTPStatus: spec.status,
@@ -1029,6 +1038,9 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string) error {
 	if len(responded) == 0 {
 		err := fmt.Errorf("%w: %s", ErrAllEnginesFailed, strings.Join(enginesFailed, ","))
 		apiErr := searchAPIError(err, "mega", q, ProxyExecutionMeta{})
+		if detail := megaFailureMessage(engineErrors); detail != "" {
+			apiErr.Message = detail
+		}
 		apiErr.Meta["engine_errors"] = engineErrors
 		WithRequest(requestCtx).WithFields(logrus.Fields{
 			"action": action, "engines": engineNamesJoined,
@@ -1107,6 +1119,19 @@ func engineErrorNames(details []EngineErrorDetail) []string {
 		names = append(names, d.Engine)
 	}
 	return names
+}
+
+func megaFailureMessage(details []EngineErrorDetail) string {
+	if len(details) == 1 {
+		detail := strings.TrimSpace(details[0].Message)
+		if detail == "" {
+			detail = details[0].Error
+		}
+		if detail != "" {
+			return fmt.Sprintf("all selected engines failed; %s: %s", details[0].Engine, detail)
+		}
+	}
+	return ""
 }
 
 func parseMegaRunConfig(c *fiber.Ctx) (megaRunConfig, error) {

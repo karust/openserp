@@ -3,6 +3,7 @@ package yandex
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -59,14 +60,11 @@ func (yand *Yandex) Name() string {
 	return "yandex"
 }
 
-func (yand *Yandex) isCaptcha(page *rod.Page) bool {
-	has, _, _ := page.Has(Selectors.Captcha)
-	return has
-}
-
-func (yand *Yandex) isNoResults(page *rod.Page) bool {
-	has, _, _ := page.Has(Selectors.NoResults)
-	return has
+// classifyPage runs the same captcha/no-results rules the raw HTML path uses
+// (classifyYandexDocument), against a snapshot of the live page, so both
+// paths can't drift.
+func (yand *Yandex) classifyPage(page *rod.Page) error {
+	return core.ClassifyFromPage(page, classifyYandexDocument)
 }
 
 func (yand *Yandex) parseResults(results rod.Elements, pageNum int) []core.SearchResult {
@@ -235,16 +233,17 @@ func (yand *Yandex) Search(ctx context.Context, query core.Query) (results []cor
 		}
 		r, err := yand.waitForParsedResults(ctx, page, searchPage, wantOrganic)
 		if err != nil {
-			if yand.isCaptcha(page) {
+			switch pageErr := yand.classifyPage(page); {
+			case errors.Is(pageErr, core.ErrCaptcha):
 				yand.logger.Error("Captcha detected: %s", url)
 				return false, core.ErrCaptcha
-			}
-			if yand.isNoResults(page) {
+			case errors.Is(pageErr, core.ErrEmptyResult):
 				yand.logger.Warn("No results found")
 				return true, nil
+			default:
+				yand.logger.Error("Cannot parse search results: %s", err)
+				return false, core.ErrSearchTimeout
 			}
-			yand.logger.Error("Cannot parse search results: %s", err)
-			return false, core.ErrSearchTimeout
 		}
 
 		if searchPage == startPage && skipOnFirstPage > 0 {
@@ -325,11 +324,11 @@ func (yand *Yandex) SearchImage(ctx context.Context, query core.Query) ([]core.S
 			}
 		}
 		if err != nil {
-			if yand.isCaptcha(page) {
+			switch pageErr := yand.classifyPage(page); {
+			case errors.Is(pageErr, core.ErrCaptcha):
 				yand.logger.Error("Captcha detected: %s", url)
 				return false, core.ErrCaptcha
-			}
-			if yand.isNoResults(page) {
+			case errors.Is(pageErr, core.ErrEmptyResult):
 				yand.logger.Warn("No results found")
 			}
 			return false, core.ErrSearchTimeout

@@ -58,7 +58,7 @@ var ErrEmptyResult = errors.New("empty_result")
 // ErrBlocked is returned when the search engine blocks the browser request.
 var ErrBlocked = errors.New("blocked")
 
-// ErrRateLimited is returned when the search engine returns an HTTP rate limit.
+// ErrRateLimited is returned when the search engine returns HTTP 429.
 var ErrRateLimited = errors.New("rate_limited")
 
 // IsProxyNetworkError reports whether err is a network-level error that
@@ -93,6 +93,7 @@ func classifyProxyNetworkError(err error) error {
 	if strings.Contains(msg, "proxyconnect") ||
 		strings.Contains(msg, "connection refused") ||
 		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "err_tunnel_connection_failed") ||
 		strings.Contains(msg, "no such host") ||
 		strings.Contains(msg, "network is unreachable") ||
 		strings.Contains(msg, "socks connect") {

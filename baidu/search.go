@@ -54,26 +54,19 @@ func (baid *Baidu) Name() string {
 	return "baidu"
 }
 
-func (baid *Baidu) isCaptcha(page *rod.Page) bool {
-	has, _, _ := page.Has(Selectors.Captcha)
-	return has
-}
-
-func (baid *Baidu) isTimeout(page *rod.Page) bool {
-	has, _, _ := page.Has(Selectors.Timeout)
-	return has
-}
-
+// classifyBlockPage runs the same captcha/timeout/no-results rules the raw
+// HTML path uses (classifyBaiduDocument), against a snapshot of the live
+// page, so both paths can't drift. ErrEmptyResult is not a block: callers
+// handle that themselves once they've also checked for parsed results.
 func (baid *Baidu) classifyBlockPage(page *rod.Page, url string) error {
-	if baid.isCaptcha(page) {
-		baid.logger.Error("Captcha detected: %s", url)
-		return core.ErrCaptcha
+	err := core.ClassifyFromPage(page, classifyBaiduDocument)
+	if errors.Is(err, core.ErrEmptyResult) {
+		return nil
 	}
-	if baid.isTimeout(page) {
-		baid.logger.Error("Timeout occurred: %s", url)
-		return core.ErrSearchTimeout
+	if err != nil {
+		baid.logger.Error("Page classified as %v: %s", err, url)
 	}
-	return nil
+	return err
 }
 
 // Search executes a Baidu web search and returns normalized search results.
@@ -135,20 +128,20 @@ func (baid *Baidu) waitForParsedSearchResults(ctx context.Context, page *rod.Pag
 			if parseErr == nil && len(results) > 0 {
 				return results, nil
 			}
-			if errors.Is(parseErr, core.ErrCaptcha) {
-				baid.logger.Error("Captcha detected: %s", url)
-				return nil, core.ErrCaptcha
+			if parseErr != nil && !errors.Is(parseErr, core.ErrEmptyResult) {
+				baid.logger.Error("Page classified as %v: %s", parseErr, url)
+				return nil, parseErr
 			}
 			lastErr = parseErr
 		} else {
 			lastErr = err
+			if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
+				return nil, blockErr
+			}
 		}
 
 		if core.HasAnySelector(page, baiduResultSelectors()) {
 			sawResultContainer = true
-		}
-		if blockErr := baid.classifyBlockPage(page, url); blockErr != nil {
-			return nil, blockErr
 		}
 		if !time.Now().Before(deadline) {
 			break

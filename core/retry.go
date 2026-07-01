@@ -131,7 +131,7 @@ var nonRetryableSentinels = []struct {
 }{
 	{ErrCaptcha, "CAPTCHA detected"},
 	{ErrBlocked, "Blocked response detected"},
-	{ErrRateLimited, "Rate limited response detected"},
+	{ErrRateLimited, "HTTP 429 block detected"},
 	{ErrProxyUnavailable, "Proxy unavailable"},
 	{ErrParser, "Parser failure"},
 	{ErrEngineInternal, "Engine panic recovered"},

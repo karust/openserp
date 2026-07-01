@@ -236,20 +236,25 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 
 	// On a captcha/block/rate-limit (non-retryable inside RetryableSearch), if
 	// the tag pool has another healthy proxy, deprioritize the burned one and
-	// retry once with the next. Tag-pool only — direct/request-url/global can't
+	// retry once with the next. Tag-pool only - direct/request-url/global can't
 	// rotate.
-	if result.Err != nil &&
+	canRotateChallengedProxy := result.Err != nil &&
 		policy.Mode == ProxyModeTagPool &&
 		policy.Tag != "" &&
 		rs.proxyRegistry != nil &&
 		IsProxyChallengeError(result.Err) &&
 		rs.proxyRegistry.HealthyCountForTag(policy.Tag) >= 2 &&
-		ctx.Err() == nil {
+		ctx.Err() == nil
+	if canRotateChallengedProxy {
 		rs.proxyRegistry.ReportChallenged(engineCtx, lastProxyURL)
 		WithRequestEngine(ctx, engine.Name()).WithError(result.Err).
 			Debug("Challenged proxy rotated out, retrying once with next proxy")
 		result = runOnce()
 		attemptMeta.Attempts = 2
+	} else if result.Err != nil && IsProxyChallengeError(result.Err) && strings.TrimSpace(lastProxyURL) != "" {
+		WithRequestEngine(ctx, engine.Name()).WithError(result.Err).
+			WithField("proxy", MaskProxyURL(lastProxyURL)).
+			Info("single proxy challenged and cannot rotate; configure proxies.entries with 2+ IPs")
 	}
 
 	if result.Err != nil {

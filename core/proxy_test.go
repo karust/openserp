@@ -379,6 +379,7 @@ func TestClassifyProxyNetworkError(t *testing.T) {
 	}{
 		{name: "timeout", err: timeoutTestError{}, want: ErrTimeout},
 		{name: "connect", err: errors.New("proxyconnect tcp: connection refused"), want: ErrProxyConnect},
+		{name: "chrome tunnel failed", err: errors.New("navigation failed: net::ERR_TUNNEL_CONNECTION_FAILED"), want: ErrProxyConnect},
 		{name: "auth", err: errors.New("Proxy Authentication Required 407"), want: ErrProxyAuth},
 		{name: "parser", err: ErrParser, want: nil},
 	}

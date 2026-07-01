@@ -68,10 +68,11 @@ func New(browser core.Browser, opts core.SearchEngineOptions) *Ecosia {
 func (e *Ecosia) Name() string { return "ecosia" }
 
 // isCaptcha reports whether the current page is a Cloudflare interstitial.
-// Checks the URL, title, then body text (cheapest first).
+// Checks the URL and title first - signals only the live page carries, not a
+// bare HTML snapshot - then falls back to the shared body-marker/selector
+// check (isCaptchaDoc) used by the raw HTML path, so both paths agree.
 func (e *Ecosia) isCaptcha(page *rod.Page) bool {
-	info, err := page.Info()
-	if err == nil {
+	if info, err := page.Info(); err == nil {
 		if strings.Contains(strings.ToLower(info.URL), cfURLPath) {
 			return true
 		}
@@ -79,20 +80,7 @@ func (e *Ecosia) isCaptcha(page *rod.Page) bool {
 			return true
 		}
 	}
-	html, err := page.Timeout(e.GetSelectorTimeout()).HTML()
-	if err != nil {
-		return false
-	}
-	lower := strings.ToLower(html)
-	if strings.Contains(lower, "cf-turnstile-response") {
-		return true
-	}
-	for _, m := range cfBodyMarkers {
-		if strings.Contains(lower, m) {
-			return true
-		}
-	}
-	return false
+	return errors.Is(core.ClassifyFromPage(page, classifyEcosiaDocument), core.ErrCaptcha)
 }
 
 func (e *Ecosia) parseResult(elem *rod.Element, rank int, ad bool) (core.SearchResult, bool) {
