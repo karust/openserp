@@ -101,10 +101,28 @@ func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas, proxyURL string
 	}
 
 	gogl.logger.Debug("Captcha response received")
-	_, err = page.Eval(fmt.Sprintf(`;(() => { document.getElementById("g-recaptcha-response").innerHTML="%s"; submitCallback(); })();`, resp))
-	if err != nil {
+	// Inject the solved token and submit the challenge. Google's /sorry/ page no
+	// longer defines submitCallback(), so the old `submitCallback()` eval threw
+	// ("Cannot read properties of undefined") and the paid-for token was wasted.
+	// Set the response on the textarea (value + innerHTML) and submit the captcha
+	// form directly, only calling submitCallback() if it still happens to exist.
+	injectJS := fmt.Sprintf(`() => {
+		var t = %q;
+		var el = document.getElementById("g-recaptcha-response");
+		if (el) { el.value = t; el.innerHTML = t; }
+		if (typeof submitCallback === "function") { try { submitCallback(); return; } catch (e) {} }
+		var f = (el && el.form) || document.querySelector('form#captcha-form') || document.querySelector('form[action*="sorry"]') || document.querySelector('form');
+		if (f) { f.submit(); }
+	}`, resp)
+	if _, err = page.Eval(injectJS); err != nil {
 		gogl.logger.Error("Failed to set captcha response: %s", err)
 		return false
+	}
+
+	// Wait for Google to validate the token and redirect back to the SERP before
+	// the caller scrapes results (the form submit triggers a navigation).
+	if werr := page.Timeout(gogl.Timeout).WaitLoad(); werr != nil {
+		gogl.logger.Debug("Post-captcha load wait: %s", werr)
 	}
 
 	return true
