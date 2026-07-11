@@ -70,6 +70,11 @@ type AppConfig struct {
 	MaxProcesses   int           `mapstructure:"max_processes"`
 	IdleTTL        time.Duration `mapstructure:"idle_ttl"`
 	MegaTimeout    time.Duration `mapstructure:"mega_timeout"`
+	// BrowserControlURL optionally points to an existing CDP control URL (ws://...) instead of launching a local browser.
+	BrowserControlURL string `mapstructure:"browser_control_url"`
+	// DelegateStealth instructs the server to skip local stealth patching and
+	// rely on the remote browser (eg. Obscura) to provide stealth/covert features.
+	DelegateStealth bool `mapstructure:"delegate_stealth"`
 }
 
 type EngineConfig struct {
@@ -178,19 +183,21 @@ func sanitizedConfigForLog(cfg Config) map[string]interface{} {
 	return map[string]interface{}{
 		"server": cfg.Server,
 		"app": map[string]interface{}{
-			"timeout":         cfg.App.Timeout,
-			"browser_path":    cfg.App.BrowserPath != "",
-			"profiles":        cfg.App.ProfilesJSON != "",
-			"head":            cfg.App.IsBrowserHead,
-			"leave_head":      cfg.App.IsLeaveHead,
-			"leakless":        cfg.App.IsLeakless,
-			"block_resources": cfg.App.BlockResources,
-			"block_trackers":  cfg.App.BlockTrackers,
-			"debug_endpoints": cfg.App.DebugEndpoints,
-			"log_format":      cfg.App.LogFormat,
-			"max_processes":   cfg.App.MaxProcesses,
-			"idle_ttl":        cfg.App.IdleTTL.String(),
-			"mega_timeout":    cfg.App.MegaTimeout.String(),
+			"timeout":          cfg.App.Timeout,
+			"browser_path":     cfg.App.BrowserPath != "",
+			"profiles":         cfg.App.ProfilesJSON != "",
+			"head":             cfg.App.IsBrowserHead,
+			"leave_head":       cfg.App.IsLeaveHead,
+			"leakless":         cfg.App.IsLeakless,
+			"block_resources":  cfg.App.BlockResources,
+			"block_trackers":   cfg.App.BlockTrackers,
+			"debug_endpoints":  cfg.App.DebugEndpoints,
+			"log_format":       cfg.App.LogFormat,
+			"max_processes":    cfg.App.MaxProcesses,
+			"idle_ttl":         cfg.App.IdleTTL.String(),
+			"mega_timeout":     cfg.App.MegaTimeout.String(),
+			"browser_control":  cfg.App.BrowserControlURL != "",
+			"delegate_stealth": cfg.App.DelegateStealth,
 		},
 		"proxies": map[string]interface{}{
 			"global":                  maskedProxyForLog(cfg.Proxies.Global),
@@ -411,6 +418,8 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("app.max_processes", 4)
 	v.SetDefault("app.idle_ttl", "10m")
 	v.SetDefault("app.mega_timeout", "90s")
+	v.SetDefault("app.browser_control_url", "")
+	v.SetDefault("app.delegate_stealth", false)
 
 	v.SetDefault("proxies.entries", []interface{}{})
 	v.SetDefault("proxies.global", "")
@@ -449,6 +458,8 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&config.Server.ConfigPath, "config", "c", "", "Configuration file path")
 	RootCmd.PersistentFlags().StringVarP(&config.App.BrowserPath, "browser-path", "", "", "Custom browser binary path (Chrome/Chromium/Edge/Brave..)")
 	RootCmd.PersistentFlags().StringVar(&config.App.ProfilesJSON, "profiles", "", "Path to browser profile catalog JSON")
+	RootCmd.PersistentFlags().StringVar(&config.App.BrowserControlURL, "browser-control-url", "", "Remote CDP control URL (ws://...) to use instead of launching local browser")
+	RootCmd.PersistentFlags().BoolVar(&config.App.DelegateStealth, "delegate-stealth", false, "Delegate stealth/anti-detection handling to the remote browser (eg. Obscura)")
 	RootCmd.PersistentFlags().BoolVarP(&config.Server.IsVerbose, "verbose", "v", false, "Use verbose output")
 	RootCmd.PersistentFlags().BoolVarP(&config.Server.IsDebug, "debug", "d", false, "Use debug output. Disable headless browser")
 	RootCmd.PersistentFlags().BoolVarP(&config.Server.IsQuiet, "quiet", "q", false, "Suppress info logs on stderr (default for CLI commands)")

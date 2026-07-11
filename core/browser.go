@@ -53,6 +53,11 @@ type BrowserOpts struct {
 	Insecure bool
 	// UserAgent optionally overrides browser-reported user agent during emulation.
 	UserAgent string
+	// BrowserControlURL optionally points to an existing CDP control URL (ws://...) instead of launching a local browser.
+	BrowserControlURL string
+	// DelegateStealthToRemote, when true, skips running the local stealth/patch JS
+	// because the remote browser (eg. Obscura) will handle stealth/covert behaviour.
+	DelegateStealthToRemote bool
 	// BlockResourceTypes are blocked during page navigation when non-empty.
 	// Typical tokens map to these types: image, font, css(stylesheet), js(script), media.
 	BlockResourceTypes []proto.NetworkResourceType
@@ -274,6 +279,23 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	}
 	logrus.WithFields(browserOptsLogFields(opts)).Debug("Browser options")
 
+	// If a remote CDP control URL is provided (e.g. Obscura), use it instead of
+	// launching a local browser. This makes Obscura a drop-in replacement for
+	// Chrome for the CDP-based integration.
+	if strings.TrimSpace(opts.BrowserControlURL) != "" {
+		b := Browser{
+			conn: &browserConnection{},
+		}
+		b.BrowserOpts = opts
+		b.browserAddr = strings.TrimSpace(opts.BrowserControlURL)
+
+		if opts.CaptchaSolverEnabled && opts.CaptchaSolverApiKey != "" {
+			b.CaptchaSolver = NewSolver(opts.CaptchaSolverApiKey)
+			logrus.Debug("Captcha solver initialized")
+		}
+		return &b, nil
+	}
+
 	path, err := resolveBrowserBinaryPath(opts.BrowserPath, launcher.LookPath)
 	if err != nil {
 		return nil, err
@@ -362,6 +384,8 @@ func browserOptsLogFields(opts BrowserOpts) logrus.Fields {
 		"block_resource_types":    len(opts.BlockResourceTypes),
 		"block_trackers":          opts.BlockTrackers,
 		"proxy_lanes_enabled":     opts.ProxyLaneStore != nil,
+		"browser_control_url":     strings.TrimSpace(opts.BrowserControlURL) != "",
+		"delegate_stealth":        opts.DelegateStealthToRemote,
 	}
 }
 
@@ -1460,11 +1484,14 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	profile, laneKey := b.laneProfile(ctx, browser)
 	SetBrowserProfileID(ctx, profile.ID)
 	minimalProfile := minimalBrowserProfileFromContext(ctx)
+	// If stealth is delegated to the remote browser (eg. Obscura), skip local
+	// worker/script stealth patching while still applying UA/locale/headers.
+	effectiveMinimal := minimalProfile || b.DelegateStealthToRemote
 	WithRequest(ctx).WithFields(logrus.Fields{
 		"lane_id":         laneKey,
 		"minimal_profile": minimalProfile,
 	}).Info("Browser profile selected")
-	if err := applyProfile(page, profile, minimalProfile); err != nil {
+	if err := applyProfile(page, profile, effectiveMinimal); err != nil {
 		closeOnErr()
 		return nil, fmt.Errorf("apply profile %s (%s) failed: %w", profile.ID, laneKey, err)
 	}
@@ -1474,7 +1501,7 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	}
 
 	page = page.Context(ctx)
-	if !minimalProfile {
+	if !effectiveMinimal {
 		metrics := profileDisplayMetricsFor(profile)
 		patchScript, err := buildProfilePatchScript(profile, profileNavigatorLanguages(profile), metrics)
 		if err != nil {

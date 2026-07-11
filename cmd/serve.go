@@ -132,13 +132,15 @@ func buildFingerprintBrowserOptions() core.BrowserOpts {
 	blockedResourceTypes := core.MustParseBlockedResourceTypes(config.App.BlockResources)
 
 	opts := core.BrowserOpts{
-		IsHeadless:         !config.App.IsBrowserHead,
-		IsLeakless:         config.App.IsLeakless,
-		Timeout:            time.Second * time.Duration(config.App.Timeout),
-		BrowserPath:        config.App.BrowserPath,
-		Insecure:           config.Server.Insecure,
-		BlockResourceTypes: blockedResourceTypes,
-		BlockTrackers:      config.App.BlockTrackers,
+		IsHeadless:              !config.App.IsBrowserHead,
+		IsLeakless:              config.App.IsLeakless,
+		Timeout:                 time.Second * time.Duration(config.App.Timeout),
+		BrowserPath:             config.App.BrowserPath,
+		BrowserControlURL:       config.App.BrowserControlURL,
+		DelegateStealthToRemote: config.App.DelegateStealth,
+		Insecure:                config.Server.Insecure,
+		BlockResourceTypes:      blockedResourceTypes,
+		BlockTrackers:           config.App.BlockTrackers,
 	}
 	if config.Server.IsDebug {
 		opts.IsHeadless = false
