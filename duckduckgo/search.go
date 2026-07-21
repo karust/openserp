@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/proto"
 	"github.com/karust/openserp/core"
 )
 
@@ -14,8 +15,7 @@ import (
 type DuckDuckGo struct {
 	core.Browser
 	core.SearchEngineOptions
-	pageSleep time.Duration // Sleep between pages
-	logger    *core.EngineLogger
+	logger *core.EngineLogger
 }
 
 // New creates a DuckDuckGo engine instance with browser/runtime options applied.
@@ -25,7 +25,6 @@ func New(browser core.Browser, opts core.SearchEngineOptions) *DuckDuckGo {
 	ddg.SearchEngineOptions = opts
 	ddg.logger = core.NewEngineLogger("DuckDuckGo")
 
-	ddg.pageSleep = time.Second * 1
 	return &ddg
 }
 
@@ -146,6 +145,25 @@ func ddgElementHasAdMarker(el *rod.Element) bool {
 	return false
 }
 
+func windowOrganicResults(results []core.SearchResult, start, limit int) []core.SearchResult {
+	out := make([]core.SearchResult, 0, len(results))
+	skipped, kept := 0, 0
+	for _, result := range results {
+		if !result.Ad && skipped < start {
+			skipped++
+			continue
+		}
+		if !result.Ad && limit > 0 && kept >= limit {
+			continue
+		}
+		out = append(out, result)
+		if !result.Ad {
+			kept++
+		}
+	}
+	return out
+}
+
 // Search executes a DuckDuckGo web search and returns normalized search
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
@@ -155,72 +173,74 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 	ddg = &scoped
 
 	ddg.logger.Debug("Starting search, query: %+v", query)
-
-	allResults := []core.SearchResult{}
-	var pageFeatures []core.SerpFeature
-	searchPage := 0
-
-	// fetchPage loads one SERP page and appends parsed results.
-	// Returns (done, error): done=true ends the outer loop without error.
-	fetchPage := func() (bool, error) {
-		url, err := BuildURL(query, searchPage)
-		if err != nil {
-			return false, err
-		}
-
-		page, err := ddg.Navigate(ctx, url)
-		if err != nil {
-			return false, err
-		}
-		defer core.DeferClosePage(ctx, page, &ddg.Browser)()
-
-		elements, selector, err := core.WaitForElements(ctx, page, Selectors.Results, ddg.GetSelectorTimeout())
-		if err != nil {
-			if ddg.isNoResults(page) {
-				ddg.logger.Warn("No results found")
-				return true, nil
-			}
-			if ddg.isCaptcha(page) {
-				ddg.logger.Error("Captcha detected: %s", url)
-				return false, core.ErrCaptcha
-			}
-			ddg.logger.Error("Cannot parse search results: %s", err)
-			return false, core.ErrSearchTimeout
-		}
-		ddg.logger.Debug("Found results with selector: %s", selector)
-
-		r := ddg.parseResults(elements, searchPage)
-		if len(r) == 0 {
-			ddg.logger.Debug("No valid results found on page %d", searchPage)
-			return false, core.ErrSearchTimeout
-		}
-
-		if query.Features && searchPage == 0 {
-			pageFeatures = extractDDGFeaturesFromPage(page)
-		}
-		allResults = append(allResults, r...)
-		return false, nil
+	if query.Start < 0 {
+		return nil, fmt.Errorf("incorrect start provided")
 	}
 
-	for core.ShouldFetchResultPage(core.CountOrganicResults(allResults), query.Limit, searchPage) {
-		done, err := fetchPage()
-		if err != nil {
-			return nil, err
+	url, err := BuildURL(query, 0)
+	if err != nil {
+		return nil, err
+	}
+	page, err := ddg.Navigate(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	defer core.DeferClosePage(ctx, page, &ddg.Browser)()
+
+	elements, selector, err := core.WaitForElements(ctx, page, Selectors.Results, ddg.GetSelectorTimeout())
+	if err != nil {
+		if ddg.isNoResults(page) {
+			ddg.logger.Warn("No results found")
+			return []core.SearchResult{}, nil
 		}
-		searchPage++
-		if done || !core.ShouldFetchResultPage(core.CountOrganicResults(allResults), query.Limit, searchPage) {
+		if ddg.isCaptcha(page) {
+			ddg.logger.Error("Captcha detected: %s", url)
+			return nil, core.ErrCaptcha
+		}
+		ddg.logger.Error("Cannot parse search results: %s", err)
+		return nil, core.ErrSearchTimeout
+	}
+	ddg.logger.Debug("Found results with selector: %s", selector)
+
+	allResults := ddg.parseResults(elements, 0)
+	if len(allResults) == 0 {
+		return nil, core.ErrSearchTimeout
+	}
+	var pageFeatures []core.SerpFeature
+	if query.Features {
+		pageFeatures = extractDDGFeaturesFromPage(page)
+	}
+
+	wantOrganic := query.Start + query.Limit
+	for core.CountOrganicResults(allResults) < wantOrganic {
+		hasMore, _, err := page.Has(Selectors.MoreResults)
+		if err != nil || !hasMore {
 			break
 		}
-		if err := core.SleepContext(ctx, ddg.pageSleep); err != nil {
-			return nil, err
+		button, err := page.Element(Selectors.MoreResults)
+		if err != nil {
+			break
 		}
+		before := len(elements)
+		if err := button.Click(proto.InputMouseButtonLeft, 1); err != nil {
+			ddg.logger.Debug("More results click failed: %s", err)
+			break
+		}
+		if err := page.Timeout(ddg.GetSelectorTimeout()).WaitElementsMoreThan(selector, before); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			ddg.logger.Debug("No additional results loaded")
+			break
+		}
+		elements, err = page.Elements(selector)
+		if err != nil || len(elements) <= before {
+			break
+		}
+		allResults = core.DeduplicateResults(append(allResults, ddg.parseResults(elements, 0)...))
 	}
 
-	// Deduplicate results
-	deduped := core.DeduplicateResults(allResults)
-
-	// Trim to exact limit if necessary
-	deduped = core.LimitOrganicResults(deduped, query.Limit)
+	deduped := windowOrganicResults(core.DeduplicateResults(allResults), query.Start, query.Limit)
 
 	ddg.logger.Info("Search completed: %d results", len(deduped))
 	return core.AttachFeaturesToFirstResult(deduped, pageFeatures), nil
