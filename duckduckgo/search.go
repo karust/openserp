@@ -164,6 +164,16 @@ func windowOrganicResults(results []core.SearchResult, start, limit int) []core.
 	return out
 }
 
+func findMoreResultsButton(page *rod.Page) *rod.Element {
+	for _, selector := range Selectors.MoreResults {
+		has, button, err := page.Has(selector)
+		if err == nil && has && button != nil {
+			return button
+		}
+	}
+	return nil
+}
+
 // Search executes a DuckDuckGo web search and returns normalized search
 // results. It may return core.ErrCaptcha or core.ErrSearchTimeout.
 func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []core.SearchResult, err error) {
@@ -213,12 +223,8 @@ func (ddg *DuckDuckGo) Search(ctx context.Context, query core.Query) (results []
 
 	wantOrganic := query.Start + query.Limit
 	for core.CountOrganicResults(allResults) < wantOrganic {
-		hasMore, _, err := page.Has(Selectors.MoreResults)
-		if err != nil || !hasMore {
-			break
-		}
-		button, err := page.Element(Selectors.MoreResults)
-		if err != nil {
+		button := findMoreResultsButton(page)
+		if button == nil {
 			break
 		}
 		before := len(elements)

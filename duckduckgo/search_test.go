@@ -1,10 +1,14 @@
 package duckduckgo
 
 import (
+	"context"
 	"net/url"
+	"os"
 	"testing"
 
 	"github.com/karust/openserp/core"
+	"github.com/karust/openserp/testutil"
+	"github.com/karust/openserp/testutil/ithelper"
 )
 
 func TestBuildURL(t *testing.T) {
@@ -269,5 +273,39 @@ func TestWindowOrganicResults(t *testing.T) {
 	got := windowOrganicResults(results, 1, 2)
 	if len(got) != 3 || !got[0].Ad || got[1].Rank != 2 || got[2].Rank != 3 {
 		t.Fatalf("unexpected result window: %#v", got)
+	}
+}
+
+func TestFindMoreResultsButton(t *testing.T) {
+	testutil.RequireIntegration(t)
+
+	fixture, err := os.ReadFile("testdata/search_results.html")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	browser := ithelper.CreateBrowser(t)
+	page, err := browser.Navigate(context.Background(), "about:blank")
+	if err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+	defer core.DeferClosePage(context.Background(), page, browser)()
+
+	cases := []struct {
+		html    string
+		wantHit bool
+	}{
+		{string(fixture), true},                               // real DDG markup
+		{`<button id="js-more-results-btn">x</button>`, true}, // renamed id, substring fallback
+		{`<div>no button</div>`, false},
+	}
+
+	for _, tc := range cases {
+		if err := page.SetDocumentContent(tc.html); err != nil {
+			t.Fatalf("set content: %v", err)
+		}
+		if hit := findMoreResultsButton(page) != nil; hit != tc.wantHit {
+			t.Fatalf("hit=%v want=%v", hit, tc.wantHit)
+		}
 	}
 }
