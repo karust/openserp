@@ -305,6 +305,86 @@ func TestParseMetadataRichTags(t *testing.T) {
 	}
 }
 
+func TestParseMetadataHonorsBaseHref(t *testing.T) {
+	doc, err := documentFromString(`<!doctype html>
+<html lang="de">
+<head>
+	<base href="/">
+	<link rel="canonical" href="de/canonical.html">
+</head>
+<body>
+	<a href="de/die_weisheit_des_schamanen.html">Die Weisheit des Schamanen</a>
+</body>
+</html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	documentURL := "https://example.com/de/ein_wolf_kommt_zu_wort.html"
+	linkBaseURL := effectiveBaseURL(doc, documentURL)
+
+	if linkBaseURL != "https://example.com/" {
+		t.Fatalf("effective base URL = %q, want %q", linkBaseURL, "https://example.com/")
+	}
+
+	meta := parseMetadata(doc, linkBaseURL)
+
+	if meta.Canonical != "https://example.com/de/canonical.html" {
+		t.Fatalf("canonical = %q", meta.Canonical)
+	}
+
+	if len(meta.Links) != 1 {
+		t.Fatalf("link count = %d, want 1", len(meta.Links))
+	}
+
+	want := "https://example.com/de/die_weisheit_des_schamanen.html"
+	if meta.Links[0].URL != want {
+		t.Fatalf("resolved link = %q, want %q", meta.Links[0].URL, want)
+	}
+
+	if strings.Contains(meta.Links[0].URL, "/de/de/") {
+		t.Fatalf("resolved link contains duplicated language path: %q", meta.Links[0].URL)
+	}
+}
+
+func TestExtractContentHonorsBaseHref(t *testing.T) {
+	htmlBytes := []byte(`<!doctype html>
+<html>
+<body>
+	<p><a href="de/die_weisheit_des_schamanen.html">Die Weisheit des Schamanen</a></p>
+	<img src="de/images/example.png" alt="Beispiel">
+</body>
+</html>`)
+
+	result, err := extractContent(
+		htmlBytes,
+		"https://example.com/de/ein_wolf_kommt_zu_wort.html",
+		"https://example.com/",
+		false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(
+		result.Markdown,
+		"https://example.com/de/die_weisheit_des_schamanen.html",
+	) {
+		t.Fatalf("markdown link was not resolved against <base href>: %q", result.Markdown)
+	}
+
+	if !strings.Contains(
+		result.Markdown,
+		"https://example.com/de/images/example.png",
+	) {
+		t.Fatalf("markdown image was not resolved against <base href>: %q", result.Markdown)
+	}
+
+	if strings.Contains(result.Markdown, "/de/de/") {
+		t.Fatalf("markdown contains duplicated language path: %q", result.Markdown)
+	}
+}
+
 func documentFromString(raw string) (*goquery.Document, error) {
 	return goquery.NewDocumentFromReader(strings.NewReader(raw))
 }
