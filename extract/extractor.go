@@ -135,8 +135,14 @@ func buildResult(req ExtractRequest, resp *FetchResponse, mode string, startedAt
 	if err != nil {
 		return nil, err
 	}
-	metadata := parseMetadata(doc, req.URL)
-	content, contentErr := extractContent(body, req.URL, !req.FullPage)
+	linkBaseURL := effectiveBaseURL(doc, req.URL)
+	metadata := parseMetadata(doc, linkBaseURL)
+	content, contentErr := extractContent(
+		body,
+		req.URL,
+		linkBaseURL,
+		!req.FullPage,
+	)
 	result := &ExtractResult{
 		URL:         req.URL,
 		Title:       firstNonEmpty(content.Title, metadata.Title),

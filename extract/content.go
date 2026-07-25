@@ -40,9 +40,19 @@ const minCleanTextRunes = 250
 // comes back too thin for a page that clearly had content, it transparently
 // falls back to full-body extraction. When clean is false it skips article
 // detection entirely and converts the whole readable <body>.
-func extractContent(htmlBytes []byte, baseURL string, clean bool) (contentResult, error) {
+// extractContent keeps the fetched document URL separate from the effective
+// HTML link base. This matters for pages using <base href>.
+func extractContent(
+	htmlBytes []byte,
+	documentURL string,
+	linkBaseURL string,
+	clean bool,
+) (contentResult, error) {
+	if strings.TrimSpace(linkBaseURL) == "" {
+		linkBaseURL = documentURL
+	}
 	if !clean {
-		return extractFullBody(htmlBytes, baseURL)
+		return extractFullBody(htmlBytes, linkBaseURL)
 	}
 
 	var out contentResult
@@ -54,7 +64,7 @@ func extractContent(htmlBytes []byte, baseURL string, clean bool) (contentResult
 		IncludeLinks:    true,
 		Deduplicate:     true,
 	}
-	if parsed, err := url.Parse(baseURL); err == nil {
+	if parsed, err := url.Parse(documentURL); err == nil {
 		opts.OriginalURL = parsed
 	}
 	extracted, err := trafilatura.Extract(bytes.NewReader(htmlBytes), opts)
@@ -62,7 +72,7 @@ func extractContent(htmlBytes []byte, baseURL string, clean bool) (contentResult
 		return out, err
 	}
 	if extracted == nil || extracted.ContentNode == nil {
-		return extractFullBody(htmlBytes, baseURL)
+		return extractFullBody(htmlBytes, linkBaseURL)
 	}
 
 	var htmlBuf bytes.Buffer
@@ -75,7 +85,7 @@ func extractContent(htmlBytes []byte, baseURL string, clean bool) (contentResult
 	out.Description = strings.TrimSpace(extracted.Metadata.Description)
 	out.Lang = strings.TrimSpace(extracted.Metadata.Language)
 
-	markdown, err := htmlToMarkdown(out.HTML, baseURL)
+	markdown, err := htmlToMarkdown(out.HTML, linkBaseURL)
 	if err != nil {
 		return out, err
 	}
@@ -84,7 +94,7 @@ func extractContent(htmlBytes []byte, baseURL string, clean bool) (contentResult
 	// trafilatura was too aggressive: the cleaned article is near-empty but the
 	// raw page had real visible text. Prefer the fuller readable-body pass.
 	if len([]rune(out.Text)) < minCleanTextRunes {
-		if full, ferr := extractFullBody(htmlBytes, baseURL); ferr == nil &&
+		if full, ferr := extractFullBody(htmlBytes, linkBaseURL); ferr == nil &&
 			len([]rune(full.Text)) > len([]rune(out.Text)) {
 			// Keep trafilatura's metadata (title/description/lang) when present;
 			// it is usually cleaner than what we derive from the full body.
