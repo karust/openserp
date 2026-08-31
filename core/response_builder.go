@@ -39,8 +39,26 @@ type EnrichContext struct {
 // EnrichResult converts a raw engine result into the v2 Result shape.
 func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 	normalizedURL := normalizeURL(raw.URL)
-	domain := extractDomain(normalizedURL)
-	displayURL := buildDisplayURL(normalizedURL, domain)
+
+	// A result's identity is derived from the destination when we have one, and
+	// from the engine's visible attribution when the SERP hid it behind a
+	// redirect wrapper. Reading the domain off the URL unconditionally is what
+	// made a link-obfuscation change blank out domain, display_url and favicon
+	// and reshuffle every id: the wrappers carry a fresh token per impression,
+	// so the URL is not a stable key.
+	usableURL := IsUsableResultURL(normalizedURL)
+	domain := ""
+	displayURL := ""
+	if usableURL {
+		domain = extractDomain(normalizedURL)
+		displayURL = buildDisplayURL(normalizedURL, domain)
+	} else {
+		domain = DomainFromAttribution(raw.DisplayURL, raw.SourceName)
+		// Reshaped, not passed through: the engine's breadcrumb carries a
+		// scheme and www, and display_url must look the same for every result
+		// in the list.
+		displayURL = AttributionDisplayURL(raw.DisplayURL, domain)
+	}
 	favicon := ""
 	if domain != "" {
 		favicon = "https://" + domain + "/favicon.ico"
@@ -75,7 +93,7 @@ func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 	}
 
 	result := Result{
-		ID:         buildResultID(ctx.Engine, normalizedURL),
+		ID:         buildStableResultID(ctx.Engine, normalizedURL, usableURL, domain, raw.Title),
 		Rank:       rank,
 		Type:       resultType,
 		Title:      raw.Title,
@@ -258,6 +276,24 @@ func EnrichImageResult(raw SearchResult, ctx EnrichContext) ImageResult {
 // buildResultID returns a stable "s_<hex>" ID for web results.
 func buildResultID(engine, normalizedURL string) string {
 	return "s_" + shortMD5(engine+"|"+normalizedURL)
+}
+
+// buildStableResultID keys a result on its URL when that URL is a real
+// destination. When it is a redirect wrapper the URL cannot be the key: Google
+// mints a fresh token per impression, so hashing it hands the same result a
+// different id on every request and breaks any caller that dedupes or tracks
+// results across runs. Domain plus title is stable across impressions.
+func buildStableResultID(engine, normalizedURL string, usableURL bool, domain, title string) string {
+	if usableURL {
+		return buildResultID(engine, normalizedURL)
+	}
+	key := domain + "|" + strings.ToLower(strings.TrimSpace(title))
+	if strings.TrimSpace(key) == "|" {
+		// Nothing stable to key on; fall back to the raw value so ids stay
+		// unique within a response rather than colliding on "".
+		return buildResultID(engine, normalizedURL)
+	}
+	return "s_" + shortMD5(engine+"|"+key)
 }
 
 // buildImageID returns a stable "i_<hex>" ID for image results.

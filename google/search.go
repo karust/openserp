@@ -460,6 +460,11 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			}
 			srchRes.Description = desc
 
+			// Visible attribution: what the domain is recovered from when the
+			// href is one of Google's encrypted link wrappers.
+			srchRes.DisplayURL = core.FirstNonEmptyText(resEl, Selectors.Cite)
+			srchRes.SourceName = core.FirstNonEmptyText(resEl, Selectors.SourceName)
+
 			srchRes.Rank, srchRes.AbsoluteRank = rank.Next(false)
 			searchResults = append(searchResults, srchRes)
 			continue

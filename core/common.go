@@ -121,6 +121,15 @@ type SearchResult struct {
 	Description string `json:"description"`
 	// Ad reports whether the result is sponsored.
 	Ad bool `json:"ad"`
+	// DisplayURL is the attribution breadcrumb the engine renders under the
+	// title, e.g. "https://www.pcmag.com › ... › VPN". Engines that expose it
+	// should fill it in: when a SERP hides the real href behind a redirect
+	// wrapper, this is what the result's domain is recovered from.
+	DisplayURL string `json:"display_url,omitempty"`
+	// SourceName is the human-readable site name shown beside the favicon,
+	// e.g. "PCMag" or "Reddit · r/VPN". It is the last resort for attribution
+	// on result blocks that render no breadcrumb at all.
+	SourceName string `json:"source_name,omitempty"`
 	// Features carries extracted SERP modules alongside the legacy result stream.
 	Features []SerpFeature `json:"-"`
 }
