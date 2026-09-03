@@ -326,6 +326,21 @@ openserp search ecosia "weather in london" --raw --proxy http://user:pass@127.0.
 
 Run `openserp search --help` for the full flag list. Engine names: `google`, `yandex`, `baidu`, `bing`, `duckduckgo`, `ecosia`.
 
+Use `--log-level` to control log verbosity, including startup warnings:
+
+```sh
+openserp search bing "golang" --log-level error
+```
+
+Supported levels are `panic`, `fatal`, `error`, `warn` (`warning` also works), `info`,
+`debug`, and `trace`. You can also set `OPENSERP_APP_LOG_LEVEL` or `app.log_level`
+in `config.yaml`; the flag overrides the environment variable, which overrides the
+config file. An empty value preserves the existing defaults: CLI commands log
+warnings and errors, while `serve` also logs info; `--verbose` enables debug logs
+and `--debug` enables trace logs. A non-empty log level overrides the log threshold
+from `--quiet`, `--verbose`, and `--debug`, without changing their other behavior
+(such as `--debug` enabling the browser UI). Search results still go to stdout.
+
 ## Query Parameters
 
 Common parameters:
