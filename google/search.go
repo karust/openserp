@@ -340,9 +340,6 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			} else {
 				srchRes.Description = strings.TrimSpace(text)
 			}
-			srchRes.Rank, srchRes.AbsoluteRank = rank.Next(true)
-			searchResults = append(searchResults, srchRes)
-
 		} else if isAnswerBox {
 			// 2. Parse answer boxes
 			answerEls, err := resEl.Page().Search(Selectors.AnswerBox)
@@ -460,18 +457,14 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 			}
 			srchRes.Description = desc
 
-			// Visible attribution: what the domain is recovered from when the
-			// href is one of Google's encrypted link wrappers.
-			srchRes.DisplayURL = core.FirstNonEmptyText(resEl, Selectors.Cite)
-			srchRes.SourceName = core.FirstNonEmptyText(resEl, Selectors.SourceName)
-
-			srchRes.Rank, srchRes.AbsoluteRank = rank.Next(false)
-			searchResults = append(searchResults, srchRes)
-			continue
-
 		} else {
 			continue
 		}
+		// Organic and ad links can both hide the destination behind a wrapper.
+		srchRes.DisplayURL = core.FirstNonEmptyText(resEl, Selectors.Cite)
+		srchRes.SourceName = core.FirstNonEmptyText(resEl, Selectors.SourceName)
+		srchRes.Rank, srchRes.AbsoluteRank = rank.Next(isAd)
+		searchResults = append(searchResults, srchRes)
 	}
 
 	deduped := core.DeduplicateResults(searchResults)
