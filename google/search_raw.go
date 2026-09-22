@@ -99,6 +99,11 @@ func parseGoogleDocument(doc *goquery.Document) []core.SearchResult {
 				Title:        title,
 				Description:  desc,
 				Ad:           isAd,
+				// Visible attribution, carried alongside the href so the
+				// response builder can still name the domain when Google
+				// serves an encrypted link wrapper instead of a destination.
+				DisplayURL: strings.TrimSpace(item.Find(Selectors.Cite).First().Text()),
+				SourceName: strings.TrimSpace(item.Find(Selectors.SourceName).First().Text()),
 			}
 
 			results = append(results, result)

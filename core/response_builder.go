@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const responseIDBytes = 8
@@ -39,8 +40,18 @@ type EnrichContext struct {
 // EnrichResult converts a raw engine result into the v2 Result shape.
 func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 	normalizedURL := normalizeURL(raw.URL)
-	domain := extractDomain(normalizedURL)
-	displayURL := buildDisplayURL(normalizedURL, domain)
+
+	// Wrapped links have no destination hostname and their tokens can change.
+	usableURL := IsUsableResultURL(normalizedURL)
+	domain := ""
+	displayURL := ""
+	if usableURL {
+		domain = extractDomain(normalizedURL)
+		displayURL = buildDisplayURL(normalizedURL, domain)
+	} else {
+		domain = DomainFromAttribution(raw.DisplayURL, raw.SourceName)
+		displayURL = AttributionDisplayURL(raw.DisplayURL, domain)
+	}
 	favicon := ""
 	if domain != "" {
 		favicon = "https://" + domain + "/favicon.ico"
@@ -75,7 +86,7 @@ func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 	}
 
 	result := Result{
-		ID:         buildResultID(ctx.Engine, normalizedURL),
+		ID:         buildStableResultID(ctx.Engine, normalizedURL, usableURL, domain, raw),
 		Rank:       rank,
 		Type:       resultType,
 		Title:      raw.Title,
@@ -260,6 +271,26 @@ func buildResultID(engine, normalizedURL string) string {
 	return "s_" + shortMD5(engine+"|"+normalizedURL)
 }
 
+// Use visible attribution when the destination is hidden. Counts and dates in
+// non-URL breadcrumbs are excluded because they change between impressions.
+func buildStableResultID(engine, normalizedURL string, usableURL bool, domain string, raw SearchResult) string {
+	if usableURL {
+		return buildResultID(engine, normalizedURL)
+	}
+	source := strings.ToLower(NormalizeWhitespace(raw.SourceName))
+	if domain == "" && source == "" {
+		return buildResultID(engine, normalizedURL)
+	}
+	breadcrumb := ""
+	if domainFromBreadcrumb(raw.DisplayURL) != "" {
+		breadcrumb = NormalizeWhitespace(raw.DisplayURL)
+	}
+	key := strings.Join([]string{
+		engine, domain, source, strings.ToLower(NormalizeWhitespace(raw.Title)), breadcrumb,
+	}, "\x00")
+	return "s_" + shortMD5(key)
+}
+
 // buildImageID returns a stable "i_<hex>" ID for image results.
 func buildImageID(engine, imageURL string) string {
 	return "i_" + shortMD5(engine+"|"+imageURL)
@@ -397,10 +428,14 @@ func buildDisplayURL(rawURL, domain string) string {
 	}
 
 	breadcrumb := domain + " › " + strings.Join(nonEmpty, " › ")
-	// Truncate to ~60 chars.
+	// Truncate on a UTF-8 boundary.
 	const maxLen = 60
 	if len(breadcrumb) > maxLen {
-		breadcrumb = breadcrumb[:maxLen-1] + "…"
+		cut := maxLen - 1
+		for cut > 0 && !utf8.RuneStart(breadcrumb[cut]) {
+			cut--
+		}
+		breadcrumb = breadcrumb[:cut] + "…"
 	}
 	return breadcrumb
 }

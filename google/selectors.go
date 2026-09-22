@@ -16,6 +16,8 @@ var Selectors = struct {
 	Ad             string
 	Link           string
 	Title          string
+	Cite           string
+	SourceName     string
 	DescPrimary    string
 	DescFallback   string
 	DescAny        string
@@ -53,6 +55,16 @@ var Selectors = struct {
 	Ad:           "div[data-text-ad], [data-text-ad]",
 	Link:         "a",
 	Title:        "h3",
+	// Cite and SourceName are the visible attribution Google renders for every
+	// result: the breadcrumb ("https://www.pcmag.com › ... › VPN") and the site
+	// name beside the favicon ("PCMag", "Reddit · r/VPN"). Google now hands
+	// automated clients encrypted link wrappers instead of hrefs, but it cannot
+	// stop showing the user which site a result came from — so these are what a
+	// result's domain and identity are derived from when the href is opaque.
+	// Between them they covered every result on the SERPs we sampled; cite alone
+	// covered ~78% (Reddit and video blocks put comment counts in cite instead).
+	Cite:         "cite",
+	SourceName:   "span.VuuXrf",
 	DescPrimary:  "div[data-sncf='1'] div",
 	DescFallback: "div.VwiC3b",
 	DescAny:      "div",

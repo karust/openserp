@@ -1391,9 +1391,13 @@ components:
         id:
           type: string
           description: >
-            Stable identifier: `s_` + hex(first 8 bytes of MD5(engine|normalized_url)).
+            For usable destination URLs: `s_` + hex(first 8 bytes of MD5(engine|normalized_url)).
             Normalized URL: lowercase scheme+host, trailing slash stripped, utm_*/fbclid/gclid
-            tracking params removed. Same URL → same ID across requests.
+            tracking params removed. Same usable URL yields the same ID across requests.
+            For wrapped or unusable URLs, a best-effort ID uses visible domain, source name,
+            title and URL breadcrumb instead of the changing redirect token. Without domain
+            or source attribution, it falls back to the normalized URL. Identical attribution
+            can share an ID; changes to attribution or switching to a direct URL can change it.
           example: s_a1b2c3d4e5f6a1b2
         rank:
           type: integer
