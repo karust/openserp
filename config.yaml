@@ -8,6 +8,7 @@ server:
 
 app:
   log_format: "text" # json|text
+  log_level: "" # panic|fatal|error|warn|info|debug|trace; empty preserves quiet/verbose/debug defaults
   timeout: 15 # Browser/search timeout in seconds, per attempt; the request deadline is derived from this x retries
   browser_path: "" # Custom browser binary path (chrome/chromium/edge..)
   profiles: "" # Overriding built-in browser profiles
