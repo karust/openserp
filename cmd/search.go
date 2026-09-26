@@ -304,6 +304,7 @@ func newCLIExtractBrowser(cfg extractpkg.Config, proxyURL string, captchaSolverE
 		BrowserPath:          config.App.BrowserPath,
 		ProxyURL:             proxyURL,
 		Insecure:             config.Server.Insecure,
+		NoSandbox:            config.App.NoSandbox,
 		BlockResourceTypes:   blockedResourceTypes,
 		BlockTrackers:        config.App.BlockTrackers,
 	}
@@ -363,6 +364,7 @@ func searchBrowser(ctx context.Context, spec engineSpec, query core.Query, brows
 		BrowserPath:          config.App.BrowserPath,
 		ProxyURL:             browserProxyURL,
 		Insecure:             config.Server.Insecure,
+		NoSandbox:            config.App.NoSandbox,
 		BlockResourceTypes:   blockedResourceTypes,
 		BlockTrackers:        config.App.BlockTrackers,
 	}

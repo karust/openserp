@@ -65,6 +65,7 @@ type AppConfig struct {
 	IsLeakless     bool          `mapstructure:"leakless"`
 	BlockResources string        `mapstructure:"block_resources"`
 	BlockTrackers  bool          `mapstructure:"block_trackers"`
+	NoSandbox      bool          `mapstructure:"no_sandbox"`
 	DebugEndpoints bool          `mapstructure:"debug_endpoints"`
 	LogFormat      string        `mapstructure:"log_format"`
 	MaxProcesses   int           `mapstructure:"max_processes"`
@@ -133,6 +134,7 @@ var flagToConfigKey = map[string]string{
 	"cb_recovery":             "circuit_breaker.recovery_seconds",
 	"cb_successes":            "circuit_breaker.successes",
 	"log_format":              "app.log_format",
+	"no-sandbox":              "app.no_sandbox",
 }
 
 var RootCmd = &cobra.Command{
@@ -186,6 +188,7 @@ func sanitizedConfigForLog(cfg Config) map[string]interface{} {
 			"leakless":        cfg.App.IsLeakless,
 			"block_resources": cfg.App.BlockResources,
 			"block_trackers":  cfg.App.BlockTrackers,
+			"no_sandbox":      cfg.App.NoSandbox,
 			"debug_endpoints": cfg.App.DebugEndpoints,
 			"log_format":      cfg.App.LogFormat,
 			"max_processes":   cfg.App.MaxProcesses,
@@ -407,6 +410,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("app.leakless", false)
 	v.SetDefault("app.block_resources", "")
 	v.SetDefault("app.block_trackers", false)
+	v.SetDefault("app.no_sandbox", false)
 	v.SetDefault("app.debug_endpoints", false)
 	v.SetDefault("app.max_processes", 4)
 	v.SetDefault("app.idle_ttl", "10m")
@@ -468,4 +472,5 @@ func init() {
 	RootCmd.PersistentFlags().IntVar(&config.CircuitBreaker.RecoverySeconds, "cb_recovery", 60, "Seconds before retrying an engine with open circuit")
 	RootCmd.PersistentFlags().IntVar(&config.CircuitBreaker.Successes, "cb_successes", 2, "Consecutive successful half-open checks needed to close circuit")
 	RootCmd.PersistentFlags().StringVar(&config.App.LogFormat, "log_format", "", "Log format: json or text (default: json in production, text in debug)")
+	RootCmd.PersistentFlags().BoolVar(&config.App.NoSandbox, "no-sandbox", false, "Launch browser with --no-sandbox (for environments where the sandbox SUID helper is unavailable)")
 }

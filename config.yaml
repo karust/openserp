@@ -16,6 +16,7 @@ app:
   leave_head: false # Keep tabs open after request
   block_resources: "image,font,css,media" # Block heavy subresources in browser mode
   block_trackers: true # Block known tracker domains
+  no_sandbox: false # Launch browser with --no-sandbox (use when the sandbox SUID helper is unavailable, e.g. nix on non-NixOS)
   max_processes: 6 # Concurrent Chrome processes
   idle_ttl: 5m # close a Chrome that has not served traffic for this long
 

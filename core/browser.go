@@ -51,6 +51,9 @@ type BrowserOpts struct {
 	ProxyLaneStore *LaneStore
 	// Insecure allows invalid TLS certificates for browser requests.
 	Insecure bool
+	// NoSandbox launches Chromium with --no-sandbox. Needed when the sandbox
+	// helper binary cannot get the SUID bit (e.g. /nix/store is read-only).
+	NoSandbox bool
 	// UserAgent optionally overrides browser-reported user agent during emulation.
 	UserAgent string
 	// BlockResourceTypes are blocked during page navigation when non-empty.
@@ -293,6 +296,9 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	} else {
 		l = l.Headless(false)
 	}
+	if opts.NoSandbox {
+		l = l.NoSandbox(true)
+	}
 	if path != "" {
 		logrus.WithField("browser_path", path).Debug("Using browser binary")
 		l = l.Bin(path)
@@ -355,6 +361,7 @@ func browserOptsLogFields(opts BrowserOpts) logrus.Fields {
 		"browser_path_configured": strings.TrimSpace(opts.BrowserPath) != "",
 		"proxy":                   maskedProxyLogValue(opts.ProxyURL),
 		"insecure":                opts.Insecure,
+		"no_sandbox":              opts.NoSandbox,
 		"user_agent_override":     strings.TrimSpace(opts.UserAgent) != "",
 		"block_resource_types":    len(opts.BlockResourceTypes),
 		"block_trackers":          opts.BlockTrackers,
