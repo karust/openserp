@@ -136,7 +136,10 @@ func execRawRequest(ctx context.Context, client tlsclient.HttpClient, req *fhttp
 		}
 		return nil, err
 	}
-	return convertRawResponse(ctx, resp), nil
+	converted := convertRawResponse(ctx, resp)
+	// Callers read the final URL after redirects from here.
+	converted.Request = &http.Request{Method: req.Method, URL: req.URL}
+	return converted, nil
 }
 
 const maxGuardedRedirects = 10

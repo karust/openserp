@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"golang.org/x/text/encoding/charmap"
 )
 
 // staticRaw returns a RawFetcher that always serves the same HTML with HTTP 200.
@@ -140,8 +141,8 @@ func TestExtractCleanFallsBackOnThinArticle(t *testing.T) {
 	// A landing page: trafilatura strips the feature/nav chrome down to almost
 	// nothing, so the thin-output guard should fall back to full-body extraction
 	// and recover the visible text.
-	landing := `<!doctype html><html lang="en"><head><title>OpenSERP</title></head><body>
-<header><nav><a href="/docs">Docs</a><a href="/pricing">Pricing</a></nav></header>
+	landing := `<!doctype html><html lang="en"><head><title>OpenSERP</title><base href="/site/"></head><body>
+<header><nav><a href="docs">Docs</a><a href="pricing">Pricing</a></nav></header>
 <main>
 <h1>OpenSERP — Free SERP API</h1>
 <section class="features">
@@ -158,6 +159,9 @@ func TestExtractCleanFallsBackOnThinArticle(t *testing.T) {
 			t.Fatalf("full-body fallback dropped %q; text = %q", want, result.Text)
 		}
 	}
+	if !strings.Contains(result.Markdown, "(https://openserp.org/site/docs)") {
+		t.Fatalf("full-body fallback lost the base URL: %s", result.Markdown)
+	}
 }
 
 func TestExtractFullPageKeepsChrome(t *testing.T) {
@@ -169,6 +173,21 @@ func TestExtractFullPageKeepsChrome(t *testing.T) {
 	result := runExtract(t, staticRaw(page), nil, ExtractRequest{URL: "https://example.com/dash", Mode: ModeFast, FullPage: true})
 	if !strings.Contains(result.Text, "Alpha") || !strings.Contains(result.Text, "Beta") {
 		t.Fatalf("full-page extraction dropped nav chrome; text = %q", result.Text)
+	}
+}
+
+func TestExtractDecodesLegacyCharset(t *testing.T) {
+	page := `<!doctype html><html lang="ru"><head><meta charset="windows-1251"><title>Заголовок</title></head>
+<body><article><h1>Заголовок</h1><p>` + strings.Repeat("Длинный русский текст статьи для проверки кодировки. ", 8) + `</p></article></body></html>`
+	encoded, err := charmap.Windows1251.NewEncoder().String(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fullPage := range []bool{false, true} {
+		result := runExtract(t, staticRaw(encoded), nil, ExtractRequest{URL: "https://example.ru/a", Mode: ModeFast, FullPage: fullPage})
+		if result.Title != "Заголовок" || !strings.Contains(result.Text, "русский текст") {
+			t.Errorf("full_page=%t: title = %q, text = %q", fullPage, result.Title, result.Text)
+		}
 	}
 }
 
@@ -302,86 +321,6 @@ func TestParseMetadataRichTags(t *testing.T) {
 	}
 	if meta.OGTags["twitter:card"] != "summary" {
 		t.Fatalf("og_tags = %#v", meta.OGTags)
-	}
-}
-
-func TestParseMetadataHonorsBaseHref(t *testing.T) {
-	doc, err := documentFromString(`<!doctype html>
-<html lang="de">
-<head>
-	<base href="/">
-	<link rel="canonical" href="de/canonical.html">
-</head>
-<body>
-	<a href="de/die_weisheit_des_schamanen.html">Die Weisheit des Schamanen</a>
-</body>
-</html>`)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	documentURL := "https://example.com/de/ein_wolf_kommt_zu_wort.html"
-	linkBaseURL := effectiveBaseURL(doc, documentURL)
-
-	if linkBaseURL != "https://example.com/" {
-		t.Fatalf("effective base URL = %q, want %q", linkBaseURL, "https://example.com/")
-	}
-
-	meta := parseMetadata(doc, linkBaseURL)
-
-	if meta.Canonical != "https://example.com/de/canonical.html" {
-		t.Fatalf("canonical = %q", meta.Canonical)
-	}
-
-	if len(meta.Links) != 1 {
-		t.Fatalf("link count = %d, want 1", len(meta.Links))
-	}
-
-	want := "https://example.com/de/die_weisheit_des_schamanen.html"
-	if meta.Links[0].URL != want {
-		t.Fatalf("resolved link = %q, want %q", meta.Links[0].URL, want)
-	}
-
-	if strings.Contains(meta.Links[0].URL, "/de/de/") {
-		t.Fatalf("resolved link contains duplicated language path: %q", meta.Links[0].URL)
-	}
-}
-
-func TestExtractContentHonorsBaseHref(t *testing.T) {
-	htmlBytes := []byte(`<!doctype html>
-<html>
-<body>
-	<p><a href="de/die_weisheit_des_schamanen.html">Die Weisheit des Schamanen</a></p>
-	<img src="de/images/example.png" alt="Beispiel">
-</body>
-</html>`)
-
-	result, err := extractContent(
-		htmlBytes,
-		"https://example.com/de/ein_wolf_kommt_zu_wort.html",
-		"https://example.com/",
-		false,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !strings.Contains(
-		result.Markdown,
-		"https://example.com/de/die_weisheit_des_schamanen.html",
-	) {
-		t.Fatalf("markdown link was not resolved against <base href>: %q", result.Markdown)
-	}
-
-	if !strings.Contains(
-		result.Markdown,
-		"https://example.com/de/images/example.png",
-	) {
-		t.Fatalf("markdown image was not resolved against <base href>: %q", result.Markdown)
-	}
-
-	if strings.Contains(result.Markdown, "/de/de/") {
-		t.Fatalf("markdown contains duplicated language path: %q", result.Markdown)
 	}
 }
 

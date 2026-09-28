@@ -168,7 +168,11 @@ func RawExtractFetch(ctx context.Context, req extractpkg.ExtractRequest, cfg ext
 	if int64(len(body)) > limit {
 		body = body[:limit]
 	}
-	return &extractpkg.FetchResponse{StatusCode: resp.StatusCode, Body: body}, nil
+	out := &extractpkg.FetchResponse{StatusCode: resp.StatusCode, Body: body}
+	if resp.Request != nil && resp.Request.URL != nil {
+		out.FinalURL = resp.Request.URL.String()
+	}
+	return out, nil
 }
 
 func (s *Server) renderedExtractFetch(ctx context.Context, req extractpkg.ExtractRequest) (*extractpkg.FetchResponse, error) {
@@ -206,7 +210,12 @@ func RenderExtractHTML(ctx context.Context, browser *Browser, req extractpkg.Ext
 	if req.MaxBytes > 0 && len(body) > req.MaxBytes {
 		body = body[:req.MaxBytes]
 	}
-	return &extractpkg.FetchResponse{StatusCode: http.StatusOK, Body: body}, nil
+	out := &extractpkg.FetchResponse{StatusCode: http.StatusOK, Body: body}
+	// Best effort - without it links resolve against the requested URL.
+	if info, err := page.Info(); err == nil {
+		out.FinalURL = info.URL
+	}
+	return out, nil
 }
 
 func (s *Server) validateRenderedExtractNavigation(ctx context.Context, req extractpkg.ExtractRequest, cfg extractpkg.Config) error {

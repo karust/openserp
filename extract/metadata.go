@@ -2,7 +2,6 @@ package extract
 
 import (
 	"encoding/json"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -18,42 +17,6 @@ type pageMetadata struct {
 	SchemaOrg   []json.RawMessage
 	Headings    []Heading
 	Links       []Link
-}
-
-// effectiveBaseURL returns the URL base defined by the document's first
-// <base href> element. When no usable HTTP(S) base exists, the original
-// document URL remains the base.
-//
-// Relative links in HTML must be resolved against <base href>, not blindly
-// against the fetched document URL.
-func effectiveBaseURL(doc *goquery.Document, documentURL string) string {
-	documentURL = strings.TrimSpace(documentURL)
-	if doc == nil || documentURL == "" {
-		return documentURL
-	}
-
-	baseHref, ok := doc.Find("base[href]").First().Attr("href")
-	baseHref = strings.TrimSpace(baseHref)
-	if !ok || baseHref == "" {
-		return documentURL
-	}
-
-	resolved := resolveURL(documentURL, baseHref)
-	if resolved == "" {
-		return documentURL
-	}
-
-	parsed, err := url.Parse(resolved)
-	if err != nil {
-		return documentURL
-	}
-
-	// A document base for fetched web content must remain an HTTP(S) URL.
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return documentURL
-	}
-
-	return parsed.String()
 }
 
 func parseMetadata(doc *goquery.Document, baseURL string) pageMetadata {
@@ -165,25 +128,6 @@ func appendJSONLD(dst *[]json.RawMessage, raw string) {
 	if data, err := json.Marshal(decoded); err == nil {
 		*dst = append(*dst, data)
 	}
-}
-
-func resolveURL(baseURL string, raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || strings.HasPrefix(raw, "#") || strings.HasPrefix(strings.ToLower(raw), "javascript:") {
-		return ""
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return ""
-	}
-	if parsed.IsAbs() {
-		return parsed.String()
-	}
-	base, err := url.Parse(baseURL)
-	if err != nil {
-		return ""
-	}
-	return base.ResolveReference(parsed).String()
 }
 
 func collapseWhitespace(value string) string {

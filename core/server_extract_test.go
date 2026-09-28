@@ -14,6 +14,48 @@ import (
 	extractpkg "github.com/karust/openserp/extract"
 )
 
+func TestRawExtractFetchFinalURL(t *testing.T) {
+	const destination = "http://1.1.1.1/docs/page.html"
+	// The local proxy serves both public URLs; no external request is made.
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/old/page" {
+			http.Redirect(w, r, destination, http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte(`<html><head><base href="./"><link rel="canonical" href="canonical.html"></head>
+<body><a href="guide.html">Guide</a></body></html>`))
+	}))
+	defer proxy.Close()
+	cfg := extractpkg.DefaultConfig()
+	for _, target := range []string{"http://8.8.8.8/old/page", destination} {
+		t.Run(target, func(t *testing.T) {
+			fetch := func(ctx context.Context, req extractpkg.ExtractRequest) (*extractpkg.FetchResponse, error) {
+				resp, err := RawExtractFetch(ctx, req, cfg, false)
+				if err == nil && resp.FinalURL != destination {
+					t.Errorf("final URL = %q", resp.FinalURL)
+				}
+				return resp, err
+			}
+			extractor := extractpkg.Extractor{RawFetch: fetch, Cfg: cfg}
+			result, err := extractor.Extract(context.Background(), extractpkg.ExtractRequest{
+				URL: target, Mode: extractpkg.ModeFast, ProxyURL: proxy.URL, FullPage: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.URL != target || result.Canonical != "http://1.1.1.1/docs/canonical.html" {
+				t.Errorf("URL = %q, canonical = %q", result.URL, result.Canonical)
+			}
+			if len(result.Links) != 1 || result.Links[0].URL != "http://1.1.1.1/docs/guide.html" {
+				t.Errorf("links = %#v", result.Links)
+			}
+			if !strings.Contains(result.Markdown, "(http://1.1.1.1/docs/guide.html)") {
+				t.Errorf("markdown = %q", result.Markdown)
+			}
+		})
+	}
+}
+
 func TestEnrichEnvelopeWithExtractionRetriesThinAndFailedCandidates(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
