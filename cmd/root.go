@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -134,7 +135,6 @@ var flagToConfigKey = map[string]string{
 	"cb_recovery":             "circuit_breaker.recovery_seconds",
 	"cb_successes":            "circuit_breaker.successes",
 	"log_format":              "app.log_format",
-	"log-level":               "app.log_level",
 }
 
 var RootCmd = &cobra.Command{
@@ -166,13 +166,32 @@ var RootCmd = &cobra.Command{
 		}
 		config.Server.IsQuiet = quiet
 
-		core.InitLogger(config.Server.IsVerbose, config.Server.IsDebug, quiet, config.App.LogFormat)
-		if err := applyLogLevel(config.App.LogLevel); err != nil {
+		level, override, err := logLevelOverride(cmd.Flags(), config.App.LogLevel)
+		if err != nil {
 			return err
+		}
+		core.InitLogger(config.Server.IsVerbose, config.Server.IsDebug, quiet, config.App.LogFormat)
+		if override {
+			logrus.SetLevel(level)
 		}
 		logrus.WithField("config", sanitizedConfigForLog(config)).Debug("Final config")
 		return nil
 	},
+}
+
+// logLevelOverride parses app.log_level, which replaces the -q/-v/-d log level.
+// A value from env or config yields to those flags when they are typed.
+func logLevelOverride(flags *pflag.FlagSet, raw string) (logrus.Level, bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false, nil
+	}
+	level, err := logrus.ParseLevel(raw)
+	if err != nil || level < logrus.ErrorLevel {
+		return 0, false, fmt.Errorf("invalid log level %q: expected error, warn, info, debug or trace", raw)
+	}
+	typed := flags.Changed("quiet") || flags.Changed("verbose") || flags.Changed("debug")
+	return level, flags.Changed("log_level") || !typed, nil
 }
 
 func commandDefaultsToQuiet(cmd *cobra.Command) bool {
@@ -290,9 +309,12 @@ func initializeConfig(cmd *cobra.Command) error {
 		if explicitConfigPath != "" {
 			return fmt.Errorf("cannot read config %q: %w", explicitConfigPath, err)
 		}
-		err = fmt.Errorf("cannot read config: %v", err)
+		// No ./config.* is normal for go install and release binaries, defaults apply.
+		var notFound viper.ConfigFileNotFoundError
+		if !errors.As(err, &notFound) {
+			logrus.Warnf("cannot read config: %v", err)
+		}
 	}
-	configReadErr := err
 
 	// 2. Environment variables (medium priority). Bind environment variables to their equivalent keys with underscores
 	for _, key := range v.AllKeys() {
@@ -305,14 +327,6 @@ func initializeConfig(cmd *cobra.Command) error {
 
 	// 3. Command flags (highest priority). Bind the current command's flags to viper
 	bindFlags(cmd, v)
-
-	// Apply the merged level before startup warnings, including a missing config.
-	if err := applyLogLevel(v.GetString("app.log_level")); err != nil {
-		return err
-	}
-	if configReadErr != nil {
-		logrus.Warn(configReadErr)
-	}
 
 	// Keep compatibility with historical typo in local configs. Runs after all
 	// sources are merged so CLI flags and env vars take precedence over the typo key.
@@ -344,19 +358,6 @@ func initializeConfig(cmd *cobra.Command) error {
 		return fmt.Errorf("invalid proxies config: %w", err)
 	}
 
-	return nil
-}
-
-func applyLogLevel(raw string) error {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	level, err := logrus.ParseLevel(raw)
-	if err != nil {
-		return fmt.Errorf("invalid app.log_level %q: expected panic, fatal, error, warn, info, debug, or trace", raw)
-	}
-	logrus.SetLevel(level)
 	return nil
 }
 
@@ -496,5 +497,5 @@ func init() {
 	RootCmd.PersistentFlags().IntVar(&config.CircuitBreaker.RecoverySeconds, "cb_recovery", 60, "Seconds before retrying an engine with open circuit")
 	RootCmd.PersistentFlags().IntVar(&config.CircuitBreaker.Successes, "cb_successes", 2, "Consecutive successful half-open checks needed to close circuit")
 	RootCmd.PersistentFlags().StringVar(&config.App.LogFormat, "log_format", "", "Log format: json or text (default: json in production, text in debug)")
-	RootCmd.PersistentFlags().StringVar(&config.App.LogLevel, "log-level", "", "Log level: panic, fatal, error, warn, info, debug, trace (overrides quiet, verbose, and debug log levels)")
+	RootCmd.PersistentFlags().StringVar(&config.App.LogLevel, "log_level", "", "Log level: error, warn, info, debug or trace (default: warn for CLI, info for serve)")
 }

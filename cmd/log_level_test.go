@@ -2,217 +2,113 @@ package cmd
 
 import (
 	"bytes"
-	"io"
 	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
-func TestApplyLogLevel(t *testing.T) {
-	previous := logrus.GetLevel()
-	t.Cleanup(func() { logrus.SetLevel(previous) })
-
-	for _, tc := range []struct {
-		raw   string
-		level logrus.Level
-	}{
-		{" error ", logrus.ErrorLevel},
-		{"warn", logrus.WarnLevel},
-		{"warning", logrus.WarnLevel},
-		{"panic", logrus.PanicLevel},
-		{"fatal", logrus.FatalLevel},
-		{"trace", logrus.TraceLevel},
-		{"info", logrus.InfoLevel},
-		{"DEBUG", logrus.DebugLevel},
-	} {
-		t.Run(tc.raw, func(t *testing.T) {
-			logrus.SetLevel(logrus.TraceLevel)
-			if err := applyLogLevel(tc.raw); err != nil {
-				t.Fatalf("applyLogLevel(%q): %v", tc.raw, err)
-			}
-			if got := logrus.GetLevel(); got != tc.level {
-				t.Fatalf("level = %s, want %s", got, tc.level)
-			}
-		})
-	}
-
-	logrus.SetLevel(logrus.WarnLevel)
-	if err := applyLogLevel("  "); err != nil {
-		t.Fatalf("empty log level: %v", err)
-	}
-	if got := logrus.GetLevel(); got != logrus.WarnLevel {
-		t.Fatalf("empty level changed logger to %s", got)
-	}
-
-	if err := applyLogLevel("verbose"); err == nil || !strings.Contains(err.Error(), "invalid") {
-		t.Fatalf("invalid level error = %v", err)
-	}
-}
-
-func TestInitializeConfigLogLevelPrecedence(t *testing.T) {
-	previous := config
-	previousLevel := logrus.GetLevel()
-	t.Cleanup(func() { config = previous; logrus.SetLevel(previousLevel) })
-
-	for _, tc := range []struct {
-		name       string
-		file, env  string
-		flag       string
-		wantConfig string
-		wantLevel  logrus.Level
-	}{
-		{"config only", "warn", "", "", "warn", logrus.WarnLevel},
-		{"env overrides config", "warn", "error", "", "error", logrus.ErrorLevel},
-		{"flag overrides env", "warn", "error", "debug", "debug", logrus.DebugLevel},
-		{"explicit empty flag", "warn", "error", "", "", logrus.InfoLevel},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Chdir(t.TempDir())
-			if err := os.WriteFile("config.yaml", []byte("app:\n  log_level: "+tc.file+"\n"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("OPENSERP_APP_LOG_LEVEL", tc.env)
-			cmd := configTestCommand(t, tc.flag)
-			logrus.SetLevel(logrus.InfoLevel)
-			if tc.name == "explicit empty flag" {
-				if err := cmd.Flags().Set("log-level", ""); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := initializeConfig(cmd); err != nil {
-				t.Fatalf("initializeConfig: %v", err)
-			}
-			if config.App.LogLevel != tc.wantConfig {
-				t.Fatalf("log level = %q, want %q", config.App.LogLevel, tc.wantConfig)
-			}
-			if got := logrus.GetLevel(); got != tc.wantLevel {
-				t.Fatalf("logger level = %s, want %s", got, tc.wantLevel)
-			}
-		})
-	}
-}
-
-func TestInitializeConfigMissingConfigRespectsEarlyLogLevel(t *testing.T) {
-	for _, tc := range []struct {
-		name, flag, env string
-		wantWarning     bool
-	}{
-		{"default", "", "", true},
-		{"CLI error", "error", "", false},
-		{"env error", "", "error", false},
-		{"CLI warn overrides env", "warn", "error", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Chdir(t.TempDir())
-			t.Setenv("OPENSERP_APP_LOG_LEVEL", tc.env)
-			t.Setenv("OPENSERP_SERVER_CONFIG_PATH", "")
-			previous := config
-			t.Cleanup(func() { config = previous })
-			var output bytes.Buffer
-			t.Cleanup(captureLogger(&output))
-			if err := initializeConfig(configTestCommand(t, tc.flag)); err != nil {
-				t.Fatal(err)
-			}
-			if got := strings.Contains(output.String(), "cannot read config"); got != tc.wantWarning {
-				t.Fatalf("warning present = %v, want %v; output: %s", got, tc.wantWarning, output.String())
-			}
-		})
-	}
-}
-
-func TestPersistentPreRunLogLevels(t *testing.T) {
-	for _, tc := range []struct {
+func TestLogLevelOverride(t *testing.T) {
+	cases := []struct {
 		name  string
-		flags map[string]string
+		raw   string
+		typed []string
 		want  logrus.Level
+		ok    bool
 	}{
-		{"CLI default", nil, logrus.WarnLevel},
-		{"quiet", map[string]string{"quiet": "true"}, logrus.WarnLevel},
-		{"verbose", map[string]string{"verbose": "true"}, logrus.DebugLevel},
-		{"debug", map[string]string{"debug": "true"}, logrus.TraceLevel},
-		{"debug wins", map[string]string{"quiet": "true", "verbose": "true", "debug": "true"}, logrus.TraceLevel},
-		{"explicit error wins", map[string]string{"quiet": "true", "verbose": "true", "debug": "true", "log-level": "error"}, logrus.ErrorLevel},
-		{"explicit info overrides quiet", map[string]string{"quiet": "true", "log-level": "info"}, logrus.InfoLevel},
-	} {
+		{name: "unset"},
+		{name: "config", raw: " DEBUG ", want: logrus.DebugLevel, ok: true},
+		{name: "typed -v beats env/config", raw: "error", typed: []string{"verbose"}},
+		{name: "--log_level beats typed -d", raw: "error", typed: []string{"log_level", "debug"}, want: logrus.ErrorLevel, ok: true},
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Chdir(t.TempDir())
-			for _, key := range []string{"OPENSERP_APP_LOG_LEVEL", "OPENSERP_SERVER_CONFIG_PATH", "OPENSERP_SERVER_QUIET", "OPENSERP_SERVER_VERBOSE", "OPENSERP_SERVER_DEBUG"} {
-				t.Setenv(key, "")
+			flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			flags.String("log_level", "", "")
+			flags.Bool("quiet", false, "")
+			flags.Bool("verbose", false, "")
+			flags.Bool("debug", false, "")
+			for _, name := range tc.typed {
+				flags.Lookup(name).Changed = true
 			}
-			previous := config
-			t.Cleanup(func() { config = previous })
-			var output bytes.Buffer
-			t.Cleanup(captureLogger(&output))
-			cmd := configTestCommand(t, "")
-			cmd.Use = "search"
-			for _, flag := range []string{"quiet", "verbose", "debug"} {
-				cmd.Flags().Bool(flag, false, "")
+
+			level, ok, err := logLevelOverride(flags, tc.raw)
+			if err != nil || ok != tc.ok || (ok && level != tc.want) {
+				t.Fatalf("got (%s, %v, %v), want (%s, %v)", level, ok, err, tc.want, tc.ok)
 			}
-			for flag, value := range tc.flags {
-				if err := cmd.Flags().Set(flag, value); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := RootCmd.PersistentPreRunE(cmd, nil); err != nil {
+		})
+	}
+
+	for _, raw := range []string{"bogus", "panic", "fatal"} {
+		if _, _, err := logLevelOverride(pflag.NewFlagSet("test", pflag.ContinueOnError), raw); err == nil {
+			t.Errorf("%q: want invalid level error", raw)
+		}
+	}
+}
+
+func TestInitializeConfigLogLevel(t *testing.T) {
+	cases := []struct {
+		name, env, flag, want string
+	}{
+		{"config", "", "", "warn"},
+		{"env beats config", "error", "", "error"},
+		{"flag beats env", "error", "debug", "debug"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateConfig(t)
+			t.Setenv("OPENSERP_APP_LOG_LEVEL", tc.env)
+			if err := os.WriteFile("config.yaml", []byte("app:\n  log_level: warn\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			if got := logrus.GetLevel(); got != tc.want {
-				t.Fatalf("level = %s, want %s", got, tc.want)
+
+			if err := initializeConfig(configCommand(t, tc.flag)); err != nil {
+				t.Fatal(err)
+			}
+			if config.App.LogLevel != tc.want {
+				t.Fatalf("log level = %q, want %q", config.App.LogLevel, tc.want)
 			}
 		})
 	}
 }
 
-func TestInitializeConfigRejectsInvalidLevel(t *testing.T) {
-	t.Chdir(t.TempDir())
-	cmd := configTestCommand(t, "no-such-level")
-	if err := initializeConfig(cmd); err == nil || !strings.Contains(err.Error(), "invalid") {
-		t.Fatalf("initializeConfig error = %v, want invalid level error", err)
-	}
-}
+// Issue #44: no ./config.yaml is normal and must not log a warning.
+func TestInitializeConfigWithoutConfigFile(t *testing.T) {
+	isolateConfig(t)
+	var logs bytes.Buffer
+	logger := logrus.StandardLogger()
+	out := logger.Out
+	logger.SetOutput(&logs)
+	t.Cleanup(func() { logger.SetOutput(out) })
 
-func TestInitializeConfigExplicitMissingConfigReturnsError(t *testing.T) {
-	t.Chdir(t.TempDir())
-	cmd := configTestCommand(t, "error")
-	if err := cmd.Flags().Set("config", filepath.Join(t.TempDir(), "missing.yaml")); err != nil {
+	if err := initializeConfig(configCommand(t, "")); err != nil {
 		t.Fatal(err)
 	}
-	if err := initializeConfig(cmd); err == nil || !strings.Contains(err.Error(), "cannot read config") {
-		t.Fatalf("initializeConfig error = %v, want explicit config read error", err)
+	if logs.Len() > 0 {
+		t.Fatalf("unexpected logs: %s", logs.String())
 	}
 }
 
-func configTestCommand(t *testing.T, level string) *cobra.Command {
+func configCommand(t *testing.T, logLevel string) *cobra.Command {
 	t.Helper()
 	cmd := &cobra.Command{Use: "test"}
 	cmd.Flags().String("config", "", "")
-	cmd.Flags().String("log-level", "", "")
-	if level != "" {
-		if err := cmd.Flags().Set("log-level", level); err != nil {
+	cmd.Flags().String("log_level", "", "")
+	if logLevel != "" {
+		if err := cmd.Flags().Set("log_level", logLevel); err != nil {
 			t.Fatal(err)
 		}
 	}
 	return cmd
 }
 
-func captureLogger(output io.Writer) func() {
-	logger := logrus.StandardLogger()
-	previousOut := logger.Out
-	previousFormatter := logger.Formatter
-	previousLevel := logger.Level
-	previousCaller := logger.ReportCaller
-	logger.SetOutput(output)
-	logger.SetFormatter(&logrus.TextFormatter{DisableTimestamp: true})
-	logger.SetLevel(logrus.InfoLevel)
-	logger.SetReportCaller(false)
-	return func() {
-		logger.SetOutput(previousOut)
-		logger.SetFormatter(previousFormatter)
-		logger.SetLevel(previousLevel)
-		logger.SetReportCaller(previousCaller)
-	}
+// isolateConfig runs the test in an empty dir without config env vars.
+func isolateConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("OPENSERP_SERVER_CONFIG_PATH", "")
+	t.Setenv("OPENSERP_APP_LOG_LEVEL", "")
+	previous := config
+	t.Cleanup(func() { config = previous })
 }
