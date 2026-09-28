@@ -137,6 +137,7 @@ func buildFingerprintBrowserOptions() core.BrowserOpts {
 		Timeout:            time.Second * time.Duration(config.App.Timeout),
 		BrowserPath:        config.App.BrowserPath,
 		Insecure:           config.Server.Insecure,
+		NoSandbox:          config.App.NoSandbox,
 		BlockResourceTypes: blockedResourceTypes,
 		BlockTrackers:      config.App.BlockTrackers,
 	}
