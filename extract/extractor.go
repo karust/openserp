@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/go-shiori/dom"
 )
 
 type Extractor struct {
@@ -131,18 +132,15 @@ func buildResult(req ExtractRequest, resp *FetchResponse, mode string, startedAt
 	if req.MaxBytes > 0 && len(body) > req.MaxBytes {
 		body = body[:req.MaxBytes]
 	}
-	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+	// dom.Parse sniffs the charset (like trafilatura.Extract), raw bodies are not always UTF-8.
+	root, err := dom.Parse(bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	linkBaseURL := effectiveBaseURL(doc, req.URL)
-	metadata := parseMetadata(doc, linkBaseURL)
-	content, contentErr := extractContent(
-		body,
-		req.URL,
-		linkBaseURL,
-		!req.FullPage,
-	)
+	doc := goquery.NewDocumentFromNode(root)
+	baseURL := effectiveBaseURL(doc, firstNonEmpty(resp.FinalURL, req.URL))
+	metadata := parseMetadata(doc, baseURL)
+	content, contentErr := extractContent(doc, baseURL, !req.FullPage)
 	result := &ExtractResult{
 		URL:         req.URL,
 		Title:       firstNonEmpty(content.Title, metadata.Title),

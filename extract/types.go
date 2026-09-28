@@ -69,6 +69,8 @@ type ExtractMeta struct {
 type FetchResponse struct {
 	StatusCode int
 	Body       []byte
+	// FinalURL is the document URL after redirects. Empty uses the request URL.
+	FinalURL string
 }
 
 type RawFetcher func(ctx context.Context, req ExtractRequest) (*FetchResponse, error)

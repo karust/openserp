@@ -40,19 +40,11 @@ const minCleanTextRunes = 250
 // comes back too thin for a page that clearly had content, it transparently
 // falls back to full-body extraction. When clean is false it skips article
 // detection entirely and converts the whole readable <body>.
-// extractContent keeps the fetched document URL separate from the effective
-// HTML link base. This matters for pages using <base href>.
-func extractContent(
-	htmlBytes []byte,
-	documentURL string,
-	linkBaseURL string,
-	clean bool,
-) (contentResult, error) {
-	if strings.TrimSpace(linkBaseURL) == "" {
-		linkBaseURL = documentURL
-	}
+// It mutates doc (absolute links, stripped scripts), so parse metadata first.
+func extractContent(doc *goquery.Document, baseURL string, clean bool) (contentResult, error) {
+	resolveContentURLs(doc, baseURL)
 	if !clean {
-		return extractFullBody(htmlBytes, linkBaseURL)
+		return extractFullBody(doc, baseURL)
 	}
 
 	var out contentResult
@@ -64,15 +56,18 @@ func extractContent(
 		IncludeLinks:    true,
 		Deduplicate:     true,
 	}
-	if parsed, err := url.Parse(documentURL); err == nil {
+	// Its readability/distiller fallbacks resolve leftover relative URLs against
+	// OriginalURL and never read <base>, so pass the effective base.
+	if parsed, err := url.Parse(baseURL); err == nil {
 		opts.OriginalURL = parsed
 	}
-	extracted, err := trafilatura.Extract(bytes.NewReader(htmlBytes), opts)
+	// ExtractDocument works on a clone, doc stays intact for the full-body fallback.
+	extracted, err := trafilatura.ExtractDocument(doc.Nodes[0], opts)
 	if err != nil {
 		return out, err
 	}
 	if extracted == nil || extracted.ContentNode == nil {
-		return extractFullBody(htmlBytes, linkBaseURL)
+		return extractFullBody(doc, baseURL)
 	}
 
 	var htmlBuf bytes.Buffer
@@ -85,7 +80,7 @@ func extractContent(
 	out.Description = strings.TrimSpace(extracted.Metadata.Description)
 	out.Lang = strings.TrimSpace(extracted.Metadata.Language)
 
-	markdown, err := htmlToMarkdown(out.HTML, linkBaseURL)
+	markdown, err := htmlToMarkdown(out.HTML, baseURL)
 	if err != nil {
 		return out, err
 	}
@@ -94,7 +89,7 @@ func extractContent(
 	// trafilatura was too aggressive: the cleaned article is near-empty but the
 	// raw page had real visible text. Prefer the fuller readable-body pass.
 	if len([]rune(out.Text)) < minCleanTextRunes {
-		if full, ferr := extractFullBody(htmlBytes, linkBaseURL); ferr == nil &&
+		if full, ferr := extractFullBody(doc, baseURL); ferr == nil &&
 			len([]rune(full.Text)) > len([]rune(out.Text)) {
 			// Keep trafilatura's metadata (title/description/lang) when present;
 			// it is usually cleaner than what we derive from the full body.
@@ -111,12 +106,8 @@ func extractContent(
 // non-content elements (scripts, styles, nav/header/footer chrome is kept since
 // for landing pages and indexes that "chrome" is the information). This is the
 // raw-er extraction used for clean=false and as the thin-output fallback.
-func extractFullBody(htmlBytes []byte, baseURL string) (contentResult, error) {
+func extractFullBody(doc *goquery.Document, baseURL string) (contentResult, error) {
 	var out contentResult
-	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(htmlBytes))
-	if err != nil {
-		return out, err
-	}
 	doc.Find("script,style,noscript,template,svg,iframe").Remove()
 
 	body := doc.Find("body").First()
