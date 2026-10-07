@@ -366,6 +366,18 @@ Simple global proxy:
 
 Advanced proxy configuration is available in [config.yaml](./config.yaml). You can enable tagged proxy pools and per-request override via `X-Use-Proxy: <tag>` or `X-Use-Proxy: direct`.
 
+## Custom DNS
+
+When the system DNS filters search domains, point direct lookups at another server:
+
+```bash
+./openserp serve --dns-server 8.8.8.8:53
+./openserp search google "query" --raw --dns-server 8.8.8.8:53
+```
+
+Or set `dns_server: 8.8.8.8:53` in [config.yaml](./config.yaml). This covers raw-mode
+and direct HTTP traffic; browser rendering still resolves via system or proxy DNS.
+
 ## API Docs
 
 Once the server is running, the interactive docs are available locally:
