@@ -325,6 +325,8 @@ func newRawTLSClient(query Query, proxyURL string, tlsProfile profiles.ClientPro
 		options = append(options, tlsclient.WithProxyUrl(proxyURL))
 	} else if query.GuardPrivateNetworks {
 		options = append(options, tlsclient.WithDialContext(GuardedDialContext))
+	} else if CustomDNSServer() != "" {
+		options = append(options, tlsclient.WithDialContext(CustomDNSDialContext))
 	}
 
 	return tlsclient.NewHttpClient(tlsclient.NewNoopLogger(), options...)
