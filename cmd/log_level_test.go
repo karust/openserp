@@ -74,6 +74,34 @@ func TestInitializeConfigLogLevel(t *testing.T) {
 	}
 }
 
+func TestInitializeConfigSaveLog(t *testing.T) {
+	cases := []struct {
+		name, env, file string
+		want            bool
+	}{
+		{"default writes the log file", "", "", true},
+		{"config turns it off", "", "app:\n  save_log: false\n", false},
+		{"env turns it off", "false", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateConfig(t)
+			t.Setenv("OPENSERP_APP_SAVE_LOG", tc.env)
+			if tc.file != "" {
+				if err := os.WriteFile("config.yaml", []byte(tc.file), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := initializeConfig(configCommand(t, "")); err != nil {
+				t.Fatal(err)
+			}
+			if config.App.SaveLog != tc.want {
+				t.Fatalf("save_log = %v, want %v", config.App.SaveLog, tc.want)
+			}
+		})
+	}
+}
+
 // Issue #44: no ./config.yaml is normal and must not log a warning.
 func TestInitializeConfigWithoutConfigFile(t *testing.T) {
 	isolateConfig(t)
