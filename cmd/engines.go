@@ -26,6 +26,11 @@ type engineSpec struct {
 	cfg         *EngineConfig
 }
 
+// disabled reports whether <engine>.disabled leaves the engine out of serve.
+func (s engineSpec) disabled() bool {
+	return s.cfg.Disabled
+}
+
 func (s engineSpec) opts() core.SearchEngineOptions {
 	return s.cfg.SearchEngineOptions
 }

@@ -97,12 +97,15 @@ func serve(cmd *cobra.Command, args []string) {
 	if config.Server.IsRawRequests {
 		logrus.Warn("Browserless results are very inconsistent or may not even work!")
 		serverOpts := buildServerOptions(corsCfg, proxyCfg, fingerprintBrowserOpts)
-		serv := core.NewServerWithOptions(config.Server.Host, config.Server.Port, serverOpts,
-			&rawEngine{name: "google"},
-			&rawEngine{name: "yandex"},
-			&rawEngine{name: "baidu"},
-			&rawEngine{name: "ecosia"},
-		)
+		var rawEngines []core.SearchEngine
+		for _, name := range enabledEngineNames("google", "yandex", "baidu", "ecosia") {
+			rawEngines = append(rawEngines, &rawEngine{name: name})
+		}
+		if len(rawEngines) == 0 {
+			logrus.Error("all search engines are disabled")
+			return
+		}
+		serv := core.NewServerWithOptions(config.Server.Host, config.Server.Port, serverOpts, rawEngines...)
 		if err := listenWithGracefulShutdown(serv, nil); err != nil {
 			logrus.Error(err)
 		}
@@ -622,6 +625,10 @@ func browserEngineSpecs() []browserEngineSpec {
 	specs := engineSpecs()
 	out := make([]browserEngineSpec, 0, len(specs))
 	for _, s := range specs {
+		if s.disabled() {
+			logrus.Infof("Engine %s is disabled in config", s.name)
+			continue
+		}
 		out = append(out, browserEngineSpec{
 			name:        s.name,
 			opts:        s.opts(),
@@ -633,6 +640,10 @@ func browserEngineSpecs() []browserEngineSpec {
 }
 
 func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) ([]core.SearchEngine, func() error, core.BrowserResolver, error) {
+	specs := browserEngineSpecs()
+	if len(specs) == 0 {
+		return nil, nil, nil, fmt.Errorf("all search engines are disabled")
+	}
 	launchProxyURL := ""
 	if strings.TrimSpace(proxyCfg.Proxies.Global) != "" && !proxyCfg.Proxies.AllowRequestProxyURL {
 		launchProxyURL = proxyCfg.Proxies.Global
@@ -650,7 +661,6 @@ func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) (
 		idleTTL = 0
 	}
 	pool := newBrowserPool(baseOpts, launchProxyURL, laneStore, maxProcesses, idleTTL)
-	specs := browserEngineSpecs()
 
 	engines := make([]core.SearchEngine, 0, len(specs))
 	for idx, spec := range specs {
@@ -728,4 +738,17 @@ func entryHasTag(entry core.ProxyEntryConfig, tag string) bool {
 
 func init() {
 	RootCmd.AddCommand(serveCMD)
+}
+
+// enabledEngineNames drops the engines whose <engine>.disabled is set.
+func enabledEngineNames(names ...string) []string {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if spec, ok := resolveEngineSpec(name); ok && spec.disabled() {
+			logrus.Infof("Engine %s is disabled in config", name)
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }

@@ -77,6 +77,8 @@ type AppConfig struct {
 type EngineConfig struct {
 	core.SearchEngineOptions `mapstructure:",squash"`
 	Proxy                    string `mapstructure:"proxy"`
+	// Disabled leaves the engine out of serve: no endpoints, not used by mega.
+	Disabled bool `mapstructure:"disabled"`
 }
 
 type GoogleConfig struct {
@@ -482,6 +484,10 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("cors.allow_headers", "Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Proxy-URL, X-Proxy-Country, X-Proxy-Class, X-Proxy-Provider, X-Proxy-Session-ID, X-Request-ID, X-Tenant")
 	v.SetDefault("cors.max_age", 86400)
 	v.SetDefault("captcha.solver_enabled", false)
+	for _, s := range engineSpecs() {
+		// A default makes OPENSERP_<ENGINE>_DISABLED bindable without a config entry.
+		v.SetDefault(s.name+".disabled", false)
+	}
 	resolve := core.DefaultURLResolveConfig()
 	v.SetDefault("google.resolve_urls", resolve.URLs)
 	v.SetDefault("google.resolve_concurrency", resolve.Concurrency)
