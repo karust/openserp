@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version               = "0.8.13"
+	version               = "0.8.14"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -34,7 +34,7 @@ type Config struct {
 	CORS             CORSConfig           `mapstructure:"cors"`
 	Captcha          CaptchaConfig        `mapstructure:"captcha"`
 	Config2Capcha    Config2Captcha       `mapstructure:"2captcha"`
-	GoogleConfig     EngineConfig         `mapstructure:"google"`
+	GoogleConfig     GoogleConfig         `mapstructure:"google"`
 	YandexConfig     EngineConfig         `mapstructure:"yandex"`
 	BaiduConfig      EngineConfig         `mapstructure:"baidu"`
 	BingConfig       EngineConfig         `mapstructure:"bing"`
@@ -79,6 +79,11 @@ type EngineConfig struct {
 	Proxy                    string `mapstructure:"proxy"`
 	// Disabled leaves the engine out of serve: no endpoints, not used by mega.
 	Disabled bool `mapstructure:"disabled"`
+}
+
+type GoogleConfig struct {
+	EngineConfig          `mapstructure:",squash"`
+	core.URLResolveConfig `mapstructure:",squash"`
 }
 
 type CacheConfig struct {
@@ -137,6 +142,7 @@ var flagToConfigKey = map[string]string{
 	"cb_recovery":             "circuit_breaker.recovery_seconds",
 	"cb_successes":            "circuit_breaker.successes",
 	"log_format":              "app.log_format",
+	"resolve-urls":            "google.resolve_urls",
 }
 
 var RootCmd = &cobra.Command{
@@ -181,19 +187,18 @@ var RootCmd = &cobra.Command{
 	},
 }
 
-// logLevelOverride parses app.log_level, which replaces the -q/-v/-d log level.
-// A value from env or config yields to those flags when they are typed.
+// Explicit verbosity flags override app.log_level from env or config.
 func logLevelOverride(flags *pflag.FlagSet, raw string) (logrus.Level, bool, error) {
+	typed := flags.Changed("quiet") || flags.Changed("verbose") || flags.Changed("debug")
 	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	if raw == "" || (typed && !flags.Changed("log_level")) {
 		return 0, false, nil
 	}
 	level, err := logrus.ParseLevel(raw)
 	if err != nil || level < logrus.ErrorLevel {
 		return 0, false, fmt.Errorf("invalid log level %q: expected error, warn, info, debug or trace", raw)
 	}
-	typed := flags.Changed("quiet") || flags.Changed("verbose") || flags.Changed("debug")
-	return level, flags.Changed("log_level") || !typed, nil
+	return level, true, nil
 }
 
 func commandDefaultsToQuiet(cmd *cobra.Command) bool {
@@ -314,7 +319,7 @@ func initializeConfig(cmd *cobra.Command) error {
 		// No ./config.* is normal for go install and release binaries, defaults apply.
 		var notFound viper.ConfigFileNotFoundError
 		if !errors.As(err, &notFound) {
-			logrus.Warnf("cannot read config: %v", err)
+			return fmt.Errorf("cannot read config: %w", err)
 		}
 	}
 
@@ -349,6 +354,14 @@ func initializeConfig(cmd *cobra.Command) error {
 	err = v.Unmarshal(&config)
 	if err != nil {
 		return fmt.Errorf("cannot unmarshall config: %v", err)
+	}
+	// Keep boolean true distinct from integer 1 (top one result).
+	config.GoogleConfig.URLs = v.GetString("google.resolve_urls")
+	if _, _, err := core.ParseResolveURLs(config.GoogleConfig.URLs); err != nil {
+		return fmt.Errorf("invalid google.resolve_urls: %w", err)
+	}
+	if config.GoogleConfig.Concurrency <= 0 || config.GoogleConfig.Timeout <= 0 || config.GoogleConfig.Cooldown <= 0 {
+		return fmt.Errorf("google.resolve_concurrency, google.resolve_timeout and google.resolve_cooldown must be positive")
 	}
 
 	if _, err := core.ParseBlockedResourceTypes(config.App.BlockResources); err != nil {
@@ -475,6 +488,11 @@ func setConfigDefaults(v *viper.Viper) {
 		// A default makes OPENSERP_<ENGINE>_DISABLED bindable without a config entry.
 		v.SetDefault(s.name+".disabled", false)
 	}
+	resolve := core.DefaultURLResolveConfig()
+	v.SetDefault("google.resolve_urls", resolve.URLs)
+	v.SetDefault("google.resolve_concurrency", resolve.Concurrency)
+	v.SetDefault("google.resolve_timeout", resolve.Timeout)
+	v.SetDefault("google.resolve_cooldown", resolve.Cooldown)
 }
 
 func init() {

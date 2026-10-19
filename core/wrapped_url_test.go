@@ -1,10 +1,39 @@
 package core
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 	"unicode/utf8"
 )
+
+func TestEnrichResultUnwrapsPlainGoogleDestinations(t *testing.T) {
+	const destination = "https://example.org/article?utm_source=google"
+	for _, wrapper := range []string{
+		"/url?q=", "https://www.google.com/url?url=",
+		"https://www.google.co.uk/goto?url=",
+		"https://www.googleadservices.com/pagead/aclk?adurl=",
+	} {
+		t.Run(wrapper, func(t *testing.T) {
+			ctx := EnrichContext{Engine: "google"}
+			got := EnrichResult(SearchResult{URL: wrapper + url.QueryEscape(destination)}, ctx)
+			want := EnrichResult(SearchResult{URL: destination}, ctx)
+			if got.URL != want.URL || got.Domain != want.Domain || got.ID != want.ID {
+				t.Fatalf("wrapped result = %+v; direct result = %+v", got, want)
+			}
+		})
+	}
+	for _, raw := range []string{
+		"/goto?url=opaque-token",
+		"/url?q=javascript%3Aalert%281%29",
+		"/url?q=%2Frelative",
+		"https://google.example.org/url?q=" + url.QueryEscape(destination),
+	} {
+		if got := EnrichResult(SearchResult{URL: raw}, EnrichContext{Engine: "google"}); got.URL != raw {
+			t.Errorf("unexpected rewrite: %q -> %q", raw, got.URL)
+		}
+	}
+}
 
 // Captured from a live Google SERP.
 const (

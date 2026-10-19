@@ -121,14 +121,9 @@ type SearchResult struct {
 	Description string `json:"description"`
 	// Ad reports whether the result is sponsored.
 	Ad bool `json:"ad"`
-	// DisplayURL is the attribution breadcrumb the engine renders under the
-	// title, e.g. "https://www.pcmag.com › ... › VPN". Engines that expose it
-	// should fill it in: when a SERP hides the real href behind a redirect
-	// wrapper, this is what the result's domain is recovered from.
+	// DisplayURL preserves attribution when the destination URL is hidden.
 	DisplayURL string `json:"display_url,omitempty"`
-	// SourceName is the human-readable site name shown beside the favicon,
-	// e.g. "PCMag" or "Reddit · r/VPN". It is the last resort for attribution
-	// on result blocks that render no breadcrumb at all.
+	// SourceName is the visible site name, used when no breadcrumb is available.
 	SourceName string `json:"source_name,omitempty"`
 	// Features carries extracted SERP modules alongside the legacy result stream.
 	Features []SerpFeature `json:"-"`
@@ -298,6 +293,13 @@ type Query struct {
 	ExtractMode string
 	// ExtractMinRunes overrides the auto-mode escalation floor (0 = default).
 	ExtractMinRunes int
+	// ResolveURLs swaps opaque engine redirect links (Google /goto tokens) for
+	// their destination URLs. Ads are never resolved.
+	ResolveURLs bool
+	// ResolveTop limits resolution to the first N organic results (0 = all).
+	ResolveTop int
+	// ResolveConfig supplies server defaults and redirect request limits.
+	ResolveConfig *URLResolveConfig
 	// ProxyURL is a direct proxy URL used by raw HTTP search paths.
 	ProxyURL string
 	// ProxyCountry identifies the proxy market country for cache/error metadata.
@@ -327,9 +329,10 @@ func (q Query) String() string {
 		maskedProxyURL = MaskProxyURL(q.ProxyURL)
 	}
 	return fmt.Sprintf(
-		"{Text:%s LangCode:%s Region:%s DateInterval:%s Filetype:%s Site:%s Limit:%d Start:%d Filter:%t Features:%t Extract:%t ExtractTop:%d ExtractMode:%s ProxyURL:%s ProxyCountry:%s ProxyClass:%s ProxyProvider:%s ProxySessionID:%s ProxyOverride:%s Insecure:%t}",
+		"{Text:%s LangCode:%s Region:%s DateInterval:%s Filetype:%s Site:%s Limit:%d Start:%d Filter:%t Features:%t Extract:%t ExtractTop:%d ExtractMode:%s ResolveURLs:%t ResolveTop:%d ProxyURL:%s ProxyCountry:%s ProxyClass:%s ProxyProvider:%s ProxySessionID:%s ProxyOverride:%s Insecure:%t}",
 		q.Text, q.LangCode, q.Region, q.DateInterval, q.Filetype, q.Site,
 		q.Limit, q.Start, q.Filter, q.Features, q.Extract, q.ExtractTop, q.ExtractMode,
+		q.ResolveURLs, q.ResolveTop,
 		maskedProxyURL, q.ProxyCountry, q.ProxyClass, q.ProxyProvider,
 		q.ProxySessionID, q.ProxyOverride, q.Insecure,
 	)
@@ -410,6 +413,14 @@ func (searchQuery *Query) InitFromContext(reqCtx *fiber.Ctx) error {
 	if err := parseExtractParams(reqCtx, searchQuery); err != nil {
 		return err
 	}
+	resolveDefault := ""
+	if searchQuery.ResolveConfig != nil {
+		resolveDefault = searchQuery.ResolveConfig.URLs
+	}
+	searchQuery.ResolveURLs, searchQuery.ResolveTop, err = ParseResolveURLs(reqCtx.Query("resolve_urls", resolveDefault))
+	if err != nil {
+		return errInvalidParam(fmt.Sprintf("resolve_urls %v", err))
+	}
 
 	searchQuery.ProxyOverride, err = NormalizeProxyRequestOverride(reqCtx.Get("X-Use-Proxy"))
 	if err != nil {
@@ -487,6 +498,23 @@ func parseExtractParams(reqCtx *fiber.Ctx, q *Query) error {
 	}
 
 	return nil
+}
+
+// ParseResolveURLs reads the bool-or-int resolve_urls knob. Integers are
+// checked first so "1" means top 1, not "all": empty/true resolves every
+// wrapped link, N the first N organic results, 0/false nothing.
+func ParseResolveURLs(raw string) (enabled bool, top int, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return true, 0, nil
+	}
+	if n, convErr := strconv.Atoi(raw); convErr == nil && n >= 0 {
+		return n > 0, n, nil
+	}
+	if enabled, convErr := strconv.ParseBool(raw); convErr == nil {
+		return enabled, 0, nil
+	}
+	return false, 0, errors.New("must be a boolean or a non-negative integer")
 }
 
 // clampExtractTop bounds a requested extraction depth to [1, maxExtractTop].

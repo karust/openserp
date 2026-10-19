@@ -21,6 +21,7 @@ func TestLogLevelOverride(t *testing.T) {
 		{name: "unset"},
 		{name: "config", raw: " DEBUG ", want: logrus.DebugLevel, ok: true},
 		{name: "typed -v beats env/config", raw: "error", typed: []string{"verbose"}},
+		{name: "typed -v ignores invalid env/config", raw: "bogus", typed: []string{"verbose"}},
 		{name: "--log_level beats typed -d", raw: "error", typed: []string{"log_level", "debug"}, want: logrus.ErrorLevel, ok: true},
 	}
 	for _, tc := range cases {
@@ -91,6 +92,16 @@ func TestInitializeConfigWithoutConfigFile(t *testing.T) {
 	}
 }
 
+func TestInitializeConfigRejectsMalformedFile(t *testing.T) {
+	isolateConfig(t)
+	if err := os.WriteFile("config.yaml", []byte("app: [\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := initializeConfig(configCommand(t, "")); err == nil {
+		t.Fatal("expected a config parse error")
+	}
+}
+
 func configCommand(t *testing.T, logLevel string) *cobra.Command {
 	t.Helper()
 	cmd := &cobra.Command{Use: "test"}
@@ -109,6 +120,9 @@ func isolateConfig(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv("OPENSERP_SERVER_CONFIG_PATH", "")
 	t.Setenv("OPENSERP_APP_LOG_LEVEL", "")
+	for _, key := range []string{"OPENSERP_GOOGLE_RESOLVE_URLS", "OPENSERP_GOOGLE_RESOLVE_CONCURRENCY", "OPENSERP_GOOGLE_RESOLVE_TIMEOUT", "OPENSERP_GOOGLE_RESOLVE_COOLDOWN"} {
+		t.Setenv(key, "")
+	}
 	previous := config
 	t.Cleanup(func() { config = previous })
 }

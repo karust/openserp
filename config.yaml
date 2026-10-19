@@ -77,6 +77,10 @@ captcha:
 google:
   rate_requests: 60 # Allowed average requests per minute
   rate_burst: 3 # Burst requests before limiter applies
+  resolve_urls: true # Default: true = all, false/0 = off, N = top N organic results
+  resolve_concurrency: 4 # Concurrent redirect requests per search
+  resolve_timeout: 3s # Total URL resolution budget per search
+  resolve_cooldown: 10m # Pause resolution through an exit after a challenge
   #captcha: true # Engine-level solver flag (also requires captcha.solver_enabled=true)
   #disabled: true # Leave this engine out of serve: no endpoints, not used by mega (env: OPENSERP_GOOGLE_DISABLED)
 

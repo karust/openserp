@@ -47,6 +47,7 @@ paths:
         - $ref: "#/components/parameters/StartQuery"
         - $ref: "#/components/parameters/FilterQuery"
         - $ref: "#/components/parameters/FeaturesQuery"
+        - $ref: "#/components/parameters/ResolveURLsQuery"
         - $ref: "#/components/parameters/ExtractQuery"
         - $ref: "#/components/parameters/ExtractModeQuery"
         - $ref: "#/components/parameters/MinRunesQuery"
@@ -324,6 +325,7 @@ paths:
         - $ref: "#/components/parameters/StartQuery"
         - $ref: "#/components/parameters/FilterQuery"
         - $ref: "#/components/parameters/FeaturesQuery"
+        - $ref: "#/components/parameters/ResolveURLsQuery"
         - $ref: "#/components/parameters/EnginesQuery"
         - $ref: "#/components/parameters/MegaModeQuery"
         - $ref: "#/components/parameters/MegaDedupeQuery"
@@ -804,6 +806,24 @@ components:
         supported by the engine.
       schema:
         type: boolean
+        default: true
+    ResolveURLsQuery:
+      name: resolve_urls
+      in: query
+      required: false
+      description: >
+        Google only. When Google hides result links behind encrypted `/goto`
+        redirects, follow one redirect hop per link to return the destination
+        URL. The destination page is not fetched, and ad links are never
+        resolved. `true` resolves every wrapped link, `N` only the first N
+        organic results, `0`/`false` disables it. Links that fail to resolve
+        keep the redirect URL; `domain` still comes from the visible attribution.
+        When omitted, uses the server's `google.resolve_urls` setting (default `true`).
+      schema:
+        oneOf:
+          - type: boolean
+          - type: integer
+            minimum: 0
         default: true
     EnginesQuery:
       name: engines
@@ -1392,6 +1412,7 @@ components:
           type: string
           description: >
             For usable destination URLs: `s_` + hex(first 8 bytes of MD5(engine|normalized_url)).
+            Plaintext Google redirects are unwrapped before normalization.
             Normalized URL: lowercase scheme+host, trailing slash stripped, utm_*/fbclid/gclid
             tracking params removed. Same usable URL yields the same ID across requests.
             For wrapped or unusable URLs, a best-effort ID uses visible domain, source name,
@@ -1409,6 +1430,9 @@ components:
           example: The Go Programming Language
         url:
           type: string
+          description: >
+            Destination URL. Google `/goto` redirects are resolved unless
+            `resolve_urls=false`; resolved links drop Google's `#:~:text=` highlight directives.
           example: https://go.dev/
         display_url:
           type: string

@@ -11,7 +11,6 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/karust/openserp/core"
-	"github.com/sirupsen/logrus"
 )
 
 // Matches a literal zero result count, e.g. "about 0 results". Requires "0"
@@ -50,26 +49,16 @@ func parseGoogleDocument(doc *goquery.Document) []core.SearchResult {
 	for i := range sel.Nodes {
 		item := sel.Eq(i)
 
-		// Skip items without an h3 element (which indicates a search result)
-		if item.Find(Selectors.Title).Length() == 0 {
+		titleTag := item.Find(Selectors.Title).First()
+		if titleTag.Length() == 0 {
 			continue
 		}
 
-		// Find URL - look for the anchor that contains the h3 title
-		linkTag := item.Find(Selectors.Title).Parent()
-		if !linkTag.Is("a") {
-			linkTag = item.Find(Selectors.Title).Closest("a")
-		}
-
-		link, exists := linkTag.Attr("href")
-		if !exists || link == "" || link == "#" {
+		link, _ := titleTag.Closest(Selectors.Link).Attr("href")
+		link = strings.TrimSpace(link)
+		if link == "" || link == "#" {
 			continue
 		}
-		link = strings.Trim(link, " ")
-
-		// Find title - this is inside the h3 element
-		titleTag := item.Find(Selectors.Title)
-		title := titleTag.Text()
 
 		isAd := item.Is(Selectors.Ad) || item.Find(Selectors.Ad).Length() > 0
 
@@ -90,38 +79,20 @@ func parseGoogleDocument(doc *goquery.Document) []core.SearchResult {
 		}
 		desc := descTag.Text()
 
-		if link != "" && link != "#" {
-			resultRank, absoluteRank := rank.Next(isAd)
-			result := core.SearchResult{
-				Rank:         resultRank,
-				AbsoluteRank: absoluteRank,
-				URL:          link,
-				Title:        title,
-				Description:  desc,
-				Ad:           isAd,
-				// Visible attribution, carried alongside the href so the
-				// response builder can still name the domain when Google
-				// serves an encrypted link wrapper instead of a destination.
-				DisplayURL: strings.TrimSpace(item.Find(Selectors.Cite).First().Text()),
-				SourceName: strings.TrimSpace(item.Find(Selectors.SourceName).First().Text()),
-			}
-
-			results = append(results, result)
-		}
+		resultRank, absoluteRank := rank.Next(isAd)
+		results = append(results, core.SearchResult{
+			Rank:         resultRank,
+			AbsoluteRank: absoluteRank,
+			URL:          link,
+			Title:        titleTag.Text(),
+			Description:  desc,
+			Ad:           isAd,
+			DisplayURL:   strings.TrimSpace(item.Find(Selectors.Cite).First().Text()),
+			SourceName:   strings.TrimSpace(item.Find(Selectors.SourceName).First().Text()),
+		})
 	}
 
-	logrus.WithField("document_size", len(doc.Text())).Trace(
-		fmt.Sprintf("Google search document size: %d", len(doc.Text())),
-	)
 	return core.AttachFeaturesToFirstResult(core.DeduplicateResults(results), extractGoogleFeatures(doc))
-}
-
-func classifyGoogleRawHTML(body []byte) error {
-	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	return classifyGoogleDocument(doc)
 }
 
 func isGoogleSorryURL(rawURL string) bool {
@@ -202,32 +173,30 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 	if err != nil {
 		return nil, err
 	}
-	htmlStatus := classifyGoogleRawHTML(body)
-	if htmlStatus != nil && !errors.Is(htmlStatus, core.ErrEmptyResult) {
-		return nil, htmlStatus
-	}
-
-	parsedResults, err := ParseHTML(bytes.NewReader(body))
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	if len(parsedResults) == 0 {
-		if errors.Is(htmlStatus, core.ErrEmptyResult) {
-			return []core.SearchResult{}, nil
-		}
-		return nil, fmt.Errorf("%w: google raw search returned no parseable results", core.ErrParser)
+	htmlStatus := classifyGoogleDocument(doc)
+	if errors.Is(htmlStatus, core.ErrEmptyResult) {
+		return []core.SearchResult{}, nil
+	}
+	if htmlStatus != nil {
+		return nil, htmlStatus
 	}
 
+	parsedResults := parseGoogleDocument(doc)
+	if len(parsedResults) == 0 {
+		return nil, fmt.Errorf("%w: google raw search returned no parseable results", core.ErrParser)
+	}
+	core.ResolveWrappedResultURLs(ctx, parsedResults, query, googleURL)
+	parsedResults = core.DeduplicateResults(parsedResults)
+
 	if query.Start > 0 {
-		organicIdx := 0
 		for i := range parsedResults {
-			if parsedResults[i].Ad {
-				continue
+			if !parsedResults[i].Ad {
+				parsedResults[i].Rank += query.Start
 			}
-			organicIdx++
-			parsedResults[i].Rank = query.Start + organicIdx
-		}
-		for i := range parsedResults {
 			if parsedResults[i].AbsoluteRank > 0 {
 				parsedResults[i].AbsoluteRank += query.Start
 			}

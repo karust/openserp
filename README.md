@@ -348,10 +348,11 @@ Common parameters:
 
 Engine-specific parameters:
 
-| Parameter  | Supported engines | Notes                                                                  |
-| ---------- | ----------------- | ---------------------------------------------------------------------- |
-| `filter`   | `google`          | Duplicate filter: `true` hides similar results, `false` includes them. |
-| `features` | browser `Search`  | Populate `serp_features[]` from the live page. Defaults to `true`.     |
+| Parameter      | Supported engines | Notes                                                                                                                            |
+| -------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `filter`       | `google`          | Duplicate filter: `true` hides similar results, `false` includes them.                                                           |
+| `features`     | browser `Search`  | Populate `serp_features[]` from the live page. Defaults to `true`.                                                               |
+| `resolve_urls` | `google`          | Turn Google `/goto` redirect links into destination URLs (one redirect hop, ads skipped). `true` (default), `false`, or top `N`. |
 
 ## Proxy Support
 
