@@ -113,7 +113,7 @@ func (ddg *DuckDuckGo) parseResults(results rod.Elements, pageNum int) []core.Se
 		desc := core.FirstNonEmptyText(r, Selectors.Desc...)
 
 		// Check if it's an ad
-		isAd := ddgElementHasAdMarker(r)
+		isAd := ddgElementHasAdMarker(r) || isDDGAdURL(hrefStr)
 		resultRank, absoluteRank := rank.Next(isAd)
 
 		result := core.SearchResult{
