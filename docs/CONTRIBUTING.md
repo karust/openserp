@@ -48,6 +48,18 @@ Notes:
 - Integration tests are gated by `testutil.RequireIntegration(t)`.
 - Do not create browser instances in `init()` or package-level variables.
 
+### Release smoke check
+
+```bash
+make build
+./scripts/smoke-check.sh
+```
+
+The script rebuilds the binary, starts `serve` on `127.0.0.1:18070`, polls
+`/health` until ready, then shuts the server down. It exits non-zero when the
+server does not become healthy. Override with `SMOKE_HOST`, `SMOKE_PORT`,
+`SMOKE_TIMEOUT` (seconds), or `SMOKE_BINARY`.
+
 ## Adding a New Search Engine
 
 ### 1) Create engine package
