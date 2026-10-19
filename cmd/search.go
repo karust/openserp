@@ -81,10 +81,14 @@ func search(cmd *cobra.Command, args []string) error {
 		Filter:   true,
 		Features: searchOpts.features,
 		Insecure: config.Server.Insecure,
+
+		ResolveConfig: &config.GoogleConfig.URLResolveConfig,
 	}
 	if err := applyCLIExtractFlag(&query, searchOpts.extract); err != nil {
 		return err
 	}
+	// initializeConfig already rejected invalid values.
+	query.ResolveURLs, query.ResolveTop, _ = core.ParseResolveURLs(config.GoogleConfig.URLs)
 
 	captchaSolverEnabled, captchaSolverAPIKey, err := resolveCaptchaSolverConfig()
 	if err != nil {
@@ -431,6 +435,7 @@ func init() {
 	searchCMD.Flags().BoolVar(&searchOpts.full, "full", false, "Include SERP features in text/markdown output")
 	searchCMD.Flags().BoolVar(&searchOpts.features, "features", false, "Parse SERP feature modules (browser mode)")
 	searchCMD.Flags().IntVar(&searchOpts.extract, "extract", 0, "Extract clean content from the top N results using auto mode (1-5)")
+	searchCMD.Flags().String("resolve-urls", "true", "Resolve Google redirect links to destination URLs: true, false, or top N")
 	searchCMD.Flags().IntVar(&searchOpts.timeout, "search-timeout", 60, "Overall search timeout in seconds")
 	RootCmd.AddCommand(searchCMD)
 }

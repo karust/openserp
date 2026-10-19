@@ -1,13 +1,77 @@
 package google
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/karust/openserp/core"
 	"github.com/karust/openserp/testutil"
 )
+
+func TestRawSearchDeduplicatesResolvedURLsAndPreservesRanks(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/search":
+			_, _ = io.WriteString(w, `<div class="tF2Cxc"><a href="/goto?url=first"><h3>First</h3></a></div>
+<div class="tF2Cxc"><a href="/goto?url=second"><h3>Duplicate</h3></a></div>
+<div class="tF2Cxc"><a href="https://example.org/other"><h3>Other</h3></a></div>`)
+		case "/goto":
+			w.Header().Set("Location", "https://example.org/article")
+			w.WriteHeader(http.StatusFound)
+		default:
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	upstream.Config.SetKeepAlivesEnabled(false)
+	defer upstream.Close()
+
+	// Tunnel Google requests to the local fixture server.
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dst, err := net.Dial("tcp", upstream.Listener.Addr().String())
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer dst.Close()
+		conn, buffered, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		_, _ = io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")
+		go func() { _, _ = io.Copy(dst, buffered) }()
+		_, _ = io.Copy(conn, dst)
+	}))
+	defer proxy.Close()
+
+	for _, start := range []int{0, 10} {
+		t.Run(fmt.Sprint(start), func(t *testing.T) {
+			results, err := Search(context.Background(), core.Query{
+				Text: "test", Start: start, ProxyURL: proxy.URL, Insecure: true, ResolveURLs: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(results) != 2 || results[0].URL != "https://example.org/article" || results[1].URL != "https://example.org/other" {
+				t.Fatalf("expected distinct destinations, got %+v", results)
+			}
+			for i, rank := range []int{start + 1, start + 3} {
+				if results[i].Rank != rank || results[i].AbsoluteRank != rank {
+					t.Errorf("result %d ranks = %d/%d, want %d", i, results[i].Rank, results[i].AbsoluteRank, rank)
+				}
+			}
+		})
+	}
+}
 
 func TestGoogleParseHTMLFixtures(t *testing.T) {
 	t.Parallel()
@@ -114,11 +178,11 @@ func TestGoogleClassifyRawHTML(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			body, err := io.ReadAll(testutil.ResponseFromFixture(t, tt.fixture).Body)
+			doc, err := goquery.NewDocumentFromReader(testutil.ResponseFromFixture(t, tt.fixture).Body)
 			if err != nil {
 				t.Fatalf("read fixture body: %v", err)
 			}
-			err = classifyGoogleRawHTML(body)
+			err = classifyGoogleDocument(doc)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("expected %v for %s, got %v", tt.want, tt.fixture, err)
 			}

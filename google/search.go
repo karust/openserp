@@ -467,6 +467,12 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 		searchResults = append(searchResults, srchRes)
 	}
 
+	resolveQuery := query
+	if gogl.Browser.ProxyURL != "" {
+		resolveQuery.ProxyURL = gogl.Browser.ProxyURL
+	}
+	resolveQuery.Insecure = resolveQuery.Insecure || gogl.Browser.Insecure
+	core.ResolveWrappedResultURLs(ctx, searchResults, resolveQuery, url)
 	deduped := core.DeduplicateResults(searchResults)
 	if len(deduped) == 0 {
 		if pageErr := gogl.classifyPage(page, query.ProxyURL); pageErr != nil {

@@ -337,6 +337,18 @@ func normalizeURL(raw string) string {
 		return raw
 	}
 
+	// Plaintext redirects can expose a destination; encrypted tokens cannot.
+	if isGoogleRedirectURL(u) {
+		query := u.Query()
+		for _, key := range []string{"url", "q", "adurl"} {
+			candidate := strings.TrimSpace(query.Get(key))
+			if IsUsableResultURL(candidate) {
+				u, _ = url.Parse(candidate)
+				break
+			}
+		}
+	}
+
 	u.Scheme = strings.ToLower(u.Scheme)
 	u.Host = strings.ToLower(u.Host)
 

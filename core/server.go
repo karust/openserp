@@ -101,6 +101,8 @@ type ServerOptions struct {
 	BrowserResolver BrowserResolver
 	// Extract configures the URL extraction endpoint and search enrichment.
 	Extract extractpkg.Config
+	// GoogleResolve configures Google result URL resolution.
+	GoogleResolve URLResolveConfig
 }
 
 type BrowserResolver func(proxyURL string) (*Browser, error)
@@ -126,6 +128,7 @@ func DefaultServerOptions() ServerOptions {
 		// command re-derives from the configured values.
 		RequestTimeout: RequestTimeoutForRetries(30*time.Second, DefaultRetryConfig()),
 		Extract:        extractpkg.DefaultConfig(),
+		GoogleResolve:  DefaultURLResolveConfig(),
 	}
 }
 
@@ -255,7 +258,7 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 		c.SetUserContext(requestCtx)
 	}
 
-	q := Query{}
+	q := Query{ResolveConfig: &s.opts.GoogleResolve}
 	if err := q.InitFromContext(c); err != nil {
 		WithRequest(c.UserContext()).WithError(err).Warn("Invalid query parameters")
 		return err
@@ -946,7 +949,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string) error {
 	defer setNetworkBytesHeader(c, requestCtx)
 	defer setBrowserProfileHeader(c, requestCtx)
 
-	q := Query{}
+	q := Query{ResolveConfig: &s.opts.GoogleResolve}
 	if err := q.InitFromContext(c); err != nil {
 		WithRequest(c.UserContext()).WithError(err).Warn("Invalid query parameters")
 		return err

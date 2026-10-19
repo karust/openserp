@@ -32,7 +32,7 @@ func (s engineSpec) opts() core.SearchEngineOptions {
 
 func engineSpecs() []engineSpec {
 	return []engineSpec{
-		{name: "google", factory: newEngine(google.New), rawSearchFn: google.Search, parseHTMLFn: google.ParseHTML, cfg: &config.GoogleConfig},
+		{name: "google", factory: newEngine(google.New), rawSearchFn: google.Search, parseHTMLFn: google.ParseHTML, cfg: &config.GoogleConfig.EngineConfig},
 		{name: "yandex", factory: newEngine(yandex.New), rawSearchFn: yandex.Search, parseHTMLFn: yandex.ParseHTML, cfg: &config.YandexConfig},
 		{name: "baidu", factory: newEngine(baidu.New), rawSearchFn: baidu.Search, parseHTMLFn: baidu.ParseHTML, cfg: &config.BaiduConfig},
 		{name: "bing", factory: newEngine(bing.New), parseHTMLFn: bing.ParseHTML, cfg: &config.BingConfig},

@@ -167,6 +167,7 @@ func buildServerOptions(corsCfg core.CORSConfig, proxyCfg core.ProxyConfig, fing
 		MegaTimeout:            config.App.MegaTimeout,
 		RequestTimeout:         core.RequestTimeoutForRetries(engineTimeout, retryCfg),
 		Extract:                config.Extract,
+		GoogleResolve:          config.GoogleConfig.URLResolveConfig,
 		Resilience: core.ResilientConfig{
 			Retry: retryCfg,
 			CircuitBreaker: core.CircuitBreakerConfig{
