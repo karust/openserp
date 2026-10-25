@@ -16,6 +16,7 @@ var Selectors = struct {
 	DescFallback     string
 	DescAny          string
 	AdTitle          string
+	Cite             string
 }{
 	Captcha: []string{"div.captcha", "div.captcha_header"},
 	// CaptchaMarkers/NoResultsMarkers are checked against lowercased page text
@@ -44,4 +45,7 @@ var Selectors = struct {
 	DescFallback:   "div.b_caption div",
 	DescAny:        "p",
 	AdTitle:        "h2 a",
+	// Cite is the visible "site › path" line; it attributes rows whose link
+	// can't be unwrapped (video rows open Bing's own player).
+	Cite: "cite",
 }

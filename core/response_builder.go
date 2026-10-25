@@ -325,16 +325,14 @@ func normalizeURL(raw string) string {
 	if raw == "" {
 		return raw
 	}
-	// Unwrap Bing redirect URLs: bing.com/ck/a?...&u=a1<base64url>
-	if strings.Contains(raw, "bing.com/ck/a") {
-		if unwrapped := unwrapBingURL(raw); unwrapped != "" {
-			raw = unwrapped
-		}
-	}
-
 	u, err := url.Parse(raw)
 	if err != nil {
 		return raw
+	}
+	if isBingClickURL(u) {
+		if unwrapped := UnwrapBingURL(raw); unwrapped != "" {
+			u, _ = url.Parse(unwrapped)
+		}
 	}
 
 	// Plaintext redirects can expose a destination; encrypted tokens cannot.
@@ -371,32 +369,23 @@ func normalizeURL(raw string) string {
 	return normalized
 }
 
-// unwrapBingURL extracts the real destination from a Bing click-tracking URL.
-// Bing encodes as: u=a1<url-safe-base64-without-padding>
-func unwrapBingURL(raw string) string {
+// UnwrapBingURL extracts the real destination from a Bing click-tracking URL,
+// or returns "" when raw isn't one. Bing encodes as: u=a1<url-safe-base64-without-padding>
+func UnwrapBingURL(raw string) string {
 	u, err := url.Parse(raw)
-	if err != nil {
+	if err != nil || !isBingClickURL(u) {
 		return ""
 	}
 	uParam := u.Query().Get("u")
 	if !strings.HasPrefix(uParam, "a1") {
 		return ""
 	}
-	encoded := uParam[2:]
-	// Bing uses URL-safe base64 without padding; add padding.
-	switch len(encoded) % 4 {
-	case 2:
-		encoded += "=="
-	case 3:
-		encoded += "="
-	}
-	import64 := strings.NewReplacer("-", "+", "_", "/")
-	decoded, err := decodeBase64String(import64.Replace(encoded))
+	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(uParam[2:], "="))
 	if err != nil {
 		return ""
 	}
-	candidate := string(decoded)
-	if strings.HasPrefix(candidate, "http://") || strings.HasPrefix(candidate, "https://") {
+	candidate := strings.TrimSpace(string(decoded))
+	if IsUsableResultURL(candidate) {
 		return candidate
 	}
 	return ""
@@ -450,11 +439,6 @@ func buildDisplayURL(rawURL, domain string) string {
 		breadcrumb = breadcrumb[:cut] + "…"
 	}
 	return breadcrumb
-}
-
-// decodeBase64String decodes standard (not URL-safe) base64.
-func decodeBase64String(s string) ([]byte, error) {
-	return base64.StdEncoding.DecodeString(s)
 }
 
 type imageDescriptionMeta struct {

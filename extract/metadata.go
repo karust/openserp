@@ -42,7 +42,7 @@ func parseMetadata(doc *goquery.Document, baseURL string) pageMetadata {
 	}
 
 	meta.OGTags = map[string]string{}
-	doc.Find(`meta[property^="og:"], meta[name^="twitter:"]`).Each(func(_ int, sel *goquery.Selection) {
+	doc.Find(`meta[property^="og:"], meta[name^="twitter:"], meta[property="article:published_time"], meta[name="article:published_time"]`).Each(func(_ int, sel *goquery.Selection) {
 		key, _ := sel.Attr("property")
 		if key == "" {
 			key, _ = sel.Attr("name")
@@ -54,6 +54,9 @@ func parseMetadata(doc *goquery.Document, baseURL string) pageMetadata {
 			meta.OGTags[key] = value
 		}
 	})
+	if value, ok := doc.Find("time[datetime]").First().Attr("datetime"); ok && strings.TrimSpace(value) != "" {
+		meta.OGTags["time:datetime"] = strings.TrimSpace(value)
+	}
 	if len(meta.OGTags) == 0 {
 		meta.OGTags = nil
 	}

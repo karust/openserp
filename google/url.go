@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/karust/openserp/core"
 	regionpkg "github.com/karust/openserp/core/region"
@@ -226,6 +227,24 @@ var googleDefaultCountryByLanguage = map[string]string{
 	"ko": "kr",
 }
 
+// buildDateTBS turns YYYYMMDD..YYYYMMDD into Google's custom date range.
+// Google reads cd_min/cd_max as MM/DD/YYYY and ignores other formats.
+func buildDateTBS(dateInterval string) (string, error) {
+	from, to, ok := strings.Cut(dateInterval, "..")
+	if !ok {
+		return "", errors.New("incorrect date interval provided")
+	}
+	start, err := time.Parse("20060102", from)
+	if err != nil {
+		return "", errors.New("incorrect date interval provided")
+	}
+	end, err := time.Parse("20060102", to)
+	if err != nil || start.After(end) {
+		return "", errors.New("incorrect date interval provided")
+	}
+	return fmt.Sprintf("cdr:1,cd_min:%s,cd_max:%s", start.Format("01/02/2006"), end.Format("01/02/2006")), nil
+}
+
 // BuildURL builds a Google web search URL from Query fields.
 // It returns an error when the resulting query text is empty or invalid.
 func BuildURL(q core.Query) (string, error) {
@@ -260,13 +279,11 @@ func BuildURL(q core.Query) (string, error) {
 
 	// Set search date range
 	if q.DateInterval != "" {
-		intervals := strings.Split(q.DateInterval, "..")
-		if len(intervals) != 2 {
-			return "", errors.New("incorrect date interval provided")
+		tbs, err := buildDateTBS(q.DateInterval)
+		if err != nil {
+			return "", err
 		}
-
-		dataParam := fmt.Sprintf("cdr:1,cd_min:%s,cd_max:%s", intervals[0], intervals[1])
-		params.Add("tbs", dataParam)
+		params.Add("tbs", tbs)
 	}
 
 	// Limit number of results
@@ -341,13 +358,11 @@ func BuildImageURL(q core.Query) (string, error) {
 
 	// Set search date range
 	if q.DateInterval != "" {
-		intervals := strings.Split(q.DateInterval, "..")
-		if len(intervals) != 2 {
-			return "", errors.New("incorrect date interval provided")
+		tbs, err := buildDateTBS(q.DateInterval)
+		if err != nil {
+			return "", err
 		}
-
-		dataParam := fmt.Sprintf("cdr:1,cd_min:%s,cd_max:%s", intervals[0], intervals[1])
-		params.Add("tbs", dataParam)
+		params.Add("tbs", tbs)
 	}
 
 	// Limit number of results

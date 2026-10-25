@@ -15,27 +15,6 @@ import (
 
 var bingDateOperatorRE = regexp.MustCompile(`(?i)\b(after|before):(\d{4}-\d{2}-\d{2})\b`)
 
-// defaultBingCountryByLanguage maps a language subtag to the country Bing
-// pairs with it for the "mkt" parameter when the caller did not specify one.
-// Languages outside this map fall back to "US" rather than echoing the
-// language code, since Bing rejects unknown markets like "ja-JA".
-var defaultBingCountryByLanguage = map[string]string{
-	"en": "US",
-	"de": "DE",
-	"ru": "RU",
-	"fr": "FR",
-	"es": "ES",
-	"it": "IT",
-	"pt": "BR",
-	"zh": "CN",
-	"ja": "JP",
-	"ko": "KR",
-	"nl": "NL",
-	"pl": "PL",
-	"tr": "TR",
-	"ar": "SA",
-}
-
 // BuildURL builds a Bing web search URL from Query fields.
 // It returns an error when query text or date parameters are invalid.
 func BuildURL(q core.Query) (string, error) {
@@ -71,26 +50,16 @@ func BuildURL(q core.Query) (string, error) {
 		return "", errors.New("empty query built")
 	}
 
-	if locale, ok := bingLocale(q.LangCode, q.Region); ok {
-		if locale.market != "" {
-			params.Add("mkt", locale.market)
-		}
-		if locale.language != "" {
-			params.Add("setlang", locale.language)
-		}
-		params.Add("cc", locale.country)
-	}
+	addBingLocale(params, q.LangCode, q.Region)
 
-	// Set result offset (pagination) - Bing uses "first" parameter.
-	// When first is present, Bing may ignore custom count and return default page size.
+	// Bing ignores count, so deeper results come from paging. first is a
+	// 1-based result index; FORM=PORE is what Bing's own "next" link sends.
 	if q.Start < 0 {
 		return "", errors.New("incorrect start provided")
 	}
 	if q.Start > 0 {
-		// Bing uses 1-based first-result index for pagination.
 		params.Add("first", strconv.Itoa(q.Start+1))
-	} else if q.Limit > 10 {
-		params.Add("count", strconv.Itoa(q.Limit))
+		params.Add("FORM", "PORE")
 	}
 
 	if q.DateInterval != "" {
@@ -107,44 +76,37 @@ func BuildURL(q core.Query) (string, error) {
 	return base.String(), nil
 }
 
-type bingLocaleParams struct {
-	language string
-	country  string
-	market   string
-}
-
-// bingLocale resolves a Bing market triplet (language, country, mkt) from a
-// caller-supplied language code. It returns ok=false when the input is empty
-// so callers can omit Bing's locale parameters entirely instead of forcing a
-// default market that biases results toward en-US.
-func bingLocale(langCode, region string) (bingLocaleParams, bool) {
+// Bing serves unrelated results when mkt or cc=US/CN/RU differs from the exit IP.
+func addBingLocale(params url.Values, langCode, region string) {
 	parsed := core.ParseLocale(langCode)
-	country := core.CountryFromRegion(region)
-	if parsed.Language == "" {
-		if country != "" {
-			return bingLocaleParams{country: country}, true
-		}
-		return bingLocaleParams{}, false
+	if parsed.Language != "" {
+		params.Add("setlang", parsed.Language)
 	}
 
-	if country == "" {
+	country := core.CountryFromRegion(region)
+	if country == "" && len(parsed.Country) == 2 {
 		country = parsed.Country
-		if country == "" {
-			country = defaultBingCountry(parsed.Language)
-		}
 	}
-	return bingLocaleParams{
-		language: parsed.Language,
-		country:  country,
-		market:   parsed.Language + "-" + country,
-	}, true
+	switch country {
+	case "", "US", "CN", "RU":
+	default:
+		params.Add("cc", country)
+	}
 }
 
-func defaultBingCountry(language string) string {
-	if country, ok := defaultBingCountryByLanguage[language]; ok {
-		return country
+// Search opens the plain query first
+// so Bing honors paging and date filters on the next load in the same tab.
+func sessionURL(searchURL string) string {
+	u, err := url.Parse(searchURL)
+	if err != nil {
+		return searchURL
 	}
-	return "US"
+	params := u.Query()
+	for _, key := range []string{"first", "FORM", "filters"} {
+		params.Del(key)
+	}
+	u.RawQuery = params.Encode()
+	return u.String()
 }
 
 func normalizeBingQueryText(text string) (string, string, error) {
@@ -231,15 +193,7 @@ func BuildImageURL(q core.Query) (string, error) {
 		return "", errors.New("empty query built")
 	}
 
-	if locale, ok := bingLocale(q.LangCode, q.Region); ok {
-		if locale.market != "" {
-			params.Add("mkt", locale.market)
-		}
-		if locale.language != "" {
-			params.Add("setlang", locale.language)
-		}
-		params.Add("cc", locale.country)
-	}
+	addBingLocale(params, q.LangCode, q.Region)
 
 	// Image-specific parameters
 	params.Add("form", "HDRSC2")

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -12,6 +13,9 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/karust/openserp/core"
 )
+
+// resultsPerPage is Bing's first= step between SERP pages.
+const resultsPerPage = 10
 
 // Bing implements core.SearchEngine for Bing SERP pages.
 type Bing struct {
@@ -34,60 +38,44 @@ func (bing *Bing) Name() string {
 	return "bing"
 }
 
-func (bing *Bing) getTotalResults(page *rod.Page) (int, error) {
-	results, err := page.Timeout(bing.GetSelectorTimeout()).Elements(Selectors.Results)
-	if err != nil {
-		return 0, errors.New("Cannot find result elements: " + err.Error())
-	}
-	return len(results), nil
-}
-
-// checkCaptcha classifies the live page the same way classifyBingDocument
-// (parse_html.go) classifies raw HTML, so /bing/search and /bing/parse agree.
+// checkCaptcha classifies the live page with classifyBingDocument
+// (parse_html.go), so /bing/search and /bing/parse agree.
 func (bing *Bing) checkCaptcha(page *rod.Page) bool {
 	if page == nil {
 		return false
 	}
 
 	if info, err := page.Info(); err == nil {
-		url := strings.ToLower(info.URL)
-		if strings.Contains(url, "turing") || strings.Contains(url, "captcha") {
-			return true
+		parsed, err := url.Parse(info.URL)
+		if err == nil {
+			path := strings.ToLower(parsed.Path)
+			if strings.Contains(path, "turing") || strings.Contains(path, "captcha") {
+				return true
+			}
 		}
 	}
-
-	for _, selector := range Selectors.Captcha {
-		has, _, _ := page.Has(selector)
-		if has {
-			bing.logger.Debug("Captcha detected: %s", selector)
-			return true
-		}
-	}
-
-	return pageTextContainsAny(page, Selectors.CaptchaMarkers)
+	return errors.Is(core.ClassifyFromPage(page, classifyBingDocument), core.ErrCaptcha)
 }
 
-// checkNoResults reports whether the page text matches Bing's no-results
-// phrasing, mirroring classifyBingDocument's text-marker check.
+// checkNoResults reports whether the page shows Bing's no-results message.
 func (bing *Bing) checkNoResults(page *rod.Page) bool {
-	return pageTextContainsAny(page, Selectors.NoResultsMarkers)
+	return errors.Is(core.ClassifyFromPage(page, classifyBingDocument), core.ErrEmptyResult)
 }
 
-func pageTextContainsAny(page *rod.Page, markers []string) bool {
-	if page == nil || len(markers) == 0 {
-		return false
+// loadInTab navigates the already open tab, keeping its Bing session. Navigate
+// would open a fresh browser context instead.
+func (bing *Bing) loadInTab(page *rod.Page, url string) error {
+	ctx, cancel := context.WithTimeout(page.GetContext(), bing.Timeout)
+	defer cancel()
+	timed := page.Context(ctx)
+	wait := timed.WaitNavigation(proto.PageLifecycleEventNameDOMContentLoaded)
+	if err := timed.Navigate(url); err != nil {
+		cancel()
+		wait()
+		return err
 	}
-	html, err := page.HTML()
-	if err != nil {
-		return false
-	}
-	text := strings.ToLower(html)
-	for _, marker := range markers {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
+	wait()
+	return ctx.Err()
 }
 
 func (bing *Bing) acceptCookies(ctx context.Context, page *rod.Page) error {
@@ -149,7 +137,7 @@ func (bing *Bing) parseResultElement(el *rod.Element, isAd bool, rank *core.Rank
 		desc = core.NormalizeWhitespace(strings.Replace(fullText, title, "", 1))
 	}
 
-	return assembleBingRow(href.String(), title, desc, isAd, rank)
+	return assembleBingRow(href.String(), title, desc, core.FirstNonEmptyText(el, Selectors.Cite), isAd, rank)
 }
 
 // Search executes a Bing web search and returns normalized search results.
@@ -162,21 +150,22 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 
 	bing.logger.Debug("Starting search, query: %+v", query)
 
-	searchResults := []core.SearchResult{}
-
 	url, err := BuildURL(query)
 	if err != nil {
 		return nil, err
 	}
 
-	page, err := bing.Navigate(ctx, url)
+	// A fresh session ignores first= and gets junk for date filters, so open
+	// the plain query first and load the rest in the same tab.
+	landing := sessionURL(url)
+	page, err := bing.Navigate(ctx, landing)
 	if err != nil {
 		return nil, err
 	}
 	defer core.DeferClosePage(ctx, page, &bing.Browser)()
 
 	if bing.checkCaptcha(page) {
-		bing.logger.Error("Captcha detected: %s", url)
+		bing.logger.Error("Captcha detected: %s", landing)
 		return nil, core.ErrCaptcha
 	}
 
@@ -184,8 +173,62 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 		return nil, err
 	}
 
+	searchResults := []core.SearchResult{}
+	var features []core.SerpFeature
+	rank := core.NewRankStateAt(query.Start, query.Start+1)
+	pageQuery := query
+	for pagesFetched := 0; core.ShouldFetchResultPage(core.CountOrganicResults(searchResults), query.Limit, pagesFetched); pagesFetched++ {
+		if pagesFetched > 0 {
+			pageQuery.Start += resultsPerPage
+			if url, err = BuildURL(pageQuery); err != nil {
+				return nil, err
+			}
+		}
+		pageResults, err := bing.parsePage(ctx, page, url, url != landing, rank)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			// Keep earlier pages if a later one gets blocked.
+			if len(searchResults) == 0 {
+				return nil, err
+			}
+			bing.logger.Warn("Pagination stopped at %s (%s); returning %d results", url, err, len(searchResults))
+			break
+		}
+		if len(pageResults) == 0 {
+			break
+		}
+		if query.Features && pagesFetched == 0 {
+			features = extractBingFeaturesFromPage(ctx, page)
+		}
+		previousCount := core.CountOrganicResults(searchResults)
+		searchResults = core.DeduplicateResults(append(searchResults, pageResults...))
+		if core.CountOrganicResults(searchResults) == previousCount {
+			break
+		}
+	}
+
+	if len(searchResults) == 0 {
+		return searchResults, nil
+	}
+	deduped := core.LimitOrganicResults(searchResults, query.Limit)
+	return core.AttachFeaturesToFirstResult(deduped, features), nil
+}
+
+// parsePage optionally loads url in the session tab, then waits for result rows
+// and parses them. An empty slice means Bing has no (more) results.
+func (bing *Bing) parsePage(ctx context.Context, page *rod.Page, url string, load bool, rank *core.RankState) ([]core.SearchResult, error) {
+	if load {
+		if err := bing.loadInTab(page, url); err != nil {
+			return nil, err
+		}
+	}
 	resultElements, _, err := core.WaitForElements(ctx, page, []string{Selectors.ResultItems, Selectors.Results}, bing.GetSelectorTimeout())
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		// Re-check captcha/no-results on timeout - Bing interstitials and
 		// no-results pages can both render after WaitLoad.
 		if bing.checkCaptcha(page) {
@@ -198,37 +241,20 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 		bing.logger.Error("Cannot parse organic results: %s", err)
 		return nil, core.ErrSearchTimeout
 	}
+	bing.logger.Info("Found %d result containers", len(resultElements))
 
-	totalResults, err := bing.getTotalResults(page)
-	if err != nil {
-		bing.logger.Debug("Failed to get total results: %v", err)
-	}
-	bing.logger.Info("Found %d organic result containers", totalResults)
-
-	rank := core.NewRankStateAt(query.Start, query.Start+1)
+	results := []core.SearchResult{}
 	for _, result := range resultElements {
 		isAd := bingElementMatches(result, Selectors.Ads)
 		isOrganic := bingElementMatches(result, Selectors.Results)
 		if !isAd && !isOrganic {
 			continue
 		}
-
-		srchRes, ok := bing.parseResultElement(result, isAd, rank)
-		if !ok {
-			continue
+		if srchRes, ok := bing.parseResultElement(result, isAd, rank); ok {
+			results = append(results, srchRes)
 		}
-		searchResults = append(searchResults, srchRes)
 	}
-
-	// Deduplicate results
-	deduped := core.DeduplicateResults(searchResults)
-
-	deduped = core.LimitOrganicResults(deduped, query.Limit)
-
-	if query.Features {
-		deduped = core.AttachFeaturesToFirstResult(deduped, extractBingFeaturesFromPage(ctx, page))
-	}
-	return deduped, nil
+	return results, nil
 }
 
 // BingImageData represents metadata encoded in the image result `m` attribute.
@@ -309,6 +335,9 @@ func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.Sea
 	bing.logger.Info("Found %d image elements", len(imageContainers))
 
 	rank := 0
+	// The selector list matches a tile's div and the a.iusc inside it, and both
+	// resolve to the same anchor, so every tile arrives twice.
+	seen := make(map[string]struct{}, len(imageContainers))
 	for _, c := range imageContainers {
 		srchRes := core.SearchResult{}
 
@@ -356,6 +385,10 @@ func (bing *Bing) SearchImage(ctx context.Context, query core.Query) ([]core.Sea
 		if imgData.MURL != "" {
 			srchRes.URL = imgData.MURL
 		}
+		if _, dup := seen[srchRes.URL]; dup {
+			continue
+		}
+		seen[srchRes.URL] = struct{}{}
 
 		rank++
 		srchRes.Rank = rank

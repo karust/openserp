@@ -36,22 +36,14 @@ func TestBuildURL(t *testing.T) {
 				if got := params.Get("setlang"); got != "ru" {
 					t.Fatalf("unexpected setlang value: %q", got)
 				}
-				if got := params.Get("mkt"); got != "ru-RU" {
-					t.Fatalf("unexpected mkt value: %q", got)
-				}
-				if got := params.Get("cc"); got != "RU" {
-					t.Fatalf("unexpected cc value: %q", got)
-				}
 				if got := params.Get("filters"); got != `ex1:"ez5_19723_19753"` {
 					t.Fatalf("unexpected filters value: %q", got)
-				}
-				if got := params.Get("count"); got != "30" {
-					t.Fatalf("unexpected count value: %q", got)
 				}
 				if got := params.Get("first"); got != "" {
 					t.Fatalf("first should be omitted when Start=0, got %q", got)
 				}
-				for _, key := range []string{"form", "qs", "sp", "pq"} {
+				// Bing ignores count; mkt and a language-derived cc poison results.
+				for _, key := range []string{"mkt", "cc", "count", "form", "FORM", "qs", "sp", "pq"} {
 					if got := params.Get(key); got != "" {
 						t.Fatalf("expected %s to be omitted, got %q", key, got)
 					}
@@ -99,8 +91,8 @@ func TestBuildURL(t *testing.T) {
 				if got := params.Get("filters"); got != `ex1:"ez5_19723_19753"` {
 					t.Fatalf("unexpected filters value: %q", got)
 				}
-				if got := params.Get("mkt"); got != "en-DE" {
-					t.Fatalf("unexpected mkt value: %q", got)
+				if got := params.Get("mkt"); got != "" {
+					t.Fatalf("mkt should be omitted, got %q", got)
 				}
 				if got := params.Get("setlang"); got != "en" {
 					t.Fatalf("unexpected setlang value: %q", got)
@@ -111,7 +103,7 @@ func TestBuildURL(t *testing.T) {
 			},
 		},
 		{
-			name: "region overrides bing market country",
+			name: "region sets bing country",
 			query: core.Query{
 				Text:     "weather",
 				LangCode: "en",
@@ -120,9 +112,6 @@ func TestBuildURL(t *testing.T) {
 			},
 			check: func(t *testing.T, params url.Values, _ string) {
 				t.Helper()
-				if got := params.Get("mkt"); got != "en-DE" {
-					t.Fatalf("unexpected mkt value: %q", got)
-				}
 				if got := params.Get("setlang"); got != "en" {
 					t.Fatalf("unexpected setlang value: %q", got)
 				}
@@ -135,19 +124,71 @@ func TestBuildURL(t *testing.T) {
 			name: "region only sets bing country",
 			query: core.Query{
 				Text:   "weather",
-				Region: "RU",
+				Region: "GB",
 				Limit:  10,
 			},
 			check: func(t *testing.T, params url.Values, _ string) {
 				t.Helper()
-				if got := params.Get("cc"); got != "RU" {
+				if got := params.Get("cc"); got != "GB" {
 					t.Fatalf("unexpected cc value: %q", got)
-				}
-				if got := params.Get("mkt"); got != "" {
-					t.Fatalf("mkt should be omitted without language, got %q", got)
 				}
 				if got := params.Get("setlang"); got != "" {
 					t.Fatalf("setlang should be omitted without language, got %q", got)
+				}
+			},
+		},
+		{
+			name: "zh-CN keeps setlang and drops the china market",
+			query: core.Query{
+				Text:     "神舟十八号 2024年4月发射",
+				LangCode: "zh-CN",
+			},
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("q"); got != "神舟十八号 2024年4月发射" {
+					t.Fatalf("unexpected q value: %q", got)
+				}
+				if got := params.Get("setlang"); got != "zh" {
+					t.Fatalf("unexpected setlang value: %q", got)
+				}
+				for _, key := range []string{"mkt", "cc"} {
+					if got := params.Get(key); got != "" {
+						t.Fatalf("expected %s to be omitted, got %q", key, got)
+					}
+				}
+			},
+		},
+		{
+			name: "us and ru regions are not sent as cc",
+			query: core.Query{
+				Text:     "weather",
+				LangCode: "en-US",
+				Region:   "RU",
+			},
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("cc"); got != "" {
+					t.Fatalf("cc should be omitted, got %q", got)
+				}
+			},
+		},
+		{
+			name: "start pages like bing's next link",
+			query: core.Query{
+				Text:  "golang",
+				Start: 10,
+				Limit: 20,
+			},
+			check: func(t *testing.T, params url.Values, _ string) {
+				t.Helper()
+				if got := params.Get("first"); got != "11" {
+					t.Fatalf("unexpected first value: %q", got)
+				}
+				if got := params.Get("FORM"); got != "PORE" {
+					t.Fatalf("unexpected FORM value: %q", got)
+				}
+				if got := params.Get("count"); got != "" {
+					t.Fatalf("count should be omitted, got %q", got)
 				}
 			},
 		},
@@ -162,9 +203,6 @@ func TestBuildURL(t *testing.T) {
 				t.Helper()
 				if got := params.Get("first"); got != "2147483648" {
 					t.Fatalf("unexpected first value: %q", got)
-				}
-				if got := params.Get("count"); got != "" {
-					t.Fatalf("count should be omitted when first is used, got %q", got)
 				}
 			},
 		},
@@ -248,11 +286,10 @@ func TestBuildImageURL(t *testing.T) {
 				if got := params.Get("setlang"); got != "en" {
 					t.Fatalf("unexpected setlang value: %q", got)
 				}
-				if got := params.Get("mkt"); got != "en-US" {
-					t.Fatalf("unexpected mkt value: %q", got)
-				}
-				if got := params.Get("cc"); got != "US" {
-					t.Fatalf("unexpected cc value: %q", got)
+				for _, key := range []string{"mkt", "cc"} {
+					if got := params.Get(key); got != "" {
+						t.Fatalf("expected %s to be omitted, got %q", key, got)
+					}
 				}
 				if got := params.Get("form"); got != "HDRSC2" {
 					t.Fatalf("unexpected form value: %q", got)
@@ -266,7 +303,7 @@ func TestBuildImageURL(t *testing.T) {
 			},
 		},
 		{
-			name: "image region overrides market country",
+			name: "image region sets country",
 			query: core.Query{
 				Text:     "cats",
 				LangCode: "en",
@@ -274,8 +311,8 @@ func TestBuildImageURL(t *testing.T) {
 			},
 			check: func(t *testing.T, params url.Values, _ string) {
 				t.Helper()
-				if got := params.Get("mkt"); got != "en-GB" {
-					t.Fatalf("unexpected mkt value: %q", got)
+				if got := params.Get("mkt"); got != "" {
+					t.Fatalf("mkt should be omitted, got %q", got)
 				}
 				if got := params.Get("cc"); got != "GB" {
 					t.Fatalf("unexpected cc value: %q", got)
@@ -307,5 +344,30 @@ func TestBuildImageURL(t *testing.T) {
 				tt.check(t, parsed.Query(), parsed.Host)
 			}
 		})
+	}
+}
+
+func TestSessionURL(t *testing.T) {
+	full, err := BuildURL(core.Query{Text: "golang", LangCode: "de-DE", Start: 20, DateInterval: "20240101..20240131"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(sessionURL(full))
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := parsed.Query()
+	for _, key := range []string{"first", "FORM", "filters"} {
+		if got := params.Get(key); got != "" {
+			t.Fatalf("%s should be stripped, got %q", key, got)
+		}
+	}
+	if params.Get("q") != "golang" || params.Get("setlang") != "de" || params.Get("cc") != "DE" {
+		t.Fatalf("query/locale must survive, got %v", params)
+	}
+
+	plain, _ := BuildURL(core.Query{Text: "golang"})
+	if got := sessionURL(plain); got != plain {
+		t.Fatalf("plain URL should be its own session URL, got %q", got)
 	}
 }
