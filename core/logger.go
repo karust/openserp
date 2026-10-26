@@ -251,6 +251,9 @@ func quoteIfNeeded(s string) string {
 	return s
 }
 
+// logFile is the open ./logs.txt handle, if any, so it can be closed.
+var logFile *os.File
+
 // saveLog=false keeps logs on stderr only, without creating ./logs.txt.
 func InitLogger(isVerbose, isDebug, isQuiet, saveLog bool, format string) {
 	switch format {
@@ -277,6 +280,7 @@ func InitLogger(isVerbose, isDebug, isQuiet, saveLog bool, format string) {
 			fmt.Fprintf(os.Stderr, "Failed to open logs file ./logs.txt: %v\n", err)
 			logrus.SetOutput(io.MultiWriter(os.Stderr))
 		} else {
+			logFile = f
 			logrus.SetOutput(io.MultiWriter(f, os.Stderr))
 		}
 		logrus.SetReportCaller(false)
