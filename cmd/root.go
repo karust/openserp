@@ -69,6 +69,7 @@ type AppConfig struct {
 	DebugEndpoints bool          `mapstructure:"debug_endpoints"`
 	LogFormat      string        `mapstructure:"log_format"`
 	LogLevel       string        `mapstructure:"log_level"`
+	SaveLog        bool          `mapstructure:"save_log"`
 	MaxProcesses   int           `mapstructure:"max_processes"`
 	IdleTTL        time.Duration `mapstructure:"idle_ttl"`
 	MegaTimeout    time.Duration `mapstructure:"mega_timeout"`
@@ -178,7 +179,7 @@ var RootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		core.InitLogger(config.Server.IsVerbose, config.Server.IsDebug, quiet, config.App.LogFormat)
+		core.InitLogger(config.Server.IsVerbose, config.Server.IsDebug, quiet, config.App.SaveLog, config.App.LogFormat)
 		if override {
 			logrus.SetLevel(level)
 		}
@@ -220,6 +221,7 @@ func sanitizedConfigForLog(cfg Config) map[string]interface{} {
 			"debug_endpoints": cfg.App.DebugEndpoints,
 			"log_format":      cfg.App.LogFormat,
 			"log_level":       cfg.App.LogLevel,
+			"save_log":        cfg.App.SaveLog,
 			"max_processes":   cfg.App.MaxProcesses,
 			"idle_ttl":        cfg.App.IdleTTL.String(),
 			"mega_timeout":    cfg.App.MegaTimeout.String(),
@@ -442,6 +444,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("server.insecure", false)
 	v.SetDefault("app.log_format", "")
 	v.SetDefault("app.log_level", "")
+	v.SetDefault("app.save_log", true)
 
 	v.SetDefault("app.timeout", 30)
 	v.SetDefault("app.browser_path", "")
@@ -522,4 +525,5 @@ func init() {
 	RootCmd.PersistentFlags().IntVar(&config.CircuitBreaker.Successes, "cb_successes", 2, "Consecutive successful half-open checks needed to close circuit")
 	RootCmd.PersistentFlags().StringVar(&config.App.LogFormat, "log_format", "", "Log format: json or text (default: json in production, text in debug)")
 	RootCmd.PersistentFlags().StringVar(&config.App.LogLevel, "log_level", "", "Log level: error, warn, info, debug or trace (default: warn for CLI, info for serve)")
+	RootCmd.PersistentFlags().BoolVar(&config.App.SaveLog, "save_log", true, "Also write logs to ./logs.txt (serve mode); false keeps them on stderr only")
 }

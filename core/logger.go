@@ -251,7 +251,11 @@ func quoteIfNeeded(s string) string {
 	return s
 }
 
-func InitLogger(isVerbose, isDebug, isQuiet bool, format string) {
+// logFile is the open ./logs.txt handle, if any, so it can be closed.
+var logFile *os.File
+
+// saveLog=false keeps logs on stderr only, without creating ./logs.txt.
+func InitLogger(isVerbose, isDebug, isQuiet, saveLog bool, format string) {
 	switch format {
 	case LogFormatText:
 		logrus.SetFormatter(&bracketFormatter{TimestampFormat: "2006-01-02 15:04:05"})
@@ -266,7 +270,7 @@ func InitLogger(isVerbose, isDebug, isQuiet bool, format string) {
 	case isDebug:
 		logrus.SetOutput(io.MultiWriter(os.Stderr))
 		logrus.SetReportCaller(true)
-	case isQuiet:
+	case isQuiet || !saveLog:
 		// One-shot CLI default: stderr only, no ./logs.txt in the user's CWD.
 		logrus.SetOutput(os.Stderr)
 		logrus.SetReportCaller(false)
@@ -276,6 +280,7 @@ func InitLogger(isVerbose, isDebug, isQuiet bool, format string) {
 			fmt.Fprintf(os.Stderr, "Failed to open logs file ./logs.txt: %v\n", err)
 			logrus.SetOutput(io.MultiWriter(os.Stderr))
 		} else {
+			logFile = f
 			logrus.SetOutput(io.MultiWriter(f, os.Stderr))
 		}
 		logrus.SetReportCaller(false)
