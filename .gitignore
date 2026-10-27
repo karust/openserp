@@ -40,3 +40,5 @@ core/testdata/*
 .tmpcache/
 google/data/geotargets-2026-05-28.csv
 demo.yml
+docs/demo.tape
+docs/demo.Dockerfile

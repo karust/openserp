@@ -20,6 +20,7 @@ def web_search(query: str, limit: int = 10) -> list[dict]:
                 "snippet": item.snippet,
             }
             for item in response.results
+            if item.type == "organic"
         ]
 
 

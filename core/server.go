@@ -371,7 +371,7 @@ func (s *Server) handleDedicatedEndpoint(c *fiber.Ctx, engine SearchEngine, isIm
 	env.Finalize(startedAt, q)
 
 	if q.Extract {
-		s.enrichEnvelopeWithExtraction(requestCtx, env, q, format)
+		EnrichEnvelopeWithExtraction(requestCtx, env, q, format, s.newExtractor(), s.opts.Extract)
 	}
 
 	if format == "json" && !q.Extract {
@@ -1090,7 +1090,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string) error {
 	}
 	env.Finalize(startedAt, q)
 	if q.Extract {
-		s.enrichEnvelopeWithExtraction(requestCtx, env, q, format)
+		EnrichEnvelopeWithExtraction(requestCtx, env, q, format, s.newExtractor(), s.opts.Extract)
 	}
 
 	if runCfg.Merge {

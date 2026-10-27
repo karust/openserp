@@ -892,12 +892,13 @@ components:
       in: query
       required: false
       description: >
-        Fetch and embed cleaned target-page content for the top web results.
+        Fetch and embed cleaned target-page content for the top organic results.
         Accepts a boolean or an integer depth: `extract=0`/`false` disables
-        extraction; `extract=true`/`1` enriches the top result; `extract=N`
-        (1-5) enriches the top N results. The tuning params `extract_mode` and
-        `min_runes` imply `extract=true` (top 1) when present, unless
-        `extract=0` is set explicitly.
+        extraction; `extract=true`/`1` enriches the top organic result;
+        `extract=N` (1-5) enriches the top N organic results. Ads and
+        people-also-ask/answer rows are skipped and never fetched. The tuning
+        params `extract_mode` and `min_runes` imply `extract=true` (top 1) when
+        present, unless `extract=0` is set explicitly.
       schema:
         oneOf:
           - type: boolean

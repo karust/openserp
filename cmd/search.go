@@ -150,9 +150,10 @@ func search(cmd *cobra.Command, args []string) error {
 
 	env := buildCLIEnvelope(spec.name, query, results, startedAt)
 	if query.Extract {
-		if err := enrichCLIEnvelopeWithExtraction(ctx, env, query, format, selectedProxy, captchaSolverEnabled, captchaSolverAPIKey); err != nil {
-			return fmt.Errorf("extract search results: %w", err)
-		}
+		query.ProxyURL = selectedProxy
+		extractor, closeExtractor := newCLIExtractor(captchaSolverEnabled, captchaSolverAPIKey)
+		defer closeExtractor()
+		core.EnrichEnvelopeWithExtraction(ctx, env, query, format, extractor, config.Extract)
 	}
 	payload := renderCLIEnvelope(env, format, searchOpts.full)
 	fmt.Println(strings.TrimRight(string(payload), "\n"))
@@ -222,26 +223,8 @@ func normalizeCLIExtractTop(raw int) (int, error) {
 	return raw, nil
 }
 
-func enrichCLIEnvelopeWithExtraction(ctx context.Context, env *core.Envelope, query core.Query, format string, proxyURL string, captchaSolverEnabled bool, captchaSolverAPIKey string) error {
-	if env == nil || !query.Extract {
-		return nil
-	}
-	query.ProxyURL = proxyURL
-	extractor, closeExtractor, err := newCLIExtractor(captchaSolverEnabled, captchaSolverAPIKey)
-	if err != nil {
-		return err
-	}
-	defer closeExtractor()
-
-	// Same depth bounds, batch deadline, and candidate fill-in as the HTTP server.
-	core.EnrichEnvelopeWithExtraction(ctx, env, query, format, extractor, config.Extract)
-	return nil
-}
-
-// newCLIExtractor builds an Extractor backed by a lazily-created, single-use
-// browser. The raw path delegates to core.RawExtractFetch; the rendered path
-// validates the target, gates auth'd SOCKS, then reuses core.RenderExtractHTML.
-func newCLIExtractor(captchaSolverEnabled bool, captchaSolverAPIKey string) (extractpkg.Extractor, func(), error) {
+// The CLI starts a browser only if extraction needs rendered HTML.
+func newCLIExtractor(captchaSolverEnabled bool, captchaSolverAPIKey string) (extractpkg.Extractor, func()) {
 	cfg := config.Extract.Normalized()
 	var browserMu sync.Mutex
 	var browser *core.Browser
@@ -290,7 +273,7 @@ func newCLIExtractor(captchaSolverEnabled bool, captchaSolverAPIKey string) (ext
 			return core.RenderExtractHTML(ctx, current, req)
 		},
 	}
-	return extractor, closeExtractor, nil
+	return extractor, closeExtractor
 }
 
 func newCLIExtractBrowser(cfg extractpkg.Config, proxyURL string, captchaSolverEnabled bool, captchaSolverAPIKey string) (*core.Browser, error) {
@@ -434,7 +417,7 @@ func init() {
 	searchCMD.Flags().StringVar(&searchOpts.format, "format", "json", "Output format: json, text, markdown, ndjson")
 	searchCMD.Flags().BoolVar(&searchOpts.full, "full", false, "Include SERP features in text/markdown output")
 	searchCMD.Flags().BoolVar(&searchOpts.features, "features", false, "Parse SERP feature modules (browser mode)")
-	searchCMD.Flags().IntVar(&searchOpts.extract, "extract", 0, "Extract clean content from the top N results using auto mode (1-5)")
+	searchCMD.Flags().IntVar(&searchOpts.extract, "extract", 0, "Extract clean content from the top N organic results using auto mode (1-5)")
 	searchCMD.Flags().String("resolve-urls", "true", "Resolve Google redirect links to destination URLs: true, false, or top N")
 	searchCMD.Flags().IntVar(&searchOpts.timeout, "search-timeout", 60, "Overall search timeout in seconds")
 	RootCmd.AddCommand(searchCMD)

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -56,6 +58,61 @@ func TestRawExtractFetchFinalURL(t *testing.T) {
 	}
 }
 
+func TestRawExtractFetchStopsAtByteLimit(t *testing.T) {
+	const limit = 4096
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("x", limit+1)))
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+		case <-ctx.Done():
+		}
+	}))
+	defer target.Close()
+
+	cfg := extractpkg.DefaultConfig()
+	cfg.AllowPrivateNetworks = true
+	resp, err := RawExtractFetch(ctx, extractpkg.ExtractRequest{URL: target.URL, MaxBytes: limit}, cfg, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Body) != limit {
+		t.Fatalf("body length = %d, want %d", len(resp.Body), limit)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("fetch drained beyond the byte limit until the deadline")
+	}
+}
+
+func TestExtractRejectsMalformedBody(t *testing.T) {
+	var hits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte("<html><body><p>Content</p></body></html>"))
+	}))
+	defer target.Close()
+	s := batchExtractTestServer(true)
+	for _, body := range []string{`{"mode":1}`, `{"clean":"false"}`, `{"url":`} {
+		t.Run(body, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/extract?url="+target.URL, strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := s.app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+			}
+		})
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("target fetched %d times for malformed requests", hits.Load())
+	}
+}
+
 func TestEnrichEnvelopeWithExtractionRetriesThinAndFailedCandidates(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -84,13 +141,13 @@ func TestEnrichEnvelopeWithExtractionRetriesThinAndFailedCandidates(t *testing.T
 	}
 	s := &Server{opts: opts}
 	env := &Envelope{Results: []Result{
-		{URL: target.URL + "/thin"},
-		{URL: target.URL + "/blocked"},
-		{URL: target.URL + "/useful"},
+		{Type: ResultTypeOrganic, URL: target.URL + "/thin"},
+		{Type: ResultTypeOrganic, URL: target.URL + "/blocked"},
+		{Type: ResultTypeOrganic, URL: target.URL + "/useful"},
 	}}
 	q := Query{Extract: true, ExtractTop: 1, ExtractMode: string(extractpkg.ModeFast)}
 
-	s.enrichEnvelopeWithExtraction(context.Background(), env, q, "json")
+	EnrichEnvelopeWithExtraction(context.Background(), env, q, "json", s.newExtractor(), opts.Extract)
 
 	if env.Results[0].Extracted == nil || env.Results[0].Extracted.Error != "empty extracted content" {
 		t.Fatalf("first candidate extracted = %+v, want empty-content error", env.Results[0].Extracted)
@@ -103,6 +160,140 @@ func TestEnrichEnvelopeWithExtractionRetriesThinAndFailedCandidates(t *testing.T
 	}
 	if !strings.Contains(env.Results[2].Extracted.Content, "Useful page") {
 		t.Fatalf("third candidate content = %q", env.Results[2].Extracted.Content)
+	}
+}
+
+func TestEnrichEnvelopeWithExtractionReadsOrganicOnly(t *testing.T) {
+	ad := func(u string) Result { return Result{Type: ResultTypeAd, URL: "https://" + u} }
+	org := func(u string) Result { return Result{Type: ResultTypeOrganic, URL: "https://" + u} }
+	paa := func(u string) Result { return Result{Type: ResultTypePeopleAlsoAsk, URL: "https://" + u} }
+
+	tests := []struct {
+		name    string
+		top     int
+		results []Result
+		fetched []string
+		ok      []string
+	}{
+		{
+			name:    "ads at the top are skipped",
+			top:     1,
+			results: []Result{ad("ad1.example"), ad("ad2.example"), org("o1.example"), org("o2.example")},
+			fetched: []string{"o1.example"},
+			ok:      []string{"o1.example"},
+		},
+		{
+			name:    "N counts organic results only",
+			top:     2,
+			results: []Result{ad("ad1.example"), org("o1.example"), paa("paa1.example"), org("o2.example"), org("o3.example")},
+			fetched: []string{"o1.example", "o2.example"},
+			ok:      []string{"o1.example", "o2.example"},
+		},
+		{
+			name: "backfill skips ads",
+			top:  1,
+			results: []Result{
+				org("fail.example"), ad("ad1.example"), ad("ad2.example"), ad("ad3.example"),
+				paa("paa1.example"), org("o2.example"),
+			},
+			fetched: []string{"fail.example", "o2.example"},
+			ok:      []string{"o2.example"},
+		},
+		{
+			name: "multiple failures are backfilled",
+			top:  2,
+			results: []Result{
+				org("fail1.example"), ad("ad1.example"), org("fail2.example"), paa("paa1.example"),
+				org("o3.example"), org("o4.example"), org("o5.example"),
+			},
+			fetched: []string{"fail1.example", "fail2.example", "o3.example", "o4.example"},
+			ok:      []string{"o3.example", "o4.example"},
+		},
+		{
+			name: "backfill is limited to three extra organic results",
+			top:  1,
+			results: []Result{
+				org("fail1.example"), org("fail2.example"), ad("ad1.example"),
+				org("fail3.example"), org("fail4.example"), org("o5.example"),
+			},
+			fetched: []string{"fail1.example", "fail2.example", "fail3.example", "fail4.example"},
+		},
+		{
+			name: "blank URLs and answer rows are skipped",
+			top:  1,
+			results: []Result{
+				{Type: ResultTypeOrganic, URL: " \t"},
+				{Type: ResultTypeAnswerBox, URL: "https://answer.example"},
+				org("o1.example"),
+			},
+			fetched: []string{"o1.example"},
+			ok:      []string{"o1.example"},
+		},
+		{
+			name:    "all ads",
+			top:     3,
+			results: []Result{ad("ad1.example"), ad("ad2.example")},
+		},
+		{
+			name:    "fewer organic than N",
+			top:     5,
+			results: []Result{ad("ad1.example"), org("o1.example"), paa("paa1.example")},
+			fetched: []string{"o1.example"},
+			ok:      []string{"o1.example"},
+		},
+		{
+			name: "no results",
+			top:  1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			fetched := map[string]int{}
+			fetch := func(_ context.Context, req extractpkg.ExtractRequest) (*extractpkg.FetchResponse, error) {
+				host := strings.TrimPrefix(req.URL, "https://")
+				mu.Lock()
+				fetched[host]++
+				mu.Unlock()
+				if strings.HasPrefix(host, "fail") {
+					return &extractpkg.FetchResponse{StatusCode: http.StatusBadGateway}, nil
+				}
+				return &extractpkg.FetchResponse{StatusCode: http.StatusOK, Body: []byte(`<html><body><article><h1>` + host + `</h1><p>This page has enough body text to count as extracted content for the organic-only selection test.</p></article></body></html>`)}, nil
+			}
+			cfg := extractpkg.Config{Enabled: true, Timeout: time.Second, MaxConcurrent: 2}
+			extractor := extractpkg.Extractor{RawFetch: fetch, Cfg: cfg}
+			env := &Envelope{Results: tc.results}
+			q := Query{Extract: true, ExtractTop: tc.top, ExtractMode: string(extractpkg.ModeFast)}
+
+			EnrichEnvelopeWithExtraction(context.Background(), env, q, "json", extractor, cfg)
+
+			if len(fetched) != len(tc.fetched) {
+				t.Errorf("fetched %v, want %v", fetched, tc.fetched)
+			}
+			for _, host := range tc.fetched {
+				if fetched[host] != 1 {
+					t.Errorf("fetched %s %d times, want once", host, fetched[host])
+				}
+			}
+			for i, r := range env.Results {
+				host := strings.TrimPrefix(r.URL, "https://")
+				switch {
+				case !slices.Contains(tc.fetched, host):
+					if r.Extracted != nil {
+						t.Errorf("result %d (%s, %s) extracted = %+v, want unset", i, r.Type, host, r.Extracted)
+					}
+				case slices.Contains(tc.ok, host):
+					if !extractedResultSucceeded(r) {
+						t.Errorf("result %d (%s) extracted = %+v, want success", i, host, r.Extracted)
+					}
+				default:
+					if r.Extracted == nil || r.Extracted.Error == "" {
+						t.Errorf("result %d (%s) extracted = %+v, want error", i, host, r.Extracted)
+					}
+				}
+			}
+		})
 	}
 }
 
