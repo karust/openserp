@@ -40,7 +40,7 @@ func engineSpecs() []engineSpec {
 		{name: "google", factory: newEngine(google.New), rawSearchFn: google.Search, parseHTMLFn: google.ParseHTML, cfg: &config.GoogleConfig.EngineConfig},
 		{name: "yandex", factory: newEngine(yandex.New), rawSearchFn: yandex.Search, parseHTMLFn: yandex.ParseHTML, cfg: &config.YandexConfig},
 		{name: "baidu", factory: newEngine(baidu.New), rawSearchFn: baidu.Search, parseHTMLFn: baidu.ParseHTML, cfg: &config.BaiduConfig},
-		{name: "bing", factory: newEngine(bing.New), parseHTMLFn: bing.ParseHTML, cfg: &config.BingConfig},
+		{name: "bing", factory: newBing, parseHTMLFn: bing.ParseHTML, cfg: &config.BingConfig.EngineConfig},
 		{name: "duckduckgo", aliases: []string{"duck", "ddg"}, factory: newEngine(duckduckgo.New), parseHTMLFn: duckduckgo.ParseHTML, cfg: &config.DuckDuckGoConfig},
 		{name: "ecosia", factory: newEngine(ecosia.New), rawSearchFn: ecosia.Search, parseHTMLFn: ecosia.ParseHTML, cfg: &config.EcosiaConfig},
 	}
@@ -52,6 +52,13 @@ func newEngine[T core.SearchEngine](ctor func(core.Browser, core.SearchEngineOpt
 	return func(b core.Browser, o core.SearchEngineOptions) core.SearchEngine {
 		return ctor(b, o)
 	}
+}
+
+// newBing is newEngine(bing.New) plus bing.search_box.
+func newBing(b core.Browser, o core.SearchEngineOptions) core.SearchEngine {
+	engine := bing.New(b, o)
+	engine.SearchBox = config.BingConfig.SearchBox
+	return engine
 }
 
 // engineValidArgs returns every accepted engine token (canonical names +

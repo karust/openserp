@@ -97,6 +97,7 @@ baidu:
 bing:
   rate_requests: 60
   rate_burst: 3
+  search_box: true # Submit through the homepage; false uses legacy /search URLs (env: OPENSERP_BING_SEARCH_BOX)
   # No proxy tag means direct traffic
 
 duckduckgo:

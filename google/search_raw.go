@@ -190,7 +190,7 @@ func Search(ctx context.Context, query core.Query) (results []core.SearchResult,
 		return nil, fmt.Errorf("%w: google raw search returned no parseable results", core.ErrParser)
 	}
 	core.ResolveWrappedResultURLs(ctx, parsedResults, query, googleURL)
-	parsedResults = core.DeduplicateResults(parsedResults)
+	parsedResults = core.LimitOrganicResults(core.DeduplicateResults(parsedResults), query.Limit)
 
 	if query.Start > 0 {
 		for i := range parsedResults {

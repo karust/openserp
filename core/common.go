@@ -167,11 +167,17 @@ func ConvertSearchResultsMap(searchResultsMap map[string]SearchResult) *[]Search
 	return &searchResults
 }
 
-// CountOrganicResults returns the number of non-ad results in a mixed SERP.
+// isOrganicResult reports whether a row is a ranked organic result, not an ad
+// or a typed row such as Google people-also-ask.
+func isOrganicResult(result SearchResult) bool {
+	return !result.Ad && (result.Type == "" || result.Type == ResultTypeOrganic)
+}
+
+// CountOrganicResults returns the number of organic results in a mixed SERP.
 func CountOrganicResults(results []SearchResult) int {
 	count := 0
 	for _, result := range results {
-		if !result.Ad {
+		if isOrganicResult(result) {
 			count++
 		}
 	}
@@ -198,7 +204,8 @@ func ShouldFetchResultPage(collected, limit, pagesFetched int) bool {
 	return limit > defaultQueryLimit
 }
 
-// LimitOrganicResults keeps all ads and at most limit non-ad results.
+// LimitOrganicResults keeps at most limit organic results. Ads and typed rows
+// (Google people-also-ask) pass through and don't count.
 func LimitOrganicResults(results []SearchResult, limit int) []SearchResult {
 	if limit <= 0 {
 		return results
@@ -206,7 +213,7 @@ func LimitOrganicResults(results []SearchResult, limit int) []SearchResult {
 	out := make([]SearchResult, 0, len(results))
 	organicCount := 0
 	for _, result := range results {
-		if result.Ad {
+		if !isOrganicResult(result) {
 			out = append(out, result)
 			continue
 		}

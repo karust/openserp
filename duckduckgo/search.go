@@ -348,5 +348,5 @@ func (ddg *DuckDuckGo) SearchImage(ctx context.Context, query core.Query) ([]cor
 	}
 
 	ddg.logger.Info("Parsed %d image results", len(searchResults))
-	return core.DeduplicateResults(searchResults), nil
+	return core.LimitOrganicResults(core.DeduplicateResults(searchResults), query.Limit), nil
 }

@@ -371,3 +371,22 @@ func TestSessionURL(t *testing.T) {
 		t.Fatalf("plain URL should be its own session URL, got %q", got)
 	}
 }
+
+func TestHomeSearch(t *testing.T) {
+	full, err := BuildURL(core.Query{Text: "golang", Site: "go.dev", LangCode: "de-DE", Start: 20, DateInterval: "20240101..20240131"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, text := homeSearch(full)
+	if home != "https://www.bing.com/?cc=DE&setlang=de" {
+		t.Fatalf("home should keep only locale params, got %q", home)
+	}
+	if text != "golang site:go.dev" {
+		t.Fatalf("text = %q", text)
+	}
+
+	plain, _ := BuildURL(core.Query{Text: "golang"})
+	if home, _ := homeSearch(plain); home != "https://www.bing.com/" {
+		t.Fatalf("plain home = %q", home)
+	}
+}

@@ -94,8 +94,8 @@ func addBingLocale(params url.Values, langCode, region string) {
 	}
 }
 
-// Search opens the plain query first
-// so Bing honors paging and date filters on the next load in the same tab.
+// sessionURL strips paging/date params. Search loads the plain query first, so
+// Bing honors paging and date filters on the next load in the same tab.
 func sessionURL(searchURL string) string {
 	u, err := url.Parse(searchURL)
 	if err != nil {
@@ -107,6 +107,25 @@ func sessionURL(searchURL string) string {
 	}
 	u.RawQuery = params.Encode()
 	return u.String()
+}
+
+// homeSearch splits a search URL into the homepage with its locale params and
+// the query text to type there. Bing keeps setlang/cc in cookies, so the typed
+// query still gets lang/region.
+func homeSearch(searchURL string) (home, text string) {
+	u, err := url.Parse(searchURL)
+	if err != nil {
+		return "https://www.bing.com/", ""
+	}
+	query := u.Query()
+	params := url.Values{}
+	for _, key := range []string{"setlang", "cc"} {
+		if value := query.Get(key); value != "" {
+			params.Set(key, value)
+		}
+	}
+	u.Path, u.RawQuery = "/", params.Encode()
+	return u.String(), query.Get("q")
 }
 
 func normalizeBingQueryText(text string) (string, string, error) {

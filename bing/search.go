@@ -21,12 +21,14 @@ const resultsPerPage = 10
 type Bing struct {
 	core.Browser
 	core.SearchEngineOptions
-	logger *core.EngineLogger
+	// SearchBox submits queries through the homepage to avoid unrelated results.
+	SearchBox bool
+	logger    *core.EngineLogger
 }
 
 // New creates a Bing engine instance with browser/runtime options applied.
 func New(browser core.Browser, opts core.SearchEngineOptions) *Bing {
-	bing := Bing{Browser: browser}
+	bing := Bing{Browser: browser, SearchBox: true}
 	opts.Init()
 	bing.SearchEngineOptions = opts
 	bing.logger = core.NewEngineLogger("Bing")
@@ -65,11 +67,36 @@ func (bing *Bing) checkNoResults(page *rod.Page) bool {
 // loadInTab navigates the already open tab, keeping its Bing session. Navigate
 // would open a fresh browser context instead.
 func (bing *Bing) loadInTab(page *rod.Page, url string) error {
+	return bing.waitInTab(page, func(p *rod.Page) error { return p.Navigate(url) })
+}
+
+// typeInTab enters text in the search box of the open tab and submits its
+// form. The box is a textarea, and Enter only adds a newline until Bing's
+// scripts attach, so the form is submitted directly.
+func (bing *Bing) typeInTab(page *rod.Page, text string) error {
+	box, err := page.Timeout(bing.GetSelectorTimeout()).Element(Selectors.SearchBox)
+	if err != nil {
+		return err
+	}
+	if err := box.SelectAllText(); err != nil {
+		return err
+	}
+	if err := box.Input(text); err != nil {
+		return err
+	}
+	return bing.waitInTab(page, func(p *rod.Page) error {
+		_, err := box.Context(p.GetContext()).Eval(`() => this.form.requestSubmit()`)
+		return err
+	})
+}
+
+// waitInTab runs act and waits for the navigation it starts.
+func (bing *Bing) waitInTab(page *rod.Page, act func(*rod.Page) error) error {
 	ctx, cancel := context.WithTimeout(page.GetContext(), bing.Timeout)
 	defer cancel()
 	timed := page.Context(ctx)
 	wait := timed.WaitNavigation(proto.PageLifecycleEventNameDOMContentLoaded)
-	if err := timed.Navigate(url); err != nil {
+	if err := act(timed); err != nil {
 		cancel()
 		wait()
 		return err
@@ -155,22 +182,38 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 		return nil, err
 	}
 
-	// A fresh session ignores first= and gets junk for date filters, so open
-	// the plain query first and load the rest in the same tab.
+	// Fresh /search sessions can return unrelated results (#69). Submit the full
+	// query first, then apply paging/date filters in the same tab.
 	landing := sessionURL(url)
-	page, err := bing.Navigate(ctx, landing)
+	open, text := landing, ""
+	if bing.SearchBox {
+		open, text = homeSearch(url)
+	}
+	page, err := bing.Navigate(ctx, open)
 	if err != nil {
 		return nil, err
 	}
 	defer core.DeferClosePage(ctx, page, &bing.Browser)()
 
 	if bing.checkCaptcha(page) {
-		bing.logger.Error("Captcha detected: %s", landing)
+		bing.logger.Error("Captcha detected: %s", open)
 		return nil, core.ErrCaptcha
 	}
 
 	if err := bing.acceptCookies(ctx, page); err != nil {
 		return nil, err
+	}
+	if bing.SearchBox {
+		if err := bing.typeInTab(page, text); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if bing.checkCaptcha(page) {
+				return nil, core.ErrCaptcha
+			}
+			// Direct navigation can silently return unrelated results (#69).
+			return nil, fmt.Errorf("%w: Bing search form: %w", core.ErrSearchTimeout, err)
+		}
 	}
 
 	searchResults := []core.SearchResult{}

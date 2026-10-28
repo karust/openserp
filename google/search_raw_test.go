@@ -71,6 +71,18 @@ func TestRawSearchDeduplicatesResolvedURLsAndPreservesRanks(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("limit", func(t *testing.T) {
+		results, err := Search(context.Background(), core.Query{
+			Text: "test", Limit: 1, ProxyURL: proxy.URL, Insecure: true, ResolveURLs: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) != 1 || results[0].URL != "https://example.org/article" {
+			t.Fatalf("limit=1 should keep only the first organic result, got %+v", results)
+		}
+	})
 }
 
 func TestGoogleParseHTMLFixtures(t *testing.T) {

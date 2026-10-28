@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version               = "0.8.16"
+	version               = "0.8.17"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -37,7 +37,7 @@ type Config struct {
 	GoogleConfig     GoogleConfig         `mapstructure:"google"`
 	YandexConfig     EngineConfig         `mapstructure:"yandex"`
 	BaiduConfig      EngineConfig         `mapstructure:"baidu"`
-	BingConfig       EngineConfig         `mapstructure:"bing"`
+	BingConfig       BingConfig           `mapstructure:"bing"`
 	DuckDuckGoConfig EngineConfig         `mapstructure:"duckduckgo"`
 	EcosiaConfig     EngineConfig         `mapstructure:"ecosia"`
 }
@@ -85,6 +85,12 @@ type EngineConfig struct {
 type GoogleConfig struct {
 	EngineConfig          `mapstructure:",squash"`
 	core.URLResolveConfig `mapstructure:",squash"`
+}
+
+type BingConfig struct {
+	EngineConfig `mapstructure:",squash"`
+	// SearchBox types the query on the homepage; false opens /search directly.
+	SearchBox bool `mapstructure:"search_box"`
 }
 
 type CacheConfig struct {
@@ -496,6 +502,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("google.resolve_concurrency", resolve.Concurrency)
 	v.SetDefault("google.resolve_timeout", resolve.Timeout)
 	v.SetDefault("google.resolve_cooldown", resolve.Cooldown)
+	v.SetDefault("bing.search_box", true)
 }
 
 func init() {

@@ -6,6 +6,7 @@ var Selectors = struct {
 	CaptchaMarkers   []string
 	NoResultsMarkers []string
 	CookieBtn        string
+	SearchBox        string
 	ResultItems      string
 	Results          string
 	Ads              string
@@ -30,6 +31,7 @@ var Selectors = struct {
 		"no results found for",
 	},
 	CookieBtn: "button#bnp_btn_accept",
+	SearchBox: "#sb_form_q",
 	// ResultItems matches the main-column children only, so carousels and
 	// "related searches" cards that reuse b_algo-style markup are excluded.
 	ResultItems:  "#b_results > li.b_algo, #b_results > li.b_ad",
