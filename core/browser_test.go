@@ -45,6 +45,38 @@ func TestCreateBrowser(t *testing.T) {
 	}()
 }
 
+func TestNavigateRelaunchesKilledBrowser(t *testing.T) {
+	testutil.RequireIntegration(t)
+
+	browser, err := NewBrowser(BrowserOpts{IsHeadless: true, IsLeakless: false, Timeout: 15 * time.Second})
+	if err != nil {
+		t.Fatalf("failed initializing browser: %s", err)
+	}
+	defer closeTestBrowser(t, browser)
+
+	page, err := browser.Navigate(context.Background(), "about:blank")
+	if err != nil {
+		t.Fatalf("navigate before kill: %v", err)
+	}
+	_ = ClosePageWithTimeout(context.Background(), page, time.Second)
+
+	// Terminate Chrome out-of-band, like `pkill chromium` or a package upgrade.
+	cdp := browser.newRodBrowser()
+	if err := cdp.Connect(); err != nil {
+		t.Fatalf("connect to chrome: %v", err)
+	}
+	if err := cdp.Close(); err != nil {
+		t.Fatalf("terminate chrome: %v", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	page, err = browser.Navigate(context.Background(), "about:blank")
+	if err != nil {
+		t.Fatalf("navigate after chrome was killed: %v", err)
+	}
+	_ = ClosePageWithTimeout(context.Background(), page, time.Second)
+}
+
 func TestNavigateUsesIsolatedBrowserContext(t *testing.T) {
 	testutil.RequireIntegration(t)
 

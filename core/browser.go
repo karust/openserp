@@ -244,6 +244,8 @@ type Browser struct {
 	proxyPass     string
 	conn          *browserConnection
 	CaptchaSolver *CaptchaSolver
+	// launch starts a new Chrome process and returns its control URL.
+	launch func() (string, error)
 }
 
 type browserConnection struct {
@@ -255,6 +257,10 @@ type browserConnection struct {
 	// lastOK is when a CDP call last succeeded; the health ping is skipped while
 	// it is within healthPingSkipWindow.
 	lastOK time.Time
+	// controlURL replaces Browser.browserAddr once Chrome has been relaunched.
+	controlURL string
+	// closed is set by Close so in-flight requests don't relaunch an evicted browser.
+	closed bool
 }
 
 const (
@@ -279,25 +285,6 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 		return nil, err
 	}
 
-	// headless=new keeps the full renderer, so WebGL falls back to SwiftShader
-	// when there's no GPU - which is what the swiftshader profiles describe.
-	// Legacy --headless kills the GPU process and breaks WebGL entirely.
-	// Leakless defaults to false: the helper binary trips antivirus on Windows.
-	l := launcher.New().Leakless(opts.IsLeakless).
-		Set("lang", browserLaunchLanguage(opts)).
-		Set("disable-blink-features", "AutomationControlled").
-		Delete("enable-automation")
-	if opts.IsHeadless {
-		// Initial window only; per-page setDeviceMetricsOverride is what pages see. Sized for the 1920x1080 swiftshader profiles that run on Docker.
-		l = l.HeadlessNew(true).Set("window-size", "1920,1040")
-	} else {
-		l = l.Headless(false)
-	}
-	if path != "" {
-		logrus.WithField("browser_path", path).Debug("Using browser binary")
-		l = l.Bin(path)
-	}
-
 	b := Browser{
 		conn: &browserConnection{},
 	}
@@ -305,6 +292,7 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	// Configure proxy if specified. Chrome's --proxy-server flag must NOT
 	// include credentials; we strip them here and reinject via a persistent
 	// CDP Fetch.handleAuthRequired listener installed after each connect.
+	launchProxy := ""
 	if opts.ProxyURL != "" {
 		normalizedProxyURL, err := NormalizeProxyURL(opts.ProxyURL)
 		if err != nil {
@@ -319,7 +307,7 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 
 		proxyStr := proxyURLForBrowserLaunch(proxyUrl)
 		logrus.WithField("proxy", MaskProxyURL(proxyStr)).Debug("Setting up proxy")
-		l = l.Proxy(proxyStr)
+		launchProxy = proxyStr
 
 		if proxyUrl.User != nil && (proxyUrl.Scheme == "http" || proxyUrl.Scheme == "https") {
 			b.proxyUser = proxyUrl.User.Username()
@@ -332,7 +320,33 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	}
 
 	b.BrowserOpts = opts
-	b.browserAddr, err = l.Launch()
+	// Rod launchers are single-use, so build a fresh one per launch; this lets
+	// ensureConnectedBrowser start a new Chrome when the old process died.
+	b.launch = func() (string, error) {
+		// headless=new keeps the full renderer, so WebGL falls back to SwiftShader
+		// when there's no GPU - which is what the swiftshader profiles describe.
+		// Legacy --headless kills the GPU process and breaks WebGL entirely.
+		// Leakless defaults to false: the helper binary trips antivirus on Windows.
+		l := launcher.New().Leakless(opts.IsLeakless).
+			Set("lang", browserLaunchLanguage(opts)).
+			Set("disable-blink-features", "AutomationControlled").
+			Delete("enable-automation")
+		if opts.IsHeadless {
+			// Initial window only; per-page setDeviceMetricsOverride is what pages see. Sized for the 1920x1080 swiftshader profiles that run on Docker.
+			l = l.HeadlessNew(true).Set("window-size", "1920,1040")
+		} else {
+			l = l.Headless(false)
+		}
+		if path != "" {
+			logrus.WithField("browser_path", path).Debug("Using browser binary")
+			l = l.Bin(path)
+		}
+		if launchProxy != "" {
+			l = l.Proxy(launchProxy)
+		}
+		return l.Launch()
+	}
+	b.browserAddr, err = b.launch()
 
 	if opts.CaptchaSolverEnabled && opts.CaptchaSolverApiKey != "" {
 		b.CaptchaSolver = NewSolver(opts.CaptchaSolverApiKey)
@@ -444,13 +458,32 @@ func (b *Browser) newRodBrowser() *rod.Browser {
 	// Per-operation timeouts are applied at call sites (timedPage.Navigate,
 	// WaitLoad/WaitStable caps, page.Timeout(GetSelectorTimeout)), and the
 	// request context carries the overall deadline.
-	return rod.New().NoDefaultDevice().ControlURL(b.browserAddr)
+	addr := b.browserAddr
+	if relaunched := b.connectionState().controlURL; relaunched != "" {
+		addr = relaunched
+	}
+	return rod.New().NoDefaultDevice().ControlURL(addr)
 }
 
 func (b *Browser) connectBrowser() (*rod.Browser, error) {
 	browser := b.newRodBrowser()
 	if err := browser.Connect(); err != nil {
-		return nil, err
+		if b.launch == nil || b.connectionState().closed {
+			return nil, err
+		}
+		// Chrome is unreachable (e.g. killed by pkill or a package upgrade);
+		// start a new process instead of failing every request from now on.
+		logrus.WithError(err).Warn("Browser connection failed, relaunching Chrome")
+		addr, launchErr := b.launch()
+		if launchErr != nil {
+			return nil, fmt.Errorf("relaunch browser after %v: %w", err, launchErr)
+		}
+		b.connectionState().controlURL = addr
+		b.connectionState().laneProfiles = nil
+		browser = b.newRodBrowser()
+		if err := browser.Connect(); err != nil {
+			return nil, err
+		}
 	}
 
 	// Keep cert handling on the persistent browser session.
@@ -1446,6 +1479,7 @@ func (b *Browser) Close() error {
 	}
 	state.browser = nil
 	state.laneProfiles = nil
+	state.closed = true
 	if err := browser.Close(); err != nil && !isBrowserClosedError(err) {
 		return err
 	}

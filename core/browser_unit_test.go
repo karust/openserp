@@ -1,6 +1,8 @@
 package core
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -231,5 +233,29 @@ func TestApplyProfileLanguageHint(t *testing.T) {
 				t.Fatalf("NavigatorLangs = %v, want [%q]", got.NavigatorLangs, tt.wantL)
 			}
 		})
+	}
+}
+
+func TestEnsureConnectedBrowserRelaunchesUnreachableChrome(t *testing.T) {
+	for _, closed := range []bool{false, true} {
+		launches := 0
+		b := &Browser{
+			browserAddr: "ws://127.0.0.1:1/devtools/browser/dead",
+			conn:        &browserConnection{closed: closed},
+			launch: func() (string, error) {
+				launches++
+				return "", errors.New("launch failed")
+			},
+		}
+		if _, err := b.ensureConnectedBrowser(context.Background(), false); err == nil {
+			t.Fatalf("closed=%v: expected connect error", closed)
+		}
+		want := 1
+		if closed {
+			want = 0
+		}
+		if launches != want {
+			t.Fatalf("closed=%v: expected %d launches, got %d", closed, want, launches)
+		}
 	}
 }
