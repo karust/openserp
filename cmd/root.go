@@ -25,6 +25,7 @@ const (
 
 type Config struct {
 	Server           ServerConfig         `mapstructure:"server"`
+	DNSServer        string               `mapstructure:"dns_server"`
 	App              AppConfig            `mapstructure:"app"`
 	Proxies          core.ProxiesConfig   `mapstructure:"proxies"`
 	Cache            CacheConfig          `mapstructure:"cache"`
@@ -126,6 +127,7 @@ var config = Config{}
 var flagToConfigKey = map[string]string{
 	"host":                    "server.host",
 	"port":                    "server.port",
+	"dns-server":              "dns_server",
 	"timeout":                 "app.timeout",
 	"config":                  "server.config_path",
 	"browser-path":            "app.browser_path",
@@ -214,7 +216,8 @@ func commandDefaultsToQuiet(cmd *cobra.Command) bool {
 
 func sanitizedConfigForLog(cfg Config) map[string]interface{} {
 	return map[string]interface{}{
-		"server": cfg.Server,
+		"server":     cfg.Server,
+		"dns_server": cfg.DNSServer,
 		"app": map[string]interface{}{
 			"timeout":         cfg.App.Timeout,
 			"browser_path":    cfg.App.BrowserPath != "",
@@ -372,6 +375,10 @@ func initializeConfig(cmd *cobra.Command) error {
 		return fmt.Errorf("google.resolve_concurrency, google.resolve_timeout and google.resolve_cooldown must be positive")
 	}
 
+	if err := core.SetCustomDNSServer(config.DNSServer); err != nil {
+		return fmt.Errorf("invalid dns_server: %w", err)
+	}
+
 	if _, err := core.ParseBlockedResourceTypes(config.App.BlockResources); err != nil {
 		return fmt.Errorf("invalid app.block_resources: %w", err)
 	}
@@ -443,6 +450,7 @@ func validateRemovedConfigPaths(v *viper.Viper) error {
 func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("server.host", "127.0.0.1")
 	v.SetDefault("server.port", 7070)
+	v.SetDefault("dns_server", "")
 	v.SetDefault("server.debug", false)
 	v.SetDefault("server.verbose", false)
 	v.SetDefault("server.quiet", false)
@@ -508,6 +516,7 @@ func setConfigDefaults(v *viper.Viper) {
 func init() {
 	RootCmd.PersistentFlags().IntVarP(&config.Server.Port, "port", "p", 7070, "Port number to run server")
 	RootCmd.PersistentFlags().StringVarP(&config.Server.Host, "host", "a", "127.0.0.1", "Host address to run server")
+	RootCmd.PersistentFlags().StringVar(&config.DNSServer, "dns-server", "", "Custom DNS server IP:port for direct lookups (e.g. 8.8.8.8:53)")
 	RootCmd.PersistentFlags().IntVarP(&config.App.Timeout, "timeout", "t", 30, "Timeout to fail request")
 	RootCmd.PersistentFlags().StringVarP(&config.Server.ConfigPath, "config", "c", "", "Configuration file path")
 	RootCmd.PersistentFlags().StringVarP(&config.App.BrowserPath, "browser-path", "", "", "Custom browser binary path (Chrome/Chromium/Edge/Brave..)")
