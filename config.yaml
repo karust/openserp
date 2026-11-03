@@ -6,6 +6,11 @@ server:
   raw_requests: false # true = raw HTTP mode, false = browser mode
   insecure: true # Allow insecure TLS connections
 
+# Custom DNS server (IP:port) for direct lookups when the system DNS filters
+# search domains. Applies to raw-mode and direct HTTP traffic; browser
+# rendering still uses system/proxy DNS.
+#dns_server: 8.8.8.8:53
+
 app:
   log_format: "text" # json|text
   log_level: "" # error|warn|info|debug|trace; empty = warn for CLI, info for serve
