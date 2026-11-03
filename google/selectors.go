@@ -11,6 +11,7 @@ var Selectors = struct {
 	NoResults      string
 	ResultStats    string
 	CookieBtn      string
+	NoResultsCard  string
 	Results        string
 	ResultsBroad   string
 	Ad             string
@@ -45,6 +46,8 @@ var Selectors = struct {
 	NoResults:   "#botstuff, #topstuff, .mnr-c",
 	ResultStats: "div#result-stats",
 	CookieBtn:   "div[role='dialog'][aria-modal] button",
+	// Notices also use this wrapper; confirm zero-results text before returning.
+	NoResultsCard: ".mnr-c",
 	// Results targets the canonical organic result block. div.tF2Cxc is the
 	// stable per-result wrapper; the :not(:has(div.tF2Cxc)) guard keeps only the
 	// innermost block so nested knowledge-panel cards (which reuse tF2Cxc) don't
@@ -77,4 +80,16 @@ var Selectors = struct {
 
 func searchResultSelectors() []string {
 	return []string{Selectors.Results, Selectors.ResultsBroad}
+}
+
+// searchReadySelectors are probed in order; the no-results card goes last so
+// rendered results always win.
+func searchReadySelectors() []string {
+	return []string{
+		Selectors.Results + ":has(" + Selectors.Title + ")",
+		Selectors.ResultsBroad + ":has(" + Selectors.Title + ")",
+		":is(" + Selectors.Ad + "):has(" + Selectors.Link + ")",
+		Selectors.AnswerBox,
+		Selectors.NoResultsCard,
+	}
 }

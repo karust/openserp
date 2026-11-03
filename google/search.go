@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,8 +16,7 @@ import (
 type Google struct {
 	core.Browser
 	core.SearchEngineOptions
-	rgxpGetDigits *regexp.Regexp
-	logger        *core.EngineLogger
+	logger *core.EngineLogger
 }
 
 // New creates a Google engine instance with browser/runtime options applied.
@@ -28,7 +25,6 @@ func New(browser core.Browser, opts core.SearchEngineOptions) *Google {
 	opts.Init()
 	gogl.SearchEngineOptions = opts
 	gogl.logger = core.NewEngineLogger("Google")
-	gogl.rgxpGetDigits = regexp.MustCompile(`\d`)
 	return &gogl
 }
 
@@ -37,43 +33,26 @@ func (gogl *Google) Name() string {
 	return "google"
 }
 
-func (gogl *Google) getTotalResults(page *rod.Page) (int, error) {
-	if gogl.rgxpGetDigits == nil {
-		return 0, core.ErrParser
+func (gogl *Google) waitForResults(ctx context.Context, page *rod.Page) (rod.Elements, string, error) {
+	// Broad wrappers can arrive before their result links, causing false timeouts.
+	ready := searchReadySelectors()
+	_, matched, err := core.WaitForElements(ctx, page, ready, gogl.GetSelectorTimeout())
+	if err == nil && matched == Selectors.NoResultsCard {
+		if errors.Is(core.ClassifyFromPage(page, classifyGoogleDocument), core.ErrEmptyResult) {
+			return nil, matched, nil
+		}
+		// The card can also be a notice above results that are still rendering.
+		_, matched, err = core.WaitForElements(ctx, page, ready[:len(ready)-1], gogl.GetSelectorTimeout())
 	}
-
-	// Stats div is absent on many locales; probe first so .Search doesn't block
-	// the full selector timeout.
-	if has, _, err := page.Has(Selectors.ResultStats); err != nil || !has {
-		return 0, nil
-	}
-
-	resultsStats, err := page.Timeout(gogl.GetSelectorTimeout()).Search(Selectors.ResultStats)
 	if err != nil {
-		return 0, errors.New("Result stats not found: " + err.Error())
+		return nil, "", err
 	}
-
-	statsText, err := resultsStats.First.Text()
-	if err != nil {
-		return 0, errors.New("Cannot extract result stats text: " + err.Error())
+	selectors := searchResultSelectors()
+	// An unfinished canonical wrapper must not override ready fallback results.
+	if matched == ready[1] {
+		selectors = selectors[1:]
 	}
-
-	if len(statsText) == 0 {
-		return 0, nil
-	}
-
-	// Remove search time seconds info from the end
-	if len(statsText) > 15 {
-		statsText = statsText[:len(statsText)-15]
-	}
-
-	foundDigits := gogl.rgxpGetDigits.FindAllString(statsText, -1)
-	totalNum := strings.Join(foundDigits, "")
-	total, err := strconv.Atoi(totalNum)
-	if err != nil {
-		return 0, err
-	}
-	return total, nil
+	return core.WaitForElements(ctx, page, selectors, gogl.GetSelectorTimeout())
 }
 
 func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas, proxyURL string) bool {
@@ -262,7 +241,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 	// Wait for the canonical organic wrapper first, then Google's broader
 	// data-hveid/data-ved layout. Headless and headful Chrome can receive
 	// different SERP markup for the same query.
-	searchResultElems, matchedSelector, err := core.WaitForElements(ctx, page, searchResultSelectors(), gogl.GetSelectorTimeout())
+	searchResultElems, matchedSelector, err := gogl.waitForResults(ctx, page)
 	if err != nil {
 		if pageErr := gogl.classifyPage(page, query.ProxyURL); pageErr != nil {
 			if errors.Is(pageErr, core.ErrEmptyResult) {
@@ -277,12 +256,6 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 		return nil, core.ErrSearchTimeout
 	}
 	gogl.logger.Debug("Search result selector matched: %s (%d elements)", matchedSelector, len(searchResultElems))
-
-	totalResults, err := gogl.getTotalResults(page)
-	if err != nil {
-		gogl.logger.Debug("Failed to get total results: %v", err)
-	}
-	gogl.logger.Info("Found %d total results", totalResults)
 
 	rank := core.NewRankStateAt(query.Start, query.Start+1)
 	// When matched by the canonical organic selector (div.tF2Cxc) every element

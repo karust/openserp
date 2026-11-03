@@ -9,7 +9,7 @@ Most examples expect OpenSERP running on `http://localhost:7000`.
 
 ```bash
 # Docker
-docker run -p 127.0.0.1:7000:7000 -it karust/openserp serve -a 0.0.0.0 -p 7000
+docker run --init -p 127.0.0.1:7000:7000 -it karust/openserp serve -a 0.0.0.0 -p 7000
 
 # Or from source
 go build -o openserp . && ./openserp serve

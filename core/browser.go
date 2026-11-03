@@ -239,7 +239,6 @@ func (b *Browser) configureRequestBlocking(ctx context.Context, page *rod.Page) 
 // Browser wraps a launched Chromium instance used by engine implementations.
 type Browser struct {
 	BrowserOpts
-	browserAddr   string
 	proxyUser     string
 	proxyPass     string
 	conn          *browserConnection
@@ -248,6 +247,10 @@ type Browser struct {
 
 type browserConnection struct {
 	mu           sync.Mutex
+	addr         string
+	launcher     *launcher.Launcher
+	exited       chan struct{} // closed once Chrome exits and its temp profile is gone
+	closed       bool
 	browser      *rod.Browser
 	laneProfiles map[string]browserprofile.Profile
 	authCancel   context.CancelFunc
@@ -269,6 +272,30 @@ const (
 // Browser wrapper configured with proxy and captcha solver settings.
 func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	opts.Check()
+	proxyURL, err := NormalizeProxyURL(opts.ProxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid proxy URL: %w", err)
+	}
+	opts.ProxyURL = proxyURL
+	b := &Browser{BrowserOpts: opts, conn: &browserConnection{}}
+	if proxy, err := url.Parse(proxyURL); err == nil && proxy.User != nil && (proxy.Scheme == "http" || proxy.Scheme == "https") {
+		b.proxyUser = proxy.User.Username()
+		b.proxyPass, _ = proxy.User.Password()
+	}
+	if err := b.launchBrowser(); err != nil {
+		return nil, err
+	}
+	if opts.CaptchaSolverEnabled && opts.CaptchaSolverApiKey != "" {
+		b.CaptchaSolver = NewSolver(opts.CaptchaSolverApiKey)
+		logrus.Debug("Captcha solver initialized")
+	}
+	return b, nil
+}
+
+// launchBrowser also handles recovery, using the same options as the first launch.
+// The caller holds conn.mu after construction.
+func (b *Browser) launchBrowser() error {
+	opts := b.BrowserOpts
 	if strings.TrimSpace(opts.UserAgent) != "" {
 		logrus.Warn("custom user_agent override can reduce profile coherence; use only for diagnostics")
 	}
@@ -276,7 +303,7 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 
 	path, err := resolveBrowserBinaryPath(opts.BrowserPath, launcher.LookPath)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// headless=new keeps the full renderer, so WebGL falls back to SwiftShader
@@ -298,48 +325,44 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 		l = l.Bin(path)
 	}
 
-	b := Browser{
-		conn: &browserConnection{},
-	}
-
 	// Configure proxy if specified. Chrome's --proxy-server flag must NOT
 	// include credentials; we strip them here and reinject via a persistent
 	// CDP Fetch.handleAuthRequired listener installed after each connect.
 	if opts.ProxyURL != "" {
-		normalizedProxyURL, err := NormalizeProxyURL(opts.ProxyURL)
-		if err != nil {
-			return nil, fmt.Errorf("invalid proxy URL: %v", err)
-		}
-		opts.ProxyURL = normalizedProxyURL
-
 		proxyUrl, err := url.Parse(opts.ProxyURL)
 		if err != nil {
-			return nil, fmt.Errorf("invalid proxy URL: %v", err)
+			return fmt.Errorf("invalid proxy URL: %w", err)
 		}
 
 		proxyStr := proxyURLForBrowserLaunch(proxyUrl)
 		logrus.WithField("proxy", MaskProxyURL(proxyStr)).Debug("Setting up proxy")
 		l = l.Proxy(proxyStr)
-
-		if proxyUrl.User != nil && (proxyUrl.Scheme == "http" || proxyUrl.Scheme == "https") {
-			b.proxyUser = proxyUrl.User.Username()
-			b.proxyPass, _ = proxyUrl.User.Password()
-			logrus.WithFields(logrus.Fields{
-				"proxy_scheme":   proxyUrl.Scheme,
-				"proxy_username": b.proxyUser,
-			}).Debugf("Proxy credentials configured for %s proxy: %s:****", proxyUrl.Scheme, b.proxyUser)
-		}
 	}
 
-	b.BrowserOpts = opts
-	b.browserAddr, err = l.Launch()
-
-	if opts.CaptchaSolverEnabled && opts.CaptchaSolverApiKey != "" {
-		b.CaptchaSolver = NewSolver(opts.CaptchaSolverApiKey)
-		logrus.Debug("Captcha solver initialized")
+	addr, err := l.Launch()
+	if err != nil {
+		return err
 	}
+	exited := make(chan struct{})
+	go func() {
+		l.Cleanup()
+		close(exited)
+	}()
+	b.conn.addr, b.conn.launcher, b.conn.exited = addr, l, exited
+	return nil
+}
 
-	return &b, err
+// kill stops Chrome unless it already exited. Launcher.Kill sleeps 1s and
+// then signals the saved PID, which may belong to another process by then.
+func (c *browserConnection) kill() {
+	if c.launcher == nil {
+		return
+	}
+	select {
+	case <-c.exited:
+	default:
+		c.launcher.Kill()
+	}
 }
 
 func browserOptsLogFields(opts BrowserOpts) logrus.Fields {
@@ -423,28 +446,18 @@ func resolveBrowserBinaryPath(browserPath string, lookPath func() (string, bool)
 
 // IsInitialized reports whether the browser launcher has been created.
 func (b *Browser) IsInitialized() bool {
-	return b.browserAddr != ""
-}
-
-func (b *Browser) connectionState() *browserConnection {
-	if b.conn == nil {
-		b.conn = &browserConnection{}
+	if b == nil || b.conn == nil {
+		return false
 	}
-	return b.conn
+	b.conn.mu.Lock()
+	defer b.conn.mu.Unlock()
+	return b.conn.addr != "" && !b.conn.closed
 }
 
 func (b *Browser) newRodBrowser() *rod.Browser {
-	// Do NOT set browser.Timeout here. rod's Browser.Timeout bakes a single
-	// absolute deadline (connectTime + d) into the connection's context. This
-	// connection is persistent and reused across requests, so a baked-in
-	// deadline expires permanently d after connect — after which every call
-	// (including the Version() health ping in ensureConnectedBrowser) fails
-	// with "context deadline exceeded", forcing a reconnect on every Navigate
-	// and orphaning in-flight pages ("Session with given id not found").
-	// Per-operation timeouts are applied at call sites (timedPage.Navigate,
-	// WaitLoad/WaitStable caps, page.Timeout(GetSelectorTimeout)), and the
-	// request context carries the overall deadline.
-	return rod.New().NoDefaultDevice().ControlURL(b.browserAddr)
+	// A timeout here permanently expires the shared connection. Apply deadlines
+	// to individual operations instead.
+	return rod.New().NoDefaultDevice().ControlURL(b.conn.addr)
 }
 
 func (b *Browser) connectBrowser() (*rod.Browser, error) {
@@ -476,7 +489,7 @@ func (b *Browser) connectBrowser() (*rod.Browser, error) {
 // listener lives for the lifetime of the rod.Browser session and replaces
 // rod's single-shot HandleAuth helper.
 func (b *Browser) startProxyAuthListener(browser *rod.Browser) error {
-	state := b.connectionState()
+	state := b.conn
 
 	// Stop a previous listener attached to a stale connection.
 	if state.authCancel != nil {
@@ -559,46 +572,58 @@ func (b *Browser) startProxyAuthListener(browser *rod.Browser) error {
 	return nil
 }
 
-func (b *Browser) ensureConnectedBrowser(ctx context.Context, forceReconnect bool) (*rod.Browser, error) {
-	if b == nil || b.browserAddr == "" {
+// ensureConnectedBrowser returns the shared connection, reconnecting when it is
+// unhealthy or still equals stale. If Chrome is gone it is relaunched once.
+func (b *Browser) ensureConnectedBrowser(ctx context.Context, stale *rod.Browser) (*rod.Browser, error) {
+	if b == nil || b.conn == nil {
 		return nil, fmt.Errorf("browser is not initialized")
 	}
-
-	state := b.connectionState()
+	ctx = EnsureContext(ctx)
+	state := b.conn
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
-	if state.browser == nil || forceReconnect {
-		connected, err := b.connectBrowser()
-		if err != nil {
+	// After the lock: a waiter may have been canceled meanwhile.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if state.closed || state.addr == "" {
+		return nil, fmt.Errorf("browser is not initialized")
+	}
+	// Reuse the connection unless it is the one the caller saw fail. Concurrent
+	// failures then share one reconnect instead of replacing each other's.
+	if state.browser != nil && state.browser != stale {
+		if time.Since(state.lastOK) < healthPingSkipWindow {
+			return state.browser, nil
+		}
+		pingCtx, cancel := context.WithTimeout(ctx, healthPingTimeout)
+		_, err := state.browser.Context(pingCtx).Version()
+		cancel()
+		if err == nil {
+			state.lastOK = time.Now()
+			return state.browser, nil
+		}
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		state.browser = connected
-		state.lastOK = time.Now()
-		return state.browser, nil
 	}
-
-	// A recent successful CDP call means the connection is alive; skip the ping.
-	if !state.lastOK.IsZero() && time.Since(state.lastOK) < healthPingSkipWindow {
-		return state.browser, nil
-	}
-
-	// Fresh derived context per call (not browser.Timeout, which would bake a
-	// permanent deadline into the persistent connection — see newRodBrowser).
-	pingCtx, cancelPing := context.WithTimeout(EnsureContext(ctx), healthPingTimeout)
-	_, pingErr := state.browser.Context(pingCtx).Version()
-	cancelPing()
-	if pingErr != nil {
-		WithRequest(ctx).WithError(pingErr).Debug("Browser ping failed, reconnecting")
-		connected, reconnectErr := b.connectBrowser()
-		if reconnectErr != nil {
-			return nil, reconnectErr
+	connected, err := b.connectBrowser()
+	if err != nil && isBrowserClosedError(err) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		state.browser = connected
+		WithRequest(ctx).WithError(err).Warn("Browser disconnected, relaunching")
+		state.kill()
+		state.browser, state.laneProfiles, state.lastOK = nil, nil, time.Time{}
+		if err = b.launchBrowser(); err == nil {
+			connected, err = b.connectBrowser()
+		}
 	}
-	state.lastOK = time.Now()
-
-	return state.browser, nil
+	if err != nil {
+		return nil, err
+	}
+	state.browser, state.lastOK = connected, time.Now()
+	return connected, nil
 }
 
 func createIsolatedPage(browser *rod.Browser, proxyURL string) (*rod.Page, proto.BrowserBrowserContextID, error) {
@@ -609,6 +634,10 @@ func createIsolatedPage(browser *rod.Browser, proxyURL string) (*rod.Page, proto
 			return nil, "", err
 		}
 		create.ProxyServer = proxyURLForBrowserLaunch(parsed)
+		// Launch proxies and insecure mode are set in connectBrowser.
+		if err := browser.IgnoreCertErrors(true); err != nil {
+			return nil, "", fmt.Errorf("ignore cert errors failed: %w", err)
+		}
 	}
 
 	browserContext, err := create.Call(browser)
@@ -677,7 +706,7 @@ func (b *Browser) laneProfile(ctx context.Context, browser *rod.Browser) (browse
 
 	laneKey := browserprofile.LaneKey(engine, region)
 
-	state := b.connectionState()
+	state := b.conn
 	state.mu.Lock()
 	if state.laneProfiles == nil {
 		state.laneProfiles = make(map[string]browserprofile.Profile)
@@ -1295,22 +1324,15 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 	if strings.TrimSpace(b.ProxyURL) == "" {
 		contextProxyURL = requestProxyURLFromContext(ctx)
 	}
-	hasProxy := contextProxyURL != "" || strings.TrimSpace(b.ProxyURL) != ""
 
-	browser, err := b.ensureConnectedBrowser(ctx, false)
+	browser, err := b.ensureConnectedBrowser(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("browser connect failed: %w", err)
 	}
-	if hasProxy || b.Insecure {
-		if err := browser.IgnoreCertErrors(true); err != nil {
-			return nil, fmt.Errorf("ignore cert errors failed: %w", err)
-		}
-	}
-
 	page, browserContextID, err := createIsolatedPage(browser, contextProxyURL)
 	if err != nil {
 		// Single-shot reconnect for stale websocket sessions.
-		browser, err = b.ensureConnectedBrowser(ctx, true)
+		browser, err = b.ensureConnectedBrowser(ctx, browser)
 		if err != nil {
 			return nil, fmt.Errorf("create isolated page failed, reconnect also failed: %w", err)
 		}
@@ -1409,7 +1431,7 @@ func (b *Browser) Navigate(ctx context.Context, URL string) (*rod.Page, error) {
 // markConnectionOK records a successful CDP round trip so the next
 // ensureConnectedBrowser can skip its health ping (see healthPingSkipWindow).
 func (b *Browser) markConnectionOK() {
-	state := b.connectionState()
+	state := b.conn
 	state.mu.Lock()
 	state.lastOK = time.Now()
 	state.mu.Unlock()
@@ -1417,39 +1439,49 @@ func (b *Browser) markConnectionOK() {
 
 // Close closes the active browser connection.
 func (b *Browser) Close() error {
-	if b == nil || b.browserAddr == "" {
+	if b == nil || b.conn == nil {
 		return nil
 	}
 
-	state := b.connectionState()
+	state := b.conn
 	state.mu.Lock()
 	defer state.mu.Unlock()
+	if state.closed {
+		return nil
+	}
+	state.closed = true
+	defer func() {
+		if state.authCancel != nil {
+			state.authCancel()
+			if state.authStopped != nil {
+				<-state.authStopped
+			}
+			state.authCancel, state.authStopped = nil, nil
+		}
+		state.browser, state.laneProfiles = nil, nil
+	}()
+	if state.addr == "" {
+		return nil
+	}
 
 	browser := state.browser
+	var err error
 	if browser == nil {
 		browser = b.newRodBrowser()
-		if err := browser.Connect(); err != nil {
-			if isBrowserClosedError(err) {
-				return nil
-			}
-			return err
+		err = browser.Connect()
+	}
+	if err == nil {
+		err = browser.Close()
+	}
+	if err != nil {
+		state.kill()
+		if isBrowserClosedError(err) {
+			err = nil
 		}
 	}
-
-	if state.authCancel != nil {
-		state.authCancel()
-		if state.authStopped != nil {
-			<-state.authStopped
-		}
-		state.authCancel = nil
-		state.authStopped = nil
-	}
-	state.browser = nil
-	state.laneProfiles = nil
-	if err := browser.Close(); err != nil && !isBrowserClosedError(err) {
-		return err
-	}
-	return nil
+	// Finish profile cleanup before a CLI process can exit.
+	<-state.exited
+	return err
 }
 
 func (b *Browser) ClosePage(ctx context.Context, page *rod.Page, timeout time.Duration) error {
@@ -1462,6 +1494,9 @@ func isBrowserClosedError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "actively refused") ||
+		strings.Contains(msg, "connection reset by peer") ||
+		strings.Contains(msg, "forcibly closed") ||
 		strings.Contains(msg, "closed network connection") ||
 		strings.Contains(msg, "target closed") ||
 		strings.Contains(msg, "eof")

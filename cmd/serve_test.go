@@ -1,12 +1,55 @@
 package cmd
 
 import (
+	"errors"
+	"net"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/karust/openserp/core"
 )
+
+func TestServeReturnsStartupErrors(t *testing.T) {
+	for _, raw := range []bool{false, true} {
+		t.Run(strconv.FormatBool(raw), func(t *testing.T) {
+			isolateConfig(t)
+			if err := initializeConfig(configCommand(t, "")); err != nil {
+				t.Fatal(err)
+			}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			config.Server.Host = "127.0.0.1"
+			config.Server.Port = listener.Addr().(*net.TCPAddr).Port
+			config.Server.IsRawRequests = raw
+			if err := serveCMD.RunE(serveCMD, nil); err == nil {
+				t.Fatal("occupied port must fail startup")
+			}
+		})
+	}
+}
+
+func TestListenFailureClosesResources(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	serv := core.NewServer("127.0.0.1", listener.Addr().(*net.TCPAddr).Port)
+	cleanupErr := errors.New("cleanup failed")
+	calls := 0
+	err = listenWithGracefulShutdown(serv, func() error {
+		calls++
+		return cleanupErr
+	})
+	if calls != 1 || !errors.Is(err, cleanupErr) {
+		t.Fatalf("cleanup calls=%d, startup error=%v", calls, err)
+	}
+}
 
 func TestRawEngineCachesRateLimiter(t *testing.T) {
 	engine := &rawEngine{name: "google"}

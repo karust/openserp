@@ -12,3 +12,10 @@ bin/
 dist/
 *.tgz
 *.tar
+
+# Local caches
+.gocache/
+.gomodcache/
+.tmp-gocache
+.tmpcache/
+

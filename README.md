@@ -23,7 +23,7 @@ Works with Claude Code, Cursor, Codex, Claude Desktop and any MCP client, [Open 
 
 ```sh
 # Start the API server
-docker run --rm -p 127.0.0.1:7000:7000 karust/openserp serve -a 0.0.0.0 -p 7000
+docker run --rm --init -p 127.0.0.1:7000:7000 karust/openserp serve -a 0.0.0.0 -p 7000
 
 # Search Google and read the top result as Markdown
 curl "http://127.0.0.1:7000/google/search?text=how+do+mcp+servers+work&extract=1"
@@ -177,7 +177,7 @@ Results keep their source engine and rank. Ads are typed separately from organic
 
 ## Search Endpoints
 
-Engine names: `google`, `yandex`, `baidu`, `bing`, `duckduckgo` (also `duck`, `ddg`), `ecosia`.
+Engine names: `google`, `yandex`, `baidu`, `bing`, `duckduckgo` (also `duck`; `ddg` works in `engines=` and the CLI), `ecosia`.
 
 Use a dedicated endpoint when the source engine matters, `any` for ordered fallback, or `balanced` to compare engines. Search supports JSON, Markdown, text and NDJSON, plus language, region, date, site and file filters.
 
