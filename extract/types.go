@@ -26,8 +26,8 @@ type ExtractRequest struct {
 	// often want the full page; FullPage keeps nav/feature/landing content that
 	// trafilatura strips. The zero value (false) preserves the cleaned default.
 	FullPage bool
-	// PreserveStructure opts into preserving reference sections within a main
-	// landmark. FullPage takes precedence. The default extraction is unchanged.
+	// PreserveStructure keeps reference sections together on supported documentation
+	// pages during clean extraction. FullPage takes precedence.
 	PreserveStructure bool
 	// UseLLMSTxt, when set and the URL is a site root, probes /llms-full.txt then
 	// /llms.txt and returns that LLM-optimized markdown instead of scraping HTML.

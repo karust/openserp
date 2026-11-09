@@ -949,7 +949,7 @@ components:
       schema:
         type: boolean
         default: false
-      description: Preserve reference sections within a main landmark; ignored when clean=false.
+      description: Preserve reference sections in the main content of supported documentation pages; ignored when clean=false.
     CleanQuery:
       name: clean
       in: query
