@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -19,13 +21,48 @@ import (
 func TestRawExtractFetchFinalURL(t *testing.T) {
 	const destination = "http://1.1.1.1/docs/page.html"
 	// The local proxy serves both public URLs; no external request is made.
-	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close")
 		if r.URL.Path == "/old/page" {
 			http.Redirect(w, r, destination, http.StatusFound)
 			return
 		}
 		_, _ = w.Write([]byte(`<html><head><base href="./"><link rel="canonical" href="canonical.html"></head>
 <body><a href="guide.html">Guide</a></body></html>`))
+	}))
+	defer origin.Close()
+	// The TLS-profile client tunnels HTTP through CONNECT too. The fixture
+	// must implement a tunnel, not return an HTML document to CONNECT.
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect || (r.Host != "8.8.8.8:80" && r.Host != "1.1.1.1:80") {
+			t.Errorf("unexpected proxy request: %s %s", r.Method, r.Host)
+			http.Error(w, "unexpected proxy request", http.StatusBadRequest)
+			return
+		}
+		upstream, err := net.DialTimeout("tcp", origin.Listener.Addr().String(), time.Second)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		defer upstream.Close()
+		conn, rw, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		_, _ = rw.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n")
+		if err := rw.Flush(); err != nil {
+			t.Error(err)
+			return
+		}
+		done := make(chan struct{})
+		go func() { _, _ = io.Copy(upstream, rw); close(done) }()
+		_, _ = io.Copy(conn, upstream)
+		_ = conn.Close()
+		_ = upstream.Close()
+		<-done
 	}))
 	defer proxy.Close()
 	cfg := extractpkg.DefaultConfig()

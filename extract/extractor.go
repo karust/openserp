@@ -140,7 +140,7 @@ func buildResult(req ExtractRequest, resp *FetchResponse, mode string, startedAt
 	doc := goquery.NewDocumentFromNode(root)
 	baseURL := effectiveBaseURL(doc, firstNonEmpty(resp.FinalURL, req.URL))
 	metadata := parseMetadata(doc, baseURL)
-	content, contentErr := extractContent(doc, baseURL, !req.FullPage)
+	content, contentErr := extractContent(doc, baseURL, !req.FullPage, req.PreserveStructure)
 	result := &ExtractResult{
 		URL:         req.URL,
 		Title:       firstNonEmpty(content.Title, metadata.Title),

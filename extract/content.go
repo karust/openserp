@@ -36,15 +36,20 @@ type contentResult struct {
 const minCleanTextRunes = 250
 
 // extractContent turns a page into markdown/text. When clean is true (the
-// default) it uses trafilatura to keep only the main article body; if that pass
-// comes back too thin for a page that clearly had content, it transparently
-// falls back to full-body extraction. When clean is false it skips article
-// detection entirely and converts the whole readable <body>.
+// default) it uses trafilatura to keep the main article body. Callers can opt
+// into preserving structured reference content within a main landmark. A thin
+// article falls back to full-body extraction. When clean is false it skips
+// content detection entirely and converts the whole readable <body>.
 // It mutates doc (absolute links, stripped scripts), so parse metadata first.
-func extractContent(doc *goquery.Document, baseURL string, clean bool) (contentResult, error) {
+func extractContent(doc *goquery.Document, baseURL string, clean, preserveStructure bool) (contentResult, error) {
 	resolveContentURLs(doc, baseURL)
 	if !clean {
 		return extractFullBody(doc, baseURL)
+	}
+	if preserveStructure {
+		if structured, ok, err := extractStructuredContent(doc, baseURL); ok || err != nil {
+			return structured, err
+		}
 	}
 
 	var out contentResult
