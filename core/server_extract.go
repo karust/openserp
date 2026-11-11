@@ -21,10 +21,11 @@ type extractPayload struct {
 	Mode string `json:"mode"`
 	// Clean defaults to true (article-only). Pointer so we can tell "omitted"
 	// (use default) from an explicit false (full-page extraction).
-	Clean      *bool  `json:"clean"`
-	UseLLMSTxt bool   `json:"use_llms_txt"`
-	MinRunes   int    `json:"min_runes"`
-	Lang       string `json:"lang"`
+	Clean             *bool  `json:"clean"`
+	UseLLMSTxt        bool   `json:"use_llms_txt"`
+	PreserveStructure bool   `json:"preserve_structure"`
+	MinRunes          int    `json:"min_runes"`
+	Lang              string `json:"lang"`
 }
 
 func (s *Server) handleExtract(c *fiber.Ctx) error {
@@ -97,14 +98,15 @@ func (s *Server) baseExtractRequest(c *fiber.Ctx, body extractPayload, cfg extra
 		return extractpkg.ExtractRequest{}, errInvalidParam("min_runes must be a non-negative integer")
 	}
 	return extractpkg.ExtractRequest{
-		Mode:       mode,
-		ProxyURL:   proxyURL,
-		LangCode:   firstNonEmpty(body.Lang, c.Query("lang")),
-		Timeout:    cfg.Timeout,
-		MaxBytes:   cfg.MaxBytes,
-		FullPage:   !clean,
-		UseLLMSTxt: parseBoolDefault(c.Query("use_llms_txt"), body.UseLLMSTxt),
-		MinRunes:   minRunes,
+		Mode:              mode,
+		ProxyURL:          proxyURL,
+		LangCode:          firstNonEmpty(body.Lang, c.Query("lang")),
+		Timeout:           cfg.Timeout,
+		MaxBytes:          cfg.MaxBytes,
+		FullPage:          !clean,
+		PreserveStructure: parseBoolDefault(c.Query("preserve_structure"), body.PreserveStructure),
+		UseLLMSTxt:        parseBoolDefault(c.Query("use_llms_txt"), body.UseLLMSTxt),
+		MinRunes:          minRunes,
 	}, nil
 }
 

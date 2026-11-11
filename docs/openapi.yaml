@@ -473,6 +473,7 @@ paths:
         - $ref: "#/components/parameters/MinRunesQuery"
         - $ref: "#/components/parameters/LangQuery"
         - $ref: "#/components/parameters/CleanQuery"
+        - $ref: "#/components/parameters/PreserveStructureQuery"
         - $ref: "#/components/parameters/UseLLMSTxtQuery"
         - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
@@ -516,6 +517,10 @@ paths:
                   type: string
                   enum: [auto, fast, rendered]
                   default: auto
+                preserve_structure:
+                  type: boolean
+                  default: false
+                  description: Same as the `preserve_structure` query parameter.
                 clean:
                   type: boolean
                   default: true
@@ -938,6 +943,21 @@ components:
       schema:
         type: integer
         minimum: 0
+    PreserveStructureQuery:
+      name: preserve_structure
+      in: query
+      required: false
+      description: >
+        Convert the page's content container as-is instead of running article
+        detection: `<main>`, or a known reference layout (DocBook, Texinfo,
+        Apache httpd; the whole `<body>` for man pages). Keeps headings, code
+        blocks and API signatures with their descriptions, along with any menus
+        or sidebars inside that container. Falls back to article detection when
+        there is no container or it lacks headings plus code or definition lists.
+        Ignored when `clean=false`.
+      schema:
+        type: boolean
+        default: false
     CleanQuery:
       name: clean
       in: query
@@ -2122,6 +2142,10 @@ components:
           enum: [auto, fast, rendered]
           default: auto
           description: Extraction mode
+        preserve_structure:
+          type: boolean
+          default: false
+          description: Same as the `preserve_structure` query parameter.
         clean:
           type: boolean
           default: true

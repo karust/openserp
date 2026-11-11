@@ -244,6 +244,9 @@ curl "http://127.0.0.1:7000/extract?url=https://example.com&mode=auto"
 # Return clean page markdown
 curl "http://127.0.0.1:7000/extract?url=https://example.com&format=markdown"
 
+# Keep headings, signatures and code blocks on documentation pages
+curl "http://127.0.0.1:7000/extract?url=https://docs.python.org/3/library/copy.html&format=markdown&preserve_structure=true"
+
 # Extract several URLs at once - returns a bare [{page_content, metadata}] array
 # (Open WebUI external loader compatible); failed URLs become items with metadata.error
 curl -X POST "http://127.0.0.1:7000/extract/batch" \

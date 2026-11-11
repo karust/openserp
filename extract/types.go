@@ -26,6 +26,13 @@ type ExtractRequest struct {
 	// often want the full page; FullPage keeps nav/feature/landing content that
 	// trafilatura strips. The zero value (false) preserves the cleaned default.
 	FullPage bool
+	// PreserveStructure converts the page's content container as-is instead of
+	// running article detection: <main>, or a known reference layout (DocBook,
+	// Texinfo, Apache httpd; <body> for man pages). Headings, code blocks and
+	// API signatures survive, and so do menus inside that container. Falls back
+	// to article detection when there is no container or it lacks structure.
+	// FullPage takes precedence.
+	PreserveStructure bool
 	// UseLLMSTxt, when set and the URL is a site root, probes /llms-full.txt then
 	// /llms.txt and returns that LLM-optimized markdown instead of scraping HTML.
 	UseLLMSTxt bool
