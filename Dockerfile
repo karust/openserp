@@ -17,9 +17,9 @@ FROM chromedp/headless-shell:stable@sha256:f7e7ac721b023cb8717f8108aef8b3e49995f
 WORKDIR /usr/src/app
 
 # wget: used by HEALTHCHECK (localhost, no TLS, so ca-certificates not required).
-# dumb-init: already provided by `docker run --init` / compose `init: true`, so we do NOT add tini here — the PID1 reaper is supplied by the runtime.
+# tini: reaps orphaned Chrome children, which would otherwise pile up as zombies when openserp is PID 1.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends wget \
+  && apt-get install -y --no-install-recommends wget tini \
   && rm -rf /var/lib/apt/lists/* \
   && getent passwd chrome >/dev/null 2>&1 || useradd --create-home --uid 1001 --shell /bin/bash chrome \
   && chown chrome:chrome /usr/src/app
@@ -38,4 +38,5 @@ USER chrome
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget --quiet --tries=1 --spider "http://127.0.0.1:${OPENSERP_SERVER_PORT}/health" || exit 1
 
-ENTRYPOINT ["openserp"]
+# -s keeps reaping when another init is PID 1 (`docker run --init`, compose `init: true`).
+ENTRYPOINT ["/usr/bin/tini", "-s", "--", "openserp"]

@@ -1310,6 +1310,14 @@ components:
         took_ms:
           type: integer
           example: 842
+        partial:
+          type: boolean
+          description: True when only part of the result page is available. Ranks keep their original positions. Omitted otherwise.
+        total_results:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Estimated total number of matches reported by the search engine, when available. Omitted when unknown or zero.
         engines_failed:
           type: array
           items:
