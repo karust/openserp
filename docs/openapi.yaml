@@ -520,7 +520,7 @@ paths:
                 preserve_structure:
                   type: boolean
                   default: false
-                  description: Preserve reference sections; ignored when clean=false.
+                  description: Same as the `preserve_structure` query parameter.
                 clean:
                   type: boolean
                   default: true
@@ -946,10 +946,18 @@ components:
     PreserveStructureQuery:
       name: preserve_structure
       in: query
+      required: false
+      description: >
+        Convert the page's content container as-is instead of running article
+        detection: `<main>`, or a known reference layout (DocBook, Texinfo,
+        Apache httpd; the whole `<body>` for man pages). Keeps headings, code
+        blocks and API signatures with their descriptions, along with any menus
+        or sidebars inside that container. Falls back to article detection when
+        there is no container or it lacks headings plus code or definition lists.
+        Ignored when `clean=false`.
       schema:
         type: boolean
         default: false
-      description: Preserve reference sections in the main content of supported documentation pages; ignored when clean=false.
     CleanQuery:
       name: clean
       in: query
@@ -2137,7 +2145,7 @@ components:
         preserve_structure:
           type: boolean
           default: false
-          description: Preserve reference sections; ignored when clean=false.
+          description: Same as the `preserve_structure` query parameter.
         clean:
           type: boolean
           default: true

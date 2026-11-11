@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
 	extractpkg "github.com/karust/openserp/extract"
 )
 
@@ -147,6 +148,39 @@ func TestExtractRejectsMalformedBody(t *testing.T) {
 	}
 	if hits.Load() != 0 {
 		t.Fatalf("target fetched %d times for malformed requests", hits.Load())
+	}
+}
+
+func TestExtractPreserveStructureParam(t *testing.T) {
+	s := &Server{}
+	for _, tc := range []struct {
+		query, body string
+		want        bool
+	}{
+		{"", `{}`, false},
+		{"", `{"preserve_structure":true}`, true},
+		{"?preserve_structure=true", `{}`, true},
+		{"?preserve_structure=false", `{"preserve_structure":true}`, false}, // query wins
+	} {
+		var payload extractPayload
+		if err := json.Unmarshal([]byte(tc.body), &payload); err != nil {
+			t.Fatal(err)
+		}
+		var got bool
+		app := fiber.New()
+		app.Get("/", func(c *fiber.Ctx) error {
+			req, err := s.baseExtractRequest(c, payload, extractpkg.DefaultConfig())
+			got = req.PreserveStructure
+			return err
+		})
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/"+tc.query, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || got != tc.want {
+			t.Errorf("query %q, body %s: status %d, preserve_structure %v, want %v", tc.query, tc.body, resp.StatusCode, got, tc.want)
+		}
 	}
 }
 

@@ -36,19 +36,20 @@ type contentResult struct {
 const minCleanTextRunes = 250
 
 // extractContent turns a page into markdown/text. When clean is true (the
-// default) it uses trafilatura to keep the main article body. Callers can opt
-// into preserving structured reference content within a main landmark. A thin
-// article falls back to full-body extraction. When clean is false it skips
-// content detection entirely and converts the whole readable <body>.
+// default) it uses trafilatura to keep only the main article body; if that pass
+// comes back too thin for a page that clearly had content, it transparently
+// falls back to full-body extraction. structured tries the page's content
+// container first (see extractStructured). When clean is false it skips
+// article detection entirely and converts the whole readable <body>.
 // It mutates doc (absolute links, stripped scripts), so parse metadata first.
-func extractContent(doc *goquery.Document, baseURL string, clean, preserveStructure bool) (contentResult, error) {
+func extractContent(doc *goquery.Document, baseURL string, clean, structured bool) (contentResult, error) {
 	resolveContentURLs(doc, baseURL)
 	if !clean {
 		return extractFullBody(doc, baseURL)
 	}
-	if preserveStructure {
-		if structured, ok, err := extractStructuredContent(doc, baseURL); ok || err != nil {
-			return structured, err
+	if structured {
+		if out, ok, err := extractStructured(doc, baseURL); ok {
+			return out, err
 		}
 	}
 
@@ -112,19 +113,24 @@ func extractContent(doc *goquery.Document, baseURL string, clean, preserveStruct
 // for landing pages and indexes that "chrome" is the information). This is the
 // raw-er extraction used for clean=false and as the thin-output fallback.
 func extractFullBody(doc *goquery.Document, baseURL string) (contentResult, error) {
-	var out contentResult
-	doc.Find("script,style,noscript,template,svg,iframe").Remove()
-
 	body := doc.Find("body").First()
 	if body.Length() == 0 {
 		body = doc.Selection
 	}
-	bodyHTML, err := body.Html()
+	return renderContent(doc, body, baseURL)
+}
+
+// renderContent converts sel to markdown and text, minus non-content elements.
+// Title and language come from the page.
+func renderContent(doc *goquery.Document, sel *goquery.Selection, baseURL string) (contentResult, error) {
+	var out contentResult
+	sel.Find("script,style,noscript,template,svg,iframe").Remove()
+	selHTML, err := sel.Html()
 	if err != nil {
 		return out, err
 	}
-	out.HTML = strings.TrimSpace(bodyHTML)
-	out.Text = collapseBlankLines(strings.TrimSpace(body.Text()))
+	out.HTML = strings.TrimSpace(selHTML)
+	out.Text = collapseBlankLines(strings.TrimSpace(sel.Text()))
 	out.Title = strings.TrimSpace(doc.Find("title").First().Text())
 	if lang, ok := doc.Find("html").First().Attr("lang"); ok {
 		out.Lang = strings.TrimSpace(lang)
