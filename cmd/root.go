@@ -60,6 +60,7 @@ type ServerConfig struct {
 type AppConfig struct {
 	Timeout        int           `mapstructure:"timeout"`
 	BrowserPath    string        `mapstructure:"browser_path"`
+	UserDataDir    string        `mapstructure:"user_data_dir"`
 	ProfilesJSON   string        `mapstructure:"profiles"`
 	IsBrowserHead  bool          `mapstructure:"head"`
 	IsLeaveHead    bool          `mapstructure:"leave_head"`
@@ -129,6 +130,7 @@ var flagToConfigKey = map[string]string{
 	"timeout":                 "app.timeout",
 	"config":                  "server.config_path",
 	"browser-path":            "app.browser_path",
+	"user-data-dir":           "app.user_data_dir",
 	"profiles-json":           "app.profiles",
 	"verbose":                 "server.verbose",
 	"debug":                   "server.debug",
@@ -454,6 +456,7 @@ func setConfigDefaults(v *viper.Viper) {
 
 	v.SetDefault("app.timeout", 30)
 	v.SetDefault("app.browser_path", "")
+	v.SetDefault("app.user_data_dir", "")
 	v.SetDefault("app.profiles", "")
 	v.SetDefault("app.head", false)
 	v.SetDefault("app.leave_head", false)
@@ -511,6 +514,7 @@ func init() {
 	RootCmd.PersistentFlags().IntVarP(&config.App.Timeout, "timeout", "t", 30, "Timeout to fail request")
 	RootCmd.PersistentFlags().StringVarP(&config.Server.ConfigPath, "config", "c", "", "Configuration file path")
 	RootCmd.PersistentFlags().StringVarP(&config.App.BrowserPath, "browser-path", "", "", "Custom browser binary path (Chrome/Chromium/Edge/Brave..)")
+	RootCmd.PersistentFlags().StringVar(&config.App.UserDataDir, "user-data-dir", "", "Directory for temporary browser profiles (default: <tmp>/rod/user-data)")
 	RootCmd.PersistentFlags().StringVar(&config.App.ProfilesJSON, "profiles", "", "Path to browser profile catalog JSON")
 	RootCmd.PersistentFlags().BoolVarP(&config.Server.IsVerbose, "verbose", "v", false, "Use verbose output")
 	RootCmd.PersistentFlags().BoolVarP(&config.Server.IsDebug, "debug", "d", false, "Use debug output. Disable headless browser")
