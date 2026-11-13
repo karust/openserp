@@ -45,6 +45,9 @@ type BrowserOpts struct {
 	CaptchaSolverEnabled bool
 	// BrowserPath optionally points to a specific browser executable.
 	BrowserPath string
+	// UserDataDir is the directory that holds per-launch Chromium profiles.
+	// Empty uses Rod's default (<tmp>/rod/user-data).
+	UserDataDir string
 	// ProxyURL defines the upstream proxy for browser traffic.
 	ProxyURL string
 	// ProxyLaneStore keeps sticky proxy lane profiles and cookies.
@@ -310,7 +313,20 @@ func (b *Browser) launchBrowser() error {
 	// when there's no GPU - which is what the swiftshader profiles describe.
 	// Legacy --headless kills the GPU process and breaks WebGL entirely.
 	// Leakless defaults to false: the helper binary trips antivirus on Windows.
+	userDataDir, err := newUserDataDir(opts.UserDataDir)
+	if err != nil {
+		return err
+	}
+	launched := false
+	defer func() {
+		// Cleanup only runs after a successful launch; drop the profile otherwise.
+		if !launched {
+			_ = os.RemoveAll(userDataDir)
+		}
+	}()
+
 	l := launcher.New().Leakless(opts.IsLeakless).
+		UserDataDir(userDataDir).
 		Set("lang", browserLaunchLanguage(opts)).
 		Set("disable-blink-features", "AutomationControlled").
 		Delete("enable-automation")
@@ -343,6 +359,7 @@ func (b *Browser) launchBrowser() error {
 	if err != nil {
 		return err
 	}
+	launched = true
 	exited := make(chan struct{})
 	go func() {
 		l.Cleanup()

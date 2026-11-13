@@ -12,6 +12,7 @@ app:
   save_log: true # Also write logs to ./logs.txt in serve mode; false = stderr only
   timeout: 15 # Browser/search timeout in seconds, per attempt; the request deadline is derived from this x retries
   browser_path: "" # Custom browser binary path (chrome/chromium/edge..)
+  user_data_dir: "" # Where temporary browser profiles live; empty = <tmp>/rod/user-data. Stale profiles from earlier runs are removed on serve startup
   profiles: "" # Overriding built-in browser profiles
   head: false # Headful mode
   leakless: false # Force browser process cleanup after request
