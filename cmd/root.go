@@ -507,7 +507,7 @@ func setConfigDefaults(v *viper.Viper) {
 
 func init() {
 	RootCmd.PersistentFlags().IntVarP(&config.Server.Port, "port", "p", 7070, "Port number to run server")
-	RootCmd.PersistentFlags().StringVarP(&config.Server.Host, "host", "a", "127.0.0.1", "Host address to run server")
+	RootCmd.PersistentFlags().StringVarP(&config.Server.Host, "host", "a", "127.0.0.1", "Host address to run server, or unix:<path>.sock for a UNIX socket")
 	RootCmd.PersistentFlags().IntVarP(&config.App.Timeout, "timeout", "t", 30, "Timeout to fail request")
 	RootCmd.PersistentFlags().StringVarP(&config.Server.ConfigPath, "config", "c", "", "Configuration file path")
 	RootCmd.PersistentFlags().StringVarP(&config.App.BrowserPath, "browser-path", "", "", "Custom browser binary path (Chrome/Chromium/Edge/Brave..)")

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -54,7 +56,8 @@ type SearchEngine interface {
 // Server exposes OpenSERP HTTP endpoints backed by one or more search engines.
 type Server struct {
 	app           *fiber.App
-	addr          string
+	host          string
+	port          int
 	searchEngines []SearchEngine
 	cache         *ResponseCache
 	resilient     *ResilientSearcher
@@ -142,7 +145,6 @@ func NewServer(host string, port int, searchEngines ...SearchEngine) *Server {
 // routes. The returned server is ready to Listen; call Shutdown for graceful
 // stop.
 func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngines ...SearchEngine) *Server {
-	addr := fmt.Sprintf("%s:%d", host, port)
 	app := fiber.New(fiber.Config{
 		ErrorHandler: JSONErrorMiddleware(),
 		BodyLimit:    10 * 1024 * 1024,
@@ -150,7 +152,8 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 
 	serv := Server{
 		app:           app,
-		addr:          addr,
+		host:          host,
+		port:          port,
 		searchEngines: searchEngines,
 		resilient:     NewResilientSearcher(searchEngines, opts.Resilience),
 		startTime:     time.Now(),
@@ -1658,10 +1661,62 @@ func (s *Server) SetDraining(draining bool) {
 
 const defaultShutdownTimeout = 30 * time.Second
 
-// Listen starts the Fiber HTTP server on the configured address.
+const unixSocketPrefix = "unix:"
+
+// parseListenAddr maps the configured host and port to a net.Listen network
+// and address. A host of the form "unix:/path/to/file.sock" selects a UNIX
+// domain socket and the port is ignored.
+func parseListenAddr(host string, port int) (network, addr string, err error) {
+	path, ok := strings.CutPrefix(host, unixSocketPrefix)
+	if !ok {
+		return "tcp", fmt.Sprintf("%s:%d", host, port), nil
+	}
+	if !strings.HasSuffix(path, ".sock") || len(path) == len(".sock") {
+		return "", "", fmt.Errorf("invalid unix socket host %q: expected unix:<path>.sock", host)
+	}
+	return "unix", path, nil
+}
+
+// removeStaleSocket deletes a socket file left behind by a previous run.
+// Other file types are never removed so a misconfigured path cannot delete
+// regular files.
+func removeStaleSocket(path string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode().Type() != fs.ModeSocket {
+		return fmt.Errorf("refusing to replace %s: existing file is not a unix socket", path)
+	}
+	return os.Remove(path)
+}
+
+// Listen starts the Fiber HTTP server on the configured TCP address or UNIX
+// socket.
 func (s *Server) Listen() error {
+	network, addr, err := parseListenAddr(s.host, s.port)
+	if err != nil {
+		return err
+	}
 	s.SetDraining(false)
-	return s.app.Listen(s.addr)
+	if network == "tcp" {
+		return s.app.Listen(addr)
+	}
+
+	if err := removeStaleSocket(addr); err != nil {
+		return err
+	}
+	// net.Listen("unix") unlinks the socket file when the listener is closed,
+	// which happens on Shutdown.
+	ln, err := net.Listen(network, addr)
+	if err != nil {
+		return err
+	}
+	logrus.WithField("socket", addr).Info("Listening on unix socket")
+	return s.app.Listener(ln)
 }
 
 // Shutdown gracefully stops the Fiber HTTP server.
