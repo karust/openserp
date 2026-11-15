@@ -49,8 +49,9 @@ func (e *Extractor) Extract(ctx context.Context, req ExtractRequest) (*ExtractRe
 	var rawResult *ExtractResult
 	var rawErr error
 	if req.Mode != ModeRendered && e.RawFetch != nil {
-		rawResult, rawErr = e.extractFast(ctx, req, startedAt)
-		if req.Mode == ModeFast || goodEnough(rawResult, rawErr, req.MinRunes) {
+		var pdf bool
+		rawResult, pdf, rawErr = e.extractFast(ctx, req, startedAt)
+		if pdf || req.Mode == ModeFast || goodEnough(rawResult, rawErr, req.MinRunes) {
 			return rawResult, rawErr
 		}
 	}
@@ -75,17 +76,25 @@ func (e *Extractor) Extract(ctx context.Context, req ExtractRequest) (*ExtractRe
 	return nil, renderedErr
 }
 
-func (e *Extractor) extractFast(ctx context.Context, req ExtractRequest, startedAt time.Time) (*ExtractResult, error) {
+func (e *Extractor) extractFast(ctx context.Context, req ExtractRequest, startedAt time.Time) (*ExtractResult, bool, error) {
 	fetchCtx, cancel := context.WithTimeout(ctx, req.Timeout)
 	defer cancel()
 	resp, err := e.RawFetch(fetchCtx, req)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if resp == nil {
-		return nil, errors.New("empty raw response")
+		return nil, false, errors.New("empty raw response")
 	}
-	return buildResult(req, resp, string(ModeFast), startedAt)
+	if bytes.HasPrefix(bytes.TrimSpace(resp.Body), []byte("%PDF-")) {
+		if err := classifyStatus(resp.StatusCode); err != nil {
+			return nil, true, err
+		}
+		result, err := extractPDF(fetchCtx, req, resp, startedAt)
+		return result, true, err
+	}
+	result, err := buildResult(req, resp, string(ModeFast), startedAt)
+	return result, false, err
 }
 
 func (e *Extractor) extractRendered(ctx context.Context, req ExtractRequest, startedAt time.Time) (*ExtractResult, error) {
