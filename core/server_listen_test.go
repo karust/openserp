@@ -139,3 +139,65 @@ func TestServerListenUnixSocketKeepsRegularFile(t *testing.T) {
 		t.Fatalf("regular file was modified: data=%q err=%v", data, err)
 	}
 }
+
+func TestParseSocketMode(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    os.FileMode
+		wantErr bool
+	}{
+		{in: "", want: 0},
+		{in: "0777", want: 0o777},
+		{in: "660", want: 0o660},
+		{in: "0o660", wantErr: true},
+		{in: "0", wantErr: true},
+		{in: "1777", wantErr: true},
+		{in: "rw", wantErr: true},
+	}
+	for _, tt := range tests {
+		got, err := ParseSocketMode(tt.in)
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("ParseSocketMode(%q): expected error, got %o", tt.in, got)
+			}
+			continue
+		}
+		if err != nil || got != tt.want {
+			t.Errorf("ParseSocketMode(%q) = %o, %v; want %o", tt.in, got, err, tt.want)
+		}
+	}
+}
+
+func TestServerListenUnixSocketAppliesMode(t *testing.T) {
+	sockPath := filepath.Join(shortTempDir(t), "openserp.sock")
+	opts := DefaultServerOptions()
+	opts.SocketMode = 0o777
+	srv := NewServerWithOptions("unix:"+sockPath, 0, opts, &engineMock{name: "google", initialized: true})
+
+	listenErrCh := make(chan error, 1)
+	go func() { listenErrCh <- srv.Listen() }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		info, err := os.Lstat(sockPath)
+		if err == nil && info.Mode().Perm() == 0o777 {
+			break
+		}
+		select {
+		case listenErr := <-listenErrCh:
+			t.Fatalf("listen exited early: %v", listenErr)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("socket mode not applied: info=%v err=%v", info, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if err := srv.ShutdownWithTimeout(time.Second); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	if err := <-listenErrCh; err != nil {
+		t.Fatalf("listen returned error: %v", err)
+	}
+}

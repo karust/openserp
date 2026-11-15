@@ -106,6 +106,9 @@ type ServerOptions struct {
 	Extract extractpkg.Config
 	// GoogleResolve configures Google result URL resolution.
 	GoogleResolve URLResolveConfig
+	// SocketMode sets the permissions of the UNIX socket file. Zero keeps the
+	// umask-derived default, which usually lets only the owner connect.
+	SocketMode os.FileMode
 }
 
 type BrowserResolver func(proxyURL string) (*Browser, error)
@@ -1694,6 +1697,19 @@ func removeStaleSocket(path string) error {
 	return os.Remove(path)
 }
 
+// ParseSocketMode parses an octal permission string such as "0660" or "777".
+// An empty string returns zero, meaning the socket keeps its default mode.
+func ParseSocketMode(s string) (os.FileMode, error) {
+	if s == "" {
+		return 0, nil
+	}
+	mode, err := strconv.ParseUint(s, 8, 32)
+	if err != nil || mode == 0 || mode > 0o777 {
+		return 0, fmt.Errorf("invalid socket mode %q: expected octal permissions such as 0660 or 0777", s)
+	}
+	return os.FileMode(mode), nil
+}
+
 // Listen starts the Fiber HTTP server on the configured TCP address or UNIX
 // socket.
 func (s *Server) Listen() error {
@@ -1714,6 +1730,12 @@ func (s *Server) Listen() error {
 	ln, err := net.Listen(network, addr)
 	if err != nil {
 		return err
+	}
+	if s.opts.SocketMode != 0 {
+		if err := os.Chmod(addr, s.opts.SocketMode); err != nil {
+			_ = ln.Close()
+			return fmt.Errorf("chmod unix socket: %w", err)
+		}
 	}
 	logrus.WithField("socket", addr).Info("Listening on unix socket")
 	return s.app.Listener(ln)
