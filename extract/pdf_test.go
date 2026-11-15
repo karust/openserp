@@ -9,13 +9,13 @@ import (
 )
 
 func TestAutoExtractPDF(t *testing.T) {
-	if _, err := exec.LookPath("pdftotext"); err != nil {
-		t.Skip("install poppler-utils to exercise PDF extraction")
+	if _, err := exec.LookPath("mutool"); err != nil {
+		t.Skip("install mupdf-tools to exercise PDF extraction")
 	}
 	// A small, self-contained PDF with a real text layer and cross-reference table.
 	var b strings.Builder
 	b.WriteString("%PDF-1.4\n")
-	stream := "BT /F1 12 Tf 24 160 Td (Example reference text.) Tj ET"
+	stream := "BT /F1 12 Tf 24 160 Td (Example f) Tj (lexible field.) Tj ET"
 	objects := []string{"<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>", fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream), "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"}
 	offsets := make([]int, len(objects))
 	for i, obj := range objects {
@@ -40,11 +40,19 @@ func TestAutoExtractPDF(t *testing.T) {
 		}}
 		got, err := e.Extract(context.Background(), ExtractRequest{URL: "https://example.org/manual", Mode: ModeAuto})
 		if tc.valid {
-			if err != nil || got.Markdown != "Example reference text." {
+			if err != nil || got.Markdown != "Example flexible field." {
 				t.Fatalf("text extraction: %+v %v", got, err)
 			}
 		} else if err == nil || got != nil {
 			t.Fatal("invalid PDF accepted")
 		}
+	}
+}
+
+func TestPDFMarkdownJoinsWrappedProseWithinPage(t *testing.T) {
+	raw := "Manual\n\nThe decoder works with a flexible\n\nrenderer and preserves the sound field.\n\nAnother paragraph that ends in a word\fnext page"
+	want := "Manual\n\nThe decoder works with a flexible renderer and preserves the sound field.\n\nAnother paragraph that ends in a word\n\nnext page"
+	if got := pdfMarkdown(raw); got != want {
+		t.Fatalf("got %q", got)
 	}
 }

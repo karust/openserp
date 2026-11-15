@@ -19,7 +19,7 @@ WORKDIR /usr/src/app
 # wget: used by HEALTHCHECK (localhost, no TLS, so ca-certificates not required).
 # tini: reaps orphaned Chrome children, which would otherwise pile up as zombies when openserp is PID 1.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends wget poppler-utils tini \
+  && apt-get install -y --no-install-recommends wget mupdf-tools tini \
   && rm -rf /var/lib/apt/lists/* \
   && getent passwd chrome >/dev/null 2>&1 || useradd --create-home --uid 1001 --shell /bin/bash chrome \
   && chown chrome:chrome /usr/src/app
