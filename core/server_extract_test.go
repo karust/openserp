@@ -116,8 +116,8 @@ func TestRawExtractFetchStopsAtByteLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Body) != limit {
-		t.Fatalf("body length = %d, want %d", len(resp.Body), limit)
+	if len(resp.Body) != limit || !resp.Truncated {
+		t.Fatalf("body length = %d, truncated = %v, want %d, true", len(resp.Body), resp.Truncated, limit)
 	}
 	if ctx.Err() != nil {
 		t.Fatal("fetch drained beyond the byte limit until the deadline")

@@ -27,7 +27,7 @@ extract:
   enabled: true
   default_mode: auto # auto|fast|rendered
   timeout: 20s
-  max_bytes: 2000000
+  max_bytes: 3145728 # 3 MB - bigger HTML is cut, bigger PDFs fail
   max_concurrent: 2
 
 proxies:

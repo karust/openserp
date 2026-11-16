@@ -1,8 +1,10 @@
 package extract
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -12,52 +14,83 @@ import (
 	"unicode/utf8"
 )
 
-// MuPDF requires seekable input. Decode only the bytes fetched by the caller.
-func extractPDF(ctx context.Context, req ExtractRequest, resp *FetchResponse, started time.Time) (*ExtractResult, error) {
-	if len(resp.Body) > req.MaxBytes {
-		return nil, errors.New("PDF exceeds extraction byte limit")
+// Sniff the body, servers often label PDFs as octet-stream.
+func isPDF(body []byte) bool {
+	return bytes.HasPrefix(bytes.TrimLeft(body, " \t\r\n"), []byte("%PDF-"))
+}
+
+func extractPDF(ctx context.Context, req ExtractRequest, resp *FetchResponse, startedAt time.Time) (*ExtractResult, error) {
+	if err := classifyStatus(resp.StatusCode); err != nil {
+		return nil, err
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	file, err := os.CreateTemp("", "openserp-*.pdf")
+	// A cut PDF loses its trailer, MuPDF would fail or return a fragment.
+	if resp.Truncated || len(resp.Body) > req.MaxBytes {
+		return nil, fmt.Errorf("PDF exceeds the %d-byte extraction limit", req.MaxBytes)
+	}
+	raw, err := pdfText(ctx, resp.Body, req.MaxBytes)
 	if err != nil {
 		return nil, err
 	}
-	defer os.Remove(file.Name())
-	_, writeErr := file.Write(resp.Body)
-	closeErr := file.Close()
-	if writeErr != nil {
-		return nil, writeErr
-	}
-	if closeErr != nil {
-		return nil, closeErr
-	}
-	cmd := exec.CommandContext(ctx, "mutool", "draw", "-F", "txt", "-o", "-", file.Name())
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	if err = cmd.Start(); err != nil {
-		return nil, errors.New("PDF extraction requires mutool")
-	}
-	data, readErr := io.ReadAll(io.LimitReader(stdout, int64(req.MaxBytes)+1))
-	if readErr != nil || len(data) > req.MaxBytes {
-		cancel()
-	}
-	err = cmd.Wait()
-	if len(data) > req.MaxBytes {
-		return nil, errors.New("PDF text exceeds extraction byte limit")
-	}
-	if err != nil || readErr != nil {
-		return nil, errors.New("unable to extract PDF text")
-	}
-	text := strings.TrimSpace(strings.ReplaceAll(string(data), "\f", "\n\n"))
+	text := normalizeMarkdown(strings.ReplaceAll(raw, "\f", "\n\n"))
 	if text == "" {
 		return nil, errors.New("PDF has no extractable text")
 	}
-	// PDF text wraps at visual line boundaries. Keep paragraph and page breaks.
-	markdown := pdfMarkdown(string(data))
-	return &ExtractResult{URL: req.URL, Canonical: firstNonEmpty(resp.FinalURL, req.URL), Text: text, Markdown: markdown, Meta: ExtractMeta{ModeUsed: string(ModeFast), Bytes: len(resp.Body), FetchedAt: time.Now().UTC().Format(time.RFC3339), TookMs: time.Since(started).Milliseconds()}}, nil
+	return &ExtractResult{
+		URL:       req.URL,
+		Canonical: firstNonEmpty(resp.FinalURL, req.URL),
+		Text:      text,
+		Markdown:  pdfMarkdown(raw),
+		Meta: ExtractMeta{
+			ModeUsed:  string(ModeFast),
+			FetchedAt: time.Now().UTC().Format(time.RFC3339),
+			Bytes:     len(resp.Body),
+			TookMs:    time.Since(startedAt).Milliseconds(),
+		},
+	}, nil
+}
+
+// pdfText returns `mutool draw -F txt` output: blank line after each block, \f after each page.
+// MuPDF needs seekable input, so the body goes through a temp file.
+func pdfText(ctx context.Context, body []byte, limit int) (string, error) {
+	file, err := os.CreateTemp("", "openserp-*.pdf")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(file.Name())
+	_, err = file.Write(body)
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return "", err
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "mutool", "draw", "-F", "txt", "-o", "-", file.Name())
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	if err := cmd.Start(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return "", errors.New("PDF extraction requires mutool (mupdf-tools)")
+		}
+		return "", fmt.Errorf("start mutool: %w", err)
+	}
+	out, readErr := io.ReadAll(io.LimitReader(stdout, int64(limit)+1))
+	if readErr != nil || len(out) > limit {
+		// mutool may be blocked on a full pipe, kill it so Wait returns.
+		cancel()
+	}
+	waitErr := cmd.Wait()
+	if len(out) > limit {
+		return "", errors.New("PDF text exceeds extraction byte limit")
+	}
+	if readErr != nil || waitErr != nil {
+		return "", errors.New("unable to extract PDF text")
+	}
+	return string(out), nil
 }
 
 // Widely spaced prose may arrive as a separate block for each visual line.

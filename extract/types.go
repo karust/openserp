@@ -78,6 +78,8 @@ type FetchResponse struct {
 	Body       []byte
 	// FinalURL is the document URL after redirects. Empty uses the request URL.
 	FinalURL string
+	// Truncated means Body was cut at the byte budget. HTML survives that, PDFs do not.
+	Truncated bool
 }
 
 type RawFetcher func(ctx context.Context, req ExtractRequest) (*FetchResponse, error)

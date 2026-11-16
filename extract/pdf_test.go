@@ -49,6 +49,19 @@ func TestAutoExtractPDF(t *testing.T) {
 	}
 }
 
+func TestTruncatedPDFFailsWithoutBrowser(t *testing.T) {
+	e := Extractor{RawFetch: func(context.Context, ExtractRequest) (*FetchResponse, error) {
+		return &FetchResponse{StatusCode: 200, Body: []byte("\n%PDF-1.7 cut"), Truncated: true}, nil
+	}, RenderedFetch: func(context.Context, ExtractRequest) (*FetchResponse, error) {
+		t.Fatal("PDF must not fall back to the browser")
+		return nil, nil
+	}}
+	_, err := e.Extract(context.Background(), ExtractRequest{URL: "https://example.org/big.pdf", Mode: ModeAuto})
+	if err == nil || !strings.Contains(err.Error(), "extraction limit") {
+		t.Fatalf("err = %v, want byte limit error", err)
+	}
+}
+
 func TestPDFMarkdownJoinsWrappedProseWithinPage(t *testing.T) {
 	raw := "Manual\n\nThe decoder works with a flexible\n\nrenderer and preserves the sound field.\n\nAnother paragraph that ends in a word\fnext page"
 	want := "Manual\n\nThe decoder works with a flexible renderer and preserves the sound field.\n\nAnother paragraph that ends in a word\n\nnext page"

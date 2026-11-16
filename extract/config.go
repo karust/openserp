@@ -16,7 +16,7 @@ func DefaultConfig() Config {
 		Enabled:       true,
 		DefaultMode:   string(ModeAuto),
 		Timeout:       20 * time.Second,
-		MaxBytes:      2 * 1024 * 1024,
+		MaxBytes:      3 * 1024 * 1024, // fits typical papers as PDFs
 		MaxConcurrent: 2,
 	}
 }

@@ -51,6 +51,7 @@ func (e *Extractor) Extract(ctx context.Context, req ExtractRequest) (*ExtractRe
 	if req.Mode != ModeRendered && e.RawFetch != nil {
 		var pdf bool
 		rawResult, pdf, rawErr = e.extractFast(ctx, req, startedAt)
+		// A browser renders a PDF viewer, not text, so a PDF result is final.
 		if pdf || req.Mode == ModeFast || goodEnough(rawResult, rawErr, req.MinRunes) {
 			return rawResult, rawErr
 		}
@@ -86,10 +87,7 @@ func (e *Extractor) extractFast(ctx context.Context, req ExtractRequest, started
 	if resp == nil {
 		return nil, false, errors.New("empty raw response")
 	}
-	if bytes.HasPrefix(bytes.TrimSpace(resp.Body), []byte("%PDF-")) {
-		if err := classifyStatus(resp.StatusCode); err != nil {
-			return nil, true, err
-		}
+	if isPDF(resp.Body) {
 		result, err := extractPDF(fetchCtx, req, resp, startedAt)
 		return result, true, err
 	}
