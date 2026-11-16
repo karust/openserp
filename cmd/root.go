@@ -478,7 +478,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("extract.enabled", true)
 	v.SetDefault("extract.default_mode", "auto")
 	v.SetDefault("extract.timeout", "20s")
-	v.SetDefault("extract.max_bytes", 2*1024*1024)
+	v.SetDefault("extract.max_bytes", 3*1024*1024)
 	v.SetDefault("extract.max_concurrent", 2)
 	v.SetDefault("extract.allow_private_networks", false)
 	// Keep stage2 defaults stable even when config file is absent.

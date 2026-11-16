@@ -467,6 +467,10 @@ paths:
       tags: [Search]
       operationId: extractURL
       summary: Extract clean content from one URL
+      description: >
+        PDF URLs return their text layer without a browser fallback. This needs
+        `mutool` (mupdf-tools), which the Docker image includes. PDFs over
+        `extract.max_bytes` and scans without a text layer fail with 502.
       parameters:
         - $ref: "#/components/parameters/URLQuery"
         - $ref: "#/components/parameters/ExtractModeShortQuery"
@@ -502,6 +506,7 @@ paths:
       tags: [Search]
       operationId: extractURLPost
       summary: Extract clean content from one URL
+      description: Same as `GET /extract`, PDFs included, with parameters in a JSON body.
       requestBody:
         required: true
         content:

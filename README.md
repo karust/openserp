@@ -47,6 +47,8 @@ cd openserp && go build -o openserp . && ./openserp serve
 
 Prebuilt binaries for Linux, macOS and Windows are on the [releases page](https://github.com/karust/openserp/releases). Images: [`karust/openserp`](https://hub.docker.com/r/karust/openserp).
 
+PDF extraction calls `mutool`. The Docker image ships it, other installs need MuPDF (`apt install mupdf-tools`).
+
 </details>
 
 ## Use with AI Agents
@@ -246,6 +248,9 @@ curl "http://127.0.0.1:7000/extract?url=https://example.com&format=markdown"
 
 # Keep headings, signatures and code blocks on documentation pages
 curl "http://127.0.0.1:7000/extract?url=https://docs.python.org/3/library/copy.html&format=markdown&preserve_structure=true"
+
+# PDFs return their text layer (scans without one return an error)
+curl "http://127.0.0.1:7000/extract?url=https://bitcoin.org/bitcoin.pdf&format=markdown"
 
 # Extract several URLs at once - returns a bare [{page_content, metadata}] array
 # (Open WebUI external loader compatible); failed URLs become items with metadata.error

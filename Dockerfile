@@ -17,9 +17,10 @@ FROM chromedp/headless-shell:stable@sha256:f7e7ac721b023cb8717f8108aef8b3e49995f
 WORKDIR /usr/src/app
 
 # wget: used by HEALTHCHECK (localhost, no TLS, so ca-certificates not required).
+# mupdf-tools: mutool reads the text layer of PDF URLs for /extract.
 # tini: reaps orphaned Chrome children, which would otherwise pile up as zombies when openserp is PID 1.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends wget tini \
+  && apt-get install -y --no-install-recommends wget mupdf-tools tini \
   && rm -rf /var/lib/apt/lists/* \
   && getent passwd chrome >/dev/null 2>&1 || useradd --create-home --uid 1001 --shell /bin/bash chrome \
   && chown chrome:chrome /usr/src/app
