@@ -89,6 +89,7 @@ var alwaysBlockedTrackingDomains = []string{
 	"googletagmanager.com",
 	"doubleclick.net",
 	"connect.facebook.net",
+	"improving.duckduckgo.com",
 }
 
 var alwaysBlockedTrackingURLPatterns = buildTrackingDomainURLPatterns(alwaysBlockedTrackingDomains)

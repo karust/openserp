@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"testing"
 
 	"github.com/go-rod/rod/lib/proto"
@@ -16,6 +17,26 @@ func TestBuildTrackingDomainURLPatterns(t *testing.T) {
 	}
 	if patterns[1] != "*://*.google-analytics.com/*" {
 		t.Fatalf("unexpected subdomain pattern: %q", patterns[1])
+	}
+}
+
+func TestTrackerBlockingScopesDuckDuckGoImprovementHost(t *testing.T) {
+	want := map[string]bool{
+		"*://improving.duckduckgo.com/*":   false,
+		"*://*.improving.duckduckgo.com/*": false,
+	}
+	for _, pattern := range alwaysBlockedTrackingURLPatterns {
+		if _, ok := want[pattern]; ok {
+			want[pattern] = true
+		}
+		if pattern == "*://duckduckgo.com/*" || pattern == "*://*.duckduckgo.com/*" {
+			t.Fatalf("tracker blocking must not cover DuckDuckGo search: %q", pattern)
+		}
+	}
+	for pattern, found := range want {
+		if !found {
+			t.Errorf("missing tracker pattern %q", pattern)
+		}
 	}
 }
 
@@ -48,6 +69,13 @@ func TestShouldBlockResourceType(t *testing.T) {
 				t.Fatalf("resource type %s: got blocked=%t want %t", tt.resourceType, got, tt.wantBlocked)
 			}
 		})
+	}
+}
+
+func TestRequestBlockingDisabledIsNoop(t *testing.T) {
+	browser := Browser{BrowserOpts: BrowserOpts{BlockTrackers: false}}
+	if err := browser.configureRequestBlocking(context.Background(), nil); err != nil {
+		t.Fatalf("disabled request blocking returned an error: %v", err)
 	}
 }
 

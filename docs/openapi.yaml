@@ -823,9 +823,9 @@ components:
       required: false
       description: >
         Google only. When Google hides result links behind encrypted `/goto`
-        redirects, follow one redirect hop per link to return the destination
-        URL. The destination page is not fetched, and ad links are never
-        resolved. `true` resolves every wrapped link, `N` only the first N
+        redirects, follow Google's redirect responses, including HTML refresh hops,
+        to return the destination URL. The destination page is not fetched, and ad
+        links are never resolved. `true` resolves every wrapped link, `N` only the first N
         organic results, `0`/`false` disables it. Links that fail to resolve
         keep the redirect URL; `domain` still comes from the visible attribution.
         When omitted, uses the server's `google.resolve_urls` setting (default `true`).

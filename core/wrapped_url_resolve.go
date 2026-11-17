@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"golang.org/x/net/html"
 )
 
 // URLResolveConfig sets Google redirect resolution defaults and limits.
@@ -25,8 +27,8 @@ type URLResolveConfig struct {
 func DefaultURLResolveConfig() URLResolveConfig {
 	return URLResolveConfig{
 		URLs: "true",
-		// A resolve is one 302 from Google (~200ms, a few hundred bytes); the
-		// destination page is never fetched.
+		// A resolve reads only Google's redirect responses; the destination page
+		// is never fetched.
 		Concurrency: 4,
 		Timeout:     3 * time.Second,
 		// The same exit serves the SERPs, so back off once Google pushes back on
@@ -36,6 +38,9 @@ func DefaultURLResolveConfig() URLResolveConfig {
 }
 
 var errResolveChallenged = errors.New("redirect resolve challenged")
+
+const maxGoogleRedirectRequests = 3
+const maxGoogleRedirectBodyBytes = 64 * 1024
 
 // fetchRedirect is swapped in tests.
 var fetchRedirect = rawClickRequest
@@ -144,12 +149,7 @@ resolveLoop:
 // ad clicks are skipped: fetching them bills the advertiser.
 func resolvableGoogleRedirect(raw, pageURL string) (string, bool) {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || !isGoogleRedirectURL(u) {
-		return "", false
-	}
-	switch strings.TrimSuffix(strings.ToLower(u.Path), "/") {
-	case "/goto", "/url":
-	default:
+	if err != nil || !isGoogleResultRedirect(u) {
 		return "", false
 	}
 	if IsUsableResultURL(normalizeURL(raw)) {
@@ -168,36 +168,122 @@ func resolvableGoogleRedirect(raw, pageURL string) (string, bool) {
 	return u.String(), true
 }
 
-func resolveGoogleRedirect(ctx context.Context, wrapped string, query Query) (string, error) {
-	resp, err := fetchRedirect(ctx, wrapped, query)
-	if err != nil {
-		return "", err
+func isGoogleResultRedirect(u *url.URL) bool {
+	if !isGoogleRedirectURL(u) {
+		return false
 	}
-	defer DrainAndCloseResponse(resp)
+	switch strings.TrimSuffix(strings.ToLower(u.Path), "/") {
+	case "/goto", "/url":
+		return true
+	}
+	return false
+}
 
-	// 400 is a bad or expired token, not pushback.
-	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
-		return "", errResolveChallenged
+func resolveGoogleRedirect(ctx context.Context, wrapped string, query Query) (string, error) {
+	current := wrapped
+	for range maxGoogleRedirectRequests {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		resp, err := fetchRedirect(ctx, current, query)
+		if err != nil {
+			return "", err
+		}
+
+		status := resp.StatusCode
+		location, ok := redirectLocation(resp)
+		if !ok && status == http.StatusOK {
+			location, ok = googleRefreshLocation(resp)
+		} else {
+			// Keep small redirect connections reusable without draining large errors.
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxGoogleRedirectBodyBytes))
+		}
+		_ = resp.Body.Close()
+		// A 400 alone does not identify a challenge.
+		if status == http.StatusForbidden || status == http.StatusTooManyRequests {
+			return "", errResolveChallenged
+		}
+		if !ok {
+			return "", fmt.Errorf("resolve: HTTP %d without redirect", status)
+		}
+		dest, err := resolveRedirectURL(current, location)
+		if err != nil {
+			return "", err
+		}
+		u, err := url.Parse(dest)
+		if err != nil {
+			return "", err
+		}
+		// A refreshed wrapper can expose a plaintext destination.
+		if isGoogleResultRedirect(u) {
+			if plain := normalizeURL(dest); IsUsableResultURL(plain) {
+				dest = plain
+				u, _ = url.Parse(dest)
+			}
+		}
+		if isGoogleInterstitial(u) {
+			return "", errResolveChallenged
+		}
+		if IsUsableResultURL(dest) {
+			return stripTextFragmentDirective(dest), nil
+		}
+
+		// Google can answer with an HTML refresh to a fresh wrapper. Only follow
+		// Google wrappers; an external destination is returned without fetching it.
+		next, ok := resolvableGoogleRedirect(dest, current)
+		if !ok {
+			return "", fmt.Errorf("resolve: %q is not a destination", dest)
+		}
+		current = next
 	}
-	location, ok := redirectLocation(resp)
-	if !ok {
-		return "", fmt.Errorf("resolve: HTTP %d without redirect", resp.StatusCode)
+	return "", errors.New("resolve: too many Google redirects")
+}
+
+func googleRefreshLocation(resp *http.Response) (string, bool) {
+	// Stop at the refresh tag; the remaining body may be large or stall.
+	z := html.NewTokenizer(io.LimitReader(resp.Body, maxGoogleRedirectBodyBytes))
+	for {
+		switch z.Next() {
+		case html.ErrorToken:
+			return "", false
+		case html.StartTagToken, html.SelfClosingTagToken:
+			token := z.Token()
+			if token.Data != "meta" {
+				continue
+			}
+			var equiv, content string
+			for _, attr := range token.Attr {
+				switch attr.Key {
+				case "http-equiv":
+					equiv = attr.Val
+				case "content":
+					content = attr.Val
+				}
+			}
+			if strings.EqualFold(strings.TrimSpace(equiv), "refresh") {
+				if location := parseMetaRefreshLocation(content); location != "" {
+					return location, true
+				}
+			}
+		}
 	}
-	dest, err := resolveRedirectURL(wrapped, location)
-	if err != nil {
-		return "", err
+}
+
+func parseMetaRefreshLocation(content string) string {
+	target := strings.TrimSpace(content)
+	if _, rest, found := strings.Cut(target, ";"); found {
+		target = strings.TrimSpace(rest)
 	}
-	u, err := url.Parse(dest)
-	if err != nil {
-		return "", err
+	key, value, found := strings.Cut(target, "=")
+	if !found || !strings.EqualFold(strings.TrimSpace(key), "url") {
+		return ""
 	}
-	if isGoogleInterstitial(u) {
-		return "", errResolveChallenged
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 && ((value[0] == '\'' && value[len(value)-1] == '\'') ||
+		(value[0] == '"' && value[len(value)-1] == '"')) {
+		value = value[1 : len(value)-1]
 	}
-	if !IsUsableResultURL(dest) {
-		return "", fmt.Errorf("resolve: %q is not a destination", dest)
-	}
-	return stripTextFragmentDirective(dest), nil
+	return strings.TrimSpace(value)
 }
 
 // isGoogleInterstitial catches captcha and consent hops, which would otherwise
