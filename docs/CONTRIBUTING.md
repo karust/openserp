@@ -51,14 +51,18 @@ Notes:
 ### Release smoke check
 
 ```bash
-make build
 ./scripts/smoke-check.sh
 ```
 
-The script rebuilds the binary, starts `serve` on `127.0.0.1:18070`, polls
-`/health` until ready, then shuts the server down. It exits non-zero when the
-server does not become healthy. Override with `SMOKE_HOST`, `SMOKE_PORT`,
-`SMOKE_TIMEOUT` (seconds), or `SMOKE_BINARY`.
+The script builds OpenSERP in a temporary directory, starts `serve` on
+`127.0.0.1:18070`, polls `/health` until ready, then shuts the server down.
+It fails if the address is occupied or the server fails to become healthy.
+Override the address and timeout with `SMOKE_HOST`, `SMOKE_PORT`, and
+`SMOKE_TIMEOUT` (seconds, default 30).
+
+You can invoke the script by path from any directory. Set `SMOKE_BINARY` to
+test a prebuilt binary with `curl` alone. A relative binary path is resolved
+from your current directory.
 
 ## Adding a New Search Engine
 
