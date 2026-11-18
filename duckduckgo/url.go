@@ -177,3 +177,18 @@ func BuildImageURL(q core.Query) (string, error) {
 	base.RawQuery = params.Encode()
 	return base.String(), nil
 }
+
+// isDDGAdURL reports whether href is DuckDuckGo's ad click-tracking link
+// (/y.js on duckduckgo.com, absolute or relative). Ad cards keep this link
+// even when they carry no ad badge.
+func isDDGAdURL(href string) bool {
+	u, err := url.Parse(strings.TrimSpace(href))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host != "" && host != "duckduckgo.com" && !strings.HasSuffix(host, ".duckduckgo.com") {
+		return false
+	}
+	return u.Path == "/y.js"
+}

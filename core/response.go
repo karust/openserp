@@ -19,6 +19,9 @@ type ResponseMeta struct {
 	EnginesFailed    []string            `json:"engines_failed"`
 	EngineErrors     []EngineErrorDetail `json:"engine_errors,omitempty"`
 	Version          string              `json:"version"`
+	// Partial and TotalResults are set only by engines that report them.
+	Partial      bool  `json:"partial,omitempty"`
+	TotalResults int64 `json:"total_results,omitempty"`
 }
 
 // EngineErrorDetail is a client-facing, sanitized per-engine failure summary.

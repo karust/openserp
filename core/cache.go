@@ -38,7 +38,7 @@ func NewResponseCache(ttl time.Duration, maxSize int) *ResponseCache {
 func BuildCacheKey(engine string, action string, q Query) string {
 	country, class, provider := cacheProxyMarket(q)
 	raw := fmt.Sprintf(
-		"%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%s|%s|%s",
+		"%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%t|%d|%s|%s|%s",
 		cacheToken(engine),
 		cacheToken(action),
 		strings.TrimSpace(q.Text),
@@ -51,6 +51,8 @@ func BuildCacheKey(engine string, action string, q Query) string {
 		q.Start,
 		q.Filter,
 		q.Features,
+		q.ResolveURLs,
+		q.ResolveTop,
 		country,
 		class,
 		provider,

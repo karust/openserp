@@ -64,7 +64,7 @@ jobs:
               echo "Building ${GOOS}/${GOARCH}..."
               CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
                 go build -trimpath -ldflags="-s -w" -o "$BIN" .
-              tar --create --gzip --file="dist/openserp-${GOOS}-${GOARCH}-${VERSION}.tgz" "$BIN"
+              tar --create --gzip --file="dist/openserp-${GOOS}-${GOARCH}-${VERSION}.tgz" "$BIN" config.yaml
               rm -f "$BIN"
             done
           done

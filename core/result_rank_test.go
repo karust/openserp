@@ -52,12 +52,13 @@ func TestLimitOrganicResultsDoesNotCountAds(t *testing.T) {
 	results := LimitOrganicResults([]SearchResult{
 		{Rank: 1, URL: "https://ads.example.com/one", Ad: true},
 		{Rank: 1, URL: "https://organic.example.com/one"},
+		{Rank: -1, URL: "https://paa.example.com/", Type: ResultTypePeopleAlsoAsk},
 		{Rank: 2, URL: "https://ads.example.com/two", Ad: true},
 		{Rank: 2, URL: "https://organic.example.com/two"},
 	}, 1)
 
-	if len(results) != 3 {
-		t.Fatalf("len(results) = %d, want 3", len(results))
+	if len(results) != 4 {
+		t.Fatalf("len(results) = %d, want 4", len(results))
 	}
 	if CountOrganicResults(results) != 1 {
 		t.Fatalf("organic count = %d, want 1", CountOrganicResults(results))

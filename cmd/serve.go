@@ -65,10 +65,10 @@ var serveCMD = &cobra.Command{
 	Aliases: []string{"listen"},
 	Short:   "Start HTTP server, to provide search engine results via API",
 	Args:    cobra.MatchAll(cobra.NoArgs),
-	Run:     serve,
+	RunE:    serve,
 }
 
-func serve(cmd *cobra.Command, args []string) {
+func serve(cmd *cobra.Command, args []string) error {
 	corsCfg := core.DefaultCORSConfig()
 	corsCfg.AllowOrigins = config.CORS.AllowOrigins
 	corsCfg.AllowMethods = config.CORS.AllowMethods
@@ -77,8 +77,7 @@ func serve(cmd *cobra.Command, args []string) {
 
 	captchaSolverEnabled, captchaSolverAPIKey, err := resolveCaptchaSolverConfig()
 	if err != nil {
-		logrus.Error(err)
-		os.Exit(1)
+		return err
 	}
 
 	proxyRuntime := core.ProxyRuntimeBrowser
@@ -88,8 +87,7 @@ func serve(cmd *cobra.Command, args []string) {
 
 	proxyCfg, err := buildNormalizedProxyConfig(proxyRuntime)
 	if err != nil {
-		logrus.WithError(err).Error(fmt.Sprintf("invalid proxy configuration: %v", err))
-		return
+		return fmt.Errorf("invalid proxy configuration: %w", err)
 	}
 
 	fingerprintBrowserOpts := buildFingerprintBrowserOptions()
@@ -97,16 +95,15 @@ func serve(cmd *cobra.Command, args []string) {
 	if config.Server.IsRawRequests {
 		logrus.Warn("Browserless results are very inconsistent or may not even work!")
 		serverOpts := buildServerOptions(corsCfg, proxyCfg, fingerprintBrowserOpts)
-		serv := core.NewServerWithOptions(config.Server.Host, config.Server.Port, serverOpts,
-			&rawEngine{name: "google"},
-			&rawEngine{name: "yandex"},
-			&rawEngine{name: "baidu"},
-			&rawEngine{name: "ecosia"},
-		)
-		if err := listenWithGracefulShutdown(serv, nil); err != nil {
-			logrus.Error(err)
+		var rawEngines []core.SearchEngine
+		for _, name := range enabledEngineNames("google", "yandex", "baidu", "ecosia") {
+			rawEngines = append(rawEngines, &rawEngine{name: name})
 		}
-		return
+		if len(rawEngines) == 0 {
+			return fmt.Errorf("all search engines are disabled")
+		}
+		serv := core.NewServerWithOptions(config.Server.Host, config.Server.Port, serverOpts, rawEngines...)
+		return listenWithGracefulShutdown(serv, nil)
 	}
 
 	baseOpts := fingerprintBrowserOpts
@@ -116,16 +113,13 @@ func serve(cmd *cobra.Command, args []string) {
 
 	engines, closeBrowsers, browserResolver, err := buildBrowserEngines(baseOpts, proxyCfg)
 	if err != nil {
-		logrus.Error(err)
-		return
+		return err
 	}
 
 	serverOpts := buildServerOptions(corsCfg, proxyCfg, fingerprintBrowserOpts)
 	serverOpts.BrowserResolver = browserResolver
 	serv := core.NewServerWithOptions(config.Server.Host, config.Server.Port, serverOpts, engines...)
-	if err := listenWithGracefulShutdown(serv, closeBrowsers); err != nil {
-		logrus.Error(err)
-	}
+	return listenWithGracefulShutdown(serv, closeBrowsers)
 }
 
 func buildFingerprintBrowserOptions() core.BrowserOpts {
@@ -167,6 +161,7 @@ func buildServerOptions(corsCfg core.CORSConfig, proxyCfg core.ProxyConfig, fing
 		MegaTimeout:            config.App.MegaTimeout,
 		RequestTimeout:         core.RequestTimeoutForRetries(engineTimeout, retryCfg),
 		Extract:                config.Extract,
+		GoogleResolve:          config.GoogleConfig.URLResolveConfig,
 		Resilience: core.ResilientConfig{
 			Retry: retryCfg,
 			CircuitBreaker: core.CircuitBreakerConfig{
@@ -181,7 +176,12 @@ func buildServerOptions(corsCfg core.CORSConfig, proxyCfg core.ProxyConfig, fing
 
 const gracefulShutdownTimeout = 30 * time.Second
 
-func listenWithGracefulShutdown(serv *core.Server, onShutdown func() error) error {
+func listenWithGracefulShutdown(serv *core.Server, onShutdown func() error) (err error) {
+	if onShutdown != nil {
+		defer func() {
+			err = errors.Join(err, onShutdown())
+		}()
+	}
 	listenErrCh := make(chan error, 1)
 	go func() {
 		listenErrCh <- serv.Listen()
@@ -203,13 +203,6 @@ func listenWithGracefulShutdown(serv *core.Server, onShutdown func() error) erro
 	shutdownErr := serv.ShutdownWithTimeout(gracefulShutdownTimeout)
 	if isServerNotRunningError(shutdownErr) {
 		shutdownErr = nil
-	}
-
-	if onShutdown != nil {
-		resourceErr := onShutdown()
-		if resourceErr != nil {
-			shutdownErr = errors.Join(shutdownErr, resourceErr)
-		}
 	}
 
 	if listenErr := waitForListenExit(listenErrCh); listenErr != nil && !isExpectedListenShutdownError(listenErr) {
@@ -597,11 +590,7 @@ func (e *pooledBrowserEngine) BrowserPoolStats() core.BrowserPoolStats {
 	return e.pool.browserStats()
 }
 
-// resolveEngine builds a fresh engine wrapper around the pool-resolved Browser.
-// The wrapper is intentionally not cached: pool eviction can replace the Chrome
-// behind a key, and a cached engine would carry a stale Browser value (closed
-// connection, dead browserAddr). Engines are thin wrappers, so per-call
-// construction is cheap.
+// Resolve per call because eviction can replace the Browser behind a pool key.
 func (e *pooledBrowserEngine) resolveEngine(q core.Query) (core.SearchEngine, error) {
 	browser, err := e.pool.get(q.ProxyURL)
 	if err != nil {
@@ -621,6 +610,10 @@ func browserEngineSpecs() []browserEngineSpec {
 	specs := engineSpecs()
 	out := make([]browserEngineSpec, 0, len(specs))
 	for _, s := range specs {
+		if s.disabled() {
+			logrus.Infof("Engine %s is disabled in config", s.name)
+			continue
+		}
 		out = append(out, browserEngineSpec{
 			name:        s.name,
 			opts:        s.opts(),
@@ -632,6 +625,17 @@ func browserEngineSpecs() []browserEngineSpec {
 }
 
 func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) ([]core.SearchEngine, func() error, core.BrowserResolver, error) {
+	specs := browserEngineSpecs()
+	if len(specs) == 0 {
+		return nil, nil, nil, fmt.Errorf("all search engines are disabled")
+	}
+	// Validate before the pool starts its sweeper, so failed startup leaks nothing.
+	for _, spec := range specs {
+		policy := resolveEngineProxyPolicy(proxyCfg, spec.name)
+		if err := validateBrowserProxyPolicy(proxyCfg, policy); err != nil {
+			return nil, nil, nil, fmt.Errorf("browser proxy validation failed for engine %s: %w", spec.name, err)
+		}
+	}
 	launchProxyURL := ""
 	if strings.TrimSpace(proxyCfg.Proxies.Global) != "" && !proxyCfg.Proxies.AllowRequestProxyURL {
 		launchProxyURL = proxyCfg.Proxies.Global
@@ -640,24 +644,10 @@ func buildBrowserEngines(baseOpts core.BrowserOpts, proxyCfg core.ProxyConfig) (
 	if proxyCfg.Proxies.Lanes.Enabled {
 		laneStore = core.NewLaneStore(proxyCfg.Proxies.Lanes.MaxLanes)
 	}
-	maxProcesses := config.App.MaxProcesses
-	if maxProcesses <= 0 {
-		maxProcesses = 4
-	}
-	idleTTL := config.App.IdleTTL
-	if idleTTL < 0 {
-		idleTTL = 0
-	}
-	pool := newBrowserPool(baseOpts, launchProxyURL, laneStore, maxProcesses, idleTTL)
-	specs := browserEngineSpecs()
+	pool := newBrowserPool(baseOpts, launchProxyURL, laneStore, config.App.MaxProcesses, config.App.IdleTTL)
 
 	engines := make([]core.SearchEngine, 0, len(specs))
 	for idx, spec := range specs {
-		policy := resolveEngineProxyPolicy(proxyCfg, spec.name)
-		if err := validateBrowserProxyPolicy(proxyCfg, policy); err != nil {
-			return nil, nil, nil, fmt.Errorf("browser proxy validation failed for engine %s: %w", spec.name, err)
-		}
-
 		opts := spec.opts
 		opts.Init()
 		base := &pooledBrowserEngine{
@@ -727,4 +717,17 @@ func entryHasTag(entry core.ProxyEntryConfig, tag string) bool {
 
 func init() {
 	RootCmd.AddCommand(serveCMD)
+}
+
+// enabledEngineNames drops the engines whose <engine>.disabled is set.
+func enabledEngineNames(names ...string) []string {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if spec, ok := resolveEngineSpec(name); ok && spec.disabled() {
+			logrus.Infof("Engine %s is disabled in config", name)
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }

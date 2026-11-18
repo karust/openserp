@@ -1,10 +1,40 @@
 package core
 
 import (
+	"encoding/base64"
+	"net/url"
 	"strings"
 	"testing"
 	"unicode/utf8"
 )
+
+func TestEnrichResultUnwrapsPlainGoogleDestinations(t *testing.T) {
+	const destination = "https://example.org/article?utm_source=google"
+	for _, wrapper := range []string{
+		"/url?q=", "https://www.google.com/url?url=",
+		"https://www.google.co.uk/goto?url=",
+		"https://www.googleadservices.com/pagead/aclk?adurl=",
+	} {
+		t.Run(wrapper, func(t *testing.T) {
+			ctx := EnrichContext{Engine: "google"}
+			got := EnrichResult(SearchResult{URL: wrapper + url.QueryEscape(destination)}, ctx)
+			want := EnrichResult(SearchResult{URL: destination}, ctx)
+			if got.URL != want.URL || got.Domain != want.Domain || got.ID != want.ID {
+				t.Fatalf("wrapped result = %+v; direct result = %+v", got, want)
+			}
+		})
+	}
+	for _, raw := range []string{
+		"/goto?url=opaque-token",
+		"/url?q=javascript%3Aalert%281%29",
+		"/url?q=%2Frelative",
+		"https://google.example.org/url?q=" + url.QueryEscape(destination),
+	} {
+		if got := EnrichResult(SearchResult{URL: raw}, EnrichContext{Engine: "google"}); got.URL != raw {
+			t.Errorf("unexpected rewrite: %q -> %q", raw, got.URL)
+		}
+	}
+}
 
 // Captured from a live Google SERP.
 const (
@@ -26,6 +56,9 @@ func TestIsUsableResultURL(t *testing.T) {
 		"relative path":  "/search?q=x",
 		"scheme-less":    "example.com/page",
 		"non-http":       "ftp://files.example/x",
+
+		// Bing video rows wrap a relative player path, not a destination.
+		"bing video wrapper": "https://www.bing.com/ck/a?!&&p=x&u=a1L3ZpZGVvcy9yaXZlcnZpZXc&ntb=1",
 	}
 	for name, raw := range unusable {
 		if IsUsableResultURL(raw) {
@@ -303,5 +336,44 @@ func TestDisplayURLTruncationPreservesUTF8(t *testing.T) {
 		if !utf8.ValidString(result.DisplayURL) {
 			t.Errorf("prefix length %d: invalid UTF-8 in %q", n, result.DisplayURL)
 		}
+	}
+}
+
+func TestUnwrapBingURL(t *testing.T) {
+	const destination = "https://example.org/article"
+	token := "a1" + base64.RawURLEncoding.EncodeToString([]byte(destination))
+	for _, raw := range []string{
+		"https://www.bing.com/ck/a?u=" + token,
+		"https://WWW.BING.COM./ck/a?u=" + token,
+		"/ck/a?u=" + token,
+		"https://www.bing.com/ck/a?u=a1" + base64.URLEncoding.EncodeToString([]byte(destination)),
+		"https://www.bing.com/ck/a?u=a1" + base64.RawURLEncoding.EncodeToString([]byte(" "+destination+"\n")),
+	} {
+		t.Run(raw, func(t *testing.T) {
+			if got := UnwrapBingURL(raw); got != destination {
+				t.Fatalf("UnwrapBingURL(%q) = %q", raw, got)
+			}
+			if got := EnrichResult(SearchResult{URL: raw}, EnrichContext{Engine: "bing"}); got.URL != destination {
+				t.Fatalf("enriched URL = %q", got.URL)
+			}
+		})
+	}
+	for _, raw := range []string{
+		"https://example.org/page?u=" + token,
+		"https://bing.com.evil.org/ck/a?u=" + token,
+		"https://www.bing.com/search?u=" + token,
+		"https://example.org/bing.com/ck/a?u=" + token,
+		"https://www.bing.com/ck/a?u=a1invalid",
+		"https://www.bing.com/ck/a?u=a1" + base64.RawURLEncoding.EncodeToString([]byte("https:///missing-host")),
+		"https://www.bing.com/ck/a?u=a1" + base64.RawURLEncoding.EncodeToString([]byte("https://bad%host/")),
+	} {
+		t.Run(raw, func(t *testing.T) {
+			if got := UnwrapBingURL(raw); got != "" {
+				t.Errorf("unexpected destination: %q", got)
+			}
+			if got := EnrichResult(SearchResult{URL: raw}, EnrichContext{Engine: "bing"}); got.URL != raw {
+				t.Errorf("unexpected rewrite: %q -> %q", raw, got.URL)
+			}
+		})
 	}
 }

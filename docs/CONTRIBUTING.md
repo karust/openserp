@@ -8,7 +8,6 @@
 4. Run `make fmt`, `make lint`, and `make test` before opening the PR.
 5. Explain what changed, why it changed, and how you tested it.
 
-Good first issues are curated in [`GOOD_FIRST_ISSUES.md`](https://github.com/karust/openserp/blob/main/docs/GOOD_FIRST_ISSUES.md).
 New engine work should start with [`ADDING_AN_ENGINE.md`](https://github.com/karust/openserp/blob/main/docs/ADDING_AN_ENGINE.md).
 
 ## Development Setup

@@ -60,6 +60,7 @@ var rawHeaderOrder = []string{
 	"sec-fetch-mode",
 	"sec-fetch-user",
 	"sec-fetch-dest",
+	"referer",
 }
 
 var rawHTTPClientCache = struct {
@@ -124,6 +125,26 @@ func doRawRequest(ctx context.Context, client tlsclient.HttpClient, searchURL st
 		return nil, err
 	}
 	applyRawRequestHeaders(req, profile)
+	return execRawRequest(ctx, client, req, rawRequestUsesProxy(query))
+}
+
+// rawClickRequest issues one GET shaped like a click on a SERP link and never
+// follows redirects, so callers can read Location. Unlike RawSearchRequest it
+// does not report a browser profile: the SERP already did.
+func rawClickRequest(ctx context.Context, targetURL string, query Query) (*http.Response, error) {
+	profile := rawRequestProfileFor(ctx, query)
+	client, err := cachedRawHTTPClient(query, profile.cacheKey(), profile.tlsProfile)
+	if err != nil {
+		return nil, err
+	}
+	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodGet, targetURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	applyRawRequestHeaders(req, profile)
+	// SERPs send origin-only referrers.
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Referer", req.URL.Scheme+"://"+req.URL.Host+"/")
 	return execRawRequest(ctx, client, req, rawRequestUsesProxy(query))
 }
 

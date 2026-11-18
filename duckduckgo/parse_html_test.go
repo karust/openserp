@@ -129,3 +129,55 @@ func TestParseDDGHTMLAdsDoNotConsumeOrganicRank(t *testing.T) {
 		t.Fatalf("unexpected absolute ranks: %d, %d, %d", results[0].AbsoluteRank, results[1].AbsoluteRank, results[2].AbsoluteRank)
 	}
 }
+
+// An ad card can come without any ad badge; its y.js click-tracking link still
+// marks it as an ad.
+func TestParseDDGHTMLAdWithoutBadgeIsDetectedByLink(t *testing.T) {
+	t.Parallel()
+
+	html := `
+<article data-testid="result">
+  <h2><a data-testid="result-title-a" href="https://duckduckgo.com/y.js?ad_domain=godaddy.com&ad_provider=bingv7aa&ad_type=txad&u3=https%3A%2F%2Fwww.bing.com%2Faclick">GoDaddy Domains</a></h2>
+  <div data-result="snippet">Paid snippet</div>
+</article>
+<article data-testid="result">
+  <h2><a data-testid="result-title-a" href="https://organic.example.com/one">Organic One</a></h2>
+  <div data-result="snippet">Organic snippet one</div>
+</article>`
+
+	results, err := ParseHTML(bytes.NewReader([]byte(html)))
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if !results[0].Ad {
+		t.Fatalf("y.js result not marked as ad: %+v", results[0])
+	}
+	if results[1].Ad || results[1].Rank != 1 {
+		t.Fatalf("organic result: Ad = %v, Rank = %d, want false and 1", results[1].Ad, results[1].Rank)
+	}
+}
+
+func TestIsDDGAdURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		url  string
+		want bool
+	}{
+		{"https://duckduckgo.com/y.js?ad_domain=godaddy.com&ad_provider=bingv7aa", true},
+		{"https://duckduckgo.com/y.js?u3=https%3A%2F%2Fwww.bing.com%2Faclick", true},
+		{"/y.js?ad_domain=example.com", true},
+		{"https://organic.example.com/one", false},
+		{"https://example.com/y.js", false},
+		{"https://duckduckgo.com/?q=y.js", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isDDGAdURL(tt.url); got != tt.want {
+			t.Errorf("isDDGAdURL(%q) = %v, want %v", tt.url, got, tt.want)
+		}
+	}
+}

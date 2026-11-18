@@ -9,6 +9,7 @@ server:
 app:
   log_format: "text" # json|text
   log_level: "" # error|warn|info|debug|trace; empty = warn for CLI, info for serve
+  save_log: true # Also write logs to ./logs.txt in serve mode; false = stderr only
   timeout: 15 # Browser/search timeout in seconds, per attempt; the request deadline is derived from this x retries
   browser_path: "" # Custom browser binary path (chrome/chromium/edge..)
   profiles: "" # Overriding built-in browser profiles
@@ -26,7 +27,7 @@ extract:
   enabled: true
   default_mode: auto # auto|fast|rendered
   timeout: 20s
-  max_bytes: 2000000
+  max_bytes: 3145728 # 3 MB - bigger HTML is cut, bigger PDFs fail
   max_concurrent: 2
 
 proxies:
@@ -77,7 +78,12 @@ captcha:
 google:
   rate_requests: 60 # Allowed average requests per minute
   rate_burst: 3 # Burst requests before limiter applies
+  resolve_urls: true # Default: true = all, false/0 = off, N = top N organic results
+  resolve_concurrency: 4 # Concurrent redirect requests per search
+  resolve_timeout: 3s # Total URL resolution budget per search
+  resolve_cooldown: 10m # Pause resolution through an exit after a challenge
   #captcha: true # Engine-level solver flag (also requires captcha.solver_enabled=true)
+  #disabled: true # Leave this engine out of serve: no endpoints, not used by mega (env: OPENSERP_GOOGLE_DISABLED)
 
 yandex:
   rate_requests: 60
@@ -91,6 +97,7 @@ baidu:
 bing:
   rate_requests: 60
   rate_burst: 3
+  search_box: true # Submit through the homepage; false uses legacy /search URLs (env: OPENSERP_BING_SEARCH_BOX)
   # No proxy tag means direct traffic
 
 duckduckgo:

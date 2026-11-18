@@ -100,6 +100,9 @@ func RunEngineTests(t *testing.T, newEngine func(*core.Browser) core.SearchEngin
 		results, err := engine.SearchImage(context.Background(), query)
 		HandleError(t, engine.Name()+" image search", err)
 		requireResults(t, results)
+		if len(results) > query.Limit {
+			t.Fatalf("image limit=%d, got %d results", query.Limit, len(results))
+		}
 	})
 }
 

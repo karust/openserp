@@ -21,10 +21,11 @@ type extractPayload struct {
 	Mode string `json:"mode"`
 	// Clean defaults to true (article-only). Pointer so we can tell "omitted"
 	// (use default) from an explicit false (full-page extraction).
-	Clean      *bool  `json:"clean"`
-	UseLLMSTxt bool   `json:"use_llms_txt"`
-	MinRunes   int    `json:"min_runes"`
-	Lang       string `json:"lang"`
+	Clean             *bool  `json:"clean"`
+	UseLLMSTxt        bool   `json:"use_llms_txt"`
+	PreserveStructure bool   `json:"preserve_structure"`
+	MinRunes          int    `json:"min_runes"`
+	Lang              string `json:"lang"`
 }
 
 func (s *Server) handleExtract(c *fiber.Ctx) error {
@@ -97,21 +98,24 @@ func (s *Server) baseExtractRequest(c *fiber.Ctx, body extractPayload, cfg extra
 		return extractpkg.ExtractRequest{}, errInvalidParam("min_runes must be a non-negative integer")
 	}
 	return extractpkg.ExtractRequest{
-		Mode:       mode,
-		ProxyURL:   proxyURL,
-		LangCode:   firstNonEmpty(body.Lang, c.Query("lang")),
-		Timeout:    cfg.Timeout,
-		MaxBytes:   cfg.MaxBytes,
-		FullPage:   !clean,
-		UseLLMSTxt: parseBoolDefault(c.Query("use_llms_txt"), body.UseLLMSTxt),
-		MinRunes:   minRunes,
+		Mode:              mode,
+		ProxyURL:          proxyURL,
+		LangCode:          firstNonEmpty(body.Lang, c.Query("lang")),
+		Timeout:           cfg.Timeout,
+		MaxBytes:          cfg.MaxBytes,
+		FullPage:          !clean,
+		PreserveStructure: parseBoolDefault(c.Query("preserve_structure"), body.PreserveStructure),
+		UseLLMSTxt:        parseBoolDefault(c.Query("use_llms_txt"), body.UseLLMSTxt),
+		MinRunes:          minRunes,
 	}, nil
 }
 
 func (s *Server) extractRequestFromFiber(c *fiber.Ctx, cfg extractpkg.Config) (extractpkg.ExtractRequest, error) {
 	var body extractPayload
 	if len(c.Body()) > 0 {
-		_ = c.BodyParser(&body)
+		if err := c.BodyParser(&body); err != nil {
+			return extractpkg.ExtractRequest{}, errInvalidParam("invalid JSON body")
+		}
 	}
 	req, err := s.baseExtractRequest(c, body, cfg)
 	if err != nil {
@@ -153,7 +157,8 @@ func RawExtractFetch(ctx context.Context, req extractpkg.ExtractRequest, cfg ext
 	if err != nil {
 		return nil, err
 	}
-	defer DrainAndCloseResponse(resp)
+	// Do not drain untrusted responses beyond the byte budget.
+	defer func() { _ = resp.Body.Close() }()
 	if err := ClassifySearchHTTPStatus(resp.StatusCode); err != nil {
 		return nil, err
 	}
@@ -161,14 +166,15 @@ func RawExtractFetch(ctx context.Context, req extractpkg.ExtractRequest, cfg ext
 	if limit <= 0 {
 		limit = int64(cfg.MaxBytes)
 	}
+	// One byte past the budget tells a full body from a cut one.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(body)) > limit {
-		body = body[:limit]
-	}
 	out := &extractpkg.FetchResponse{StatusCode: resp.StatusCode, Body: body}
+	if int64(len(body)) > limit {
+		out.Body, out.Truncated = body[:limit], true
+	}
 	if resp.Request != nil && resp.Request.URL != nil {
 		out.FinalURL = resp.Request.URL.String()
 	}
@@ -260,16 +266,8 @@ func validateExtractTargetURL(ctx context.Context, rawURL string, allowPrivateNe
 	return ValidatePublicHTTPURL(ctx, rawURL)
 }
 
-func (s *Server) enrichEnvelopeWithExtraction(ctx context.Context, env *Envelope, q Query, format string) {
-	EnrichEnvelopeWithExtraction(ctx, env, q, format, s.newExtractor(), s.opts.Extract)
-}
-
-// EnrichEnvelopeWithExtraction fills env.Results[*].Extracted by running the
-// extractor over the top organic results, with candidate fill-in when a top
-// result fails. It is shared by the HTTP search handler and the CLI so both
-// apply the same depth bounds, batch deadline, and result selection. The
-// extractor and cfg are supplied by the caller (the server reuses its
-// long-lived browser pool; the CLI builds a one-shot browser).
+// EnrichEnvelopeWithExtraction extracts top organic results for HTTP and CLI
+// callers, trying up to three more candidates when extraction fails.
 func EnrichEnvelopeWithExtraction(ctx context.Context, env *Envelope, q Query, format string, extractor extractpkg.Extractor, cfg extractpkg.Config) {
 	cfg = cfg.Normalized()
 	if env == nil || !q.Extract || !cfg.Enabled {
@@ -283,21 +281,22 @@ func EnrichEnvelopeWithExtraction(ctx context.Context, env *Envelope, q Query, f
 		contentFormat = "text"
 	}
 	limit := clampExtractTop(q.ExtractTop)
-	if limit > len(env.Results) {
-		limit = len(env.Results)
+	var candidates []int
+	for i, result := range env.Results {
+		// Ads would register real clicks; answer rows are not ranked pages.
+		if result.Type != ResultTypeOrganic || strings.TrimSpace(result.URL) == "" {
+			continue
+		}
+		candidates = append(candidates, i)
+		if len(candidates) == limit+3 {
+			break
+		}
 	}
-	candidateLimit := limit + 3
-	if candidateLimit > len(env.Results) {
-		candidateLimit = len(env.Results)
-	}
+	limit = min(limit, len(candidates))
 
-	// Per-fetch timeouts bound a single URL; this aggregate deadline bounds the
-	// whole batch so a few slow/hanging targets can't stretch the request
-	// open-endedly. The ceiling is derived from the per-URL budget (see
-	// Config.BatchTimeout) rather than a separate knob. When it fires, in-flight
-	// fetches are cancelled and any not yet started record a timeout error instead
-	// of a result — never a 500.
-	ctx, cancel := context.WithTimeout(ctx, cfg.BatchTimeout(candidateLimit))
+	// Bound the whole batch as well as each fetch; slow targets must not keep
+	// the request open indefinitely.
+	ctx, cancel := context.WithTimeout(ctx, cfg.BatchTimeout(len(candidates)))
 	defer cancel()
 
 	extractOne := func(idx int) {
@@ -339,10 +338,7 @@ func EnrichEnvelopeWithExtraction(ctx context.Context, env *Envelope, q Query, f
 
 	sem := make(chan struct{}, cfg.MaxConcurrent)
 	var wg sync.WaitGroup
-	for i := 0; i < limit; i++ {
-		if strings.TrimSpace(env.Results[i].URL) == "" {
-			continue
-		}
+	for _, i := range candidates[:limit] {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(idx int) {
@@ -353,10 +349,15 @@ func EnrichEnvelopeWithExtraction(ctx context.Context, env *Envelope, q Query, f
 	}
 	wg.Wait()
 
-	successes := extractedSuccessCount(env.Results[:limit])
-	for i := limit; successes < limit && i < candidateLimit; i++ {
-		if strings.TrimSpace(env.Results[i].URL) == "" {
-			continue
+	successes := 0
+	for _, i := range candidates[:limit] {
+		if extractedResultSucceeded(env.Results[i]) {
+			successes++
+		}
+	}
+	for _, i := range candidates[limit:] {
+		if successes >= limit {
+			break
 		}
 		extractOne(i)
 		if extractedResultSucceeded(env.Results[i]) {
@@ -372,16 +373,6 @@ const minUsefulExtractRunes = 80
 // server and the CLI so both apply the same threshold.
 func ExtractedContentLooksUseful(content string) bool {
 	return len([]rune(strings.TrimSpace(content))) >= minUsefulExtractRunes
-}
-
-func extractedSuccessCount(results []Result) int {
-	count := 0
-	for _, result := range results {
-		if extractedResultSucceeded(result) {
-			count++
-		}
-	}
-	return count
 }
 
 func extractedResultSucceeded(result Result) bool {

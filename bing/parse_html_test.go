@@ -82,6 +82,33 @@ func TestParseBingHTMLNoResults(t *testing.T) {
 	}
 }
 
+// Real Bing pages embed the no-results phrase in inline JS, /ck/a tokens differ
+// per page view for the same destination, and video rows link Bing's player.
+func TestParseBingHTMLScriptMarkerAndWrappedLinks(t *testing.T) {
+	t.Parallel()
+
+	html := `<html><head><script>var s={"searchNoResult":"There are no results for this question"};</script></head><body>
+<ol id="b_results">
+  <li class="b_algo"><h2><a href="https://www.bing.com/ck/a?!&&p=aaa&u=a1aHR0cHM6Ly9nby5kZXYvZG9jLw&ntb=1">Docs</a></h2><div class="b_caption"><p>Go docs</p></div></li>
+  <li class="b_algo"><h2><a href="https://www.bing.com/ck/a?!&&p=bbb&u=a1aHR0cHM6Ly9nby5kZXYvZG9jLw&ntb=1">Docs</a></h2><div class="b_caption"><p>Go docs</p></div></li>
+  <li class="b_algo"><div class="b_attribution"><cite>https://www.youtube.com <span>› watch</span></cite></div><h2><a href="https://www.bing.com/ck/a?!&&p=ccc&u=a1L3ZpZGVvcy9yaXZlcnZpZXc&ntb=1">Go Course - YouTube</a></h2></li>
+</ol></body></html>`
+	results, err := ParseHTML(bytes.NewReader([]byte(html)))
+	if err != nil {
+		t.Fatalf("ParseHTML() error = %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 deduped results, got %d: %+v", len(results), results)
+	}
+	if results[0].URL != "https://go.dev/doc/" {
+		t.Fatalf("expected unwrapped URL, got %q", results[0].URL)
+	}
+	video := core.EnrichResult(results[1], core.EnrichContext{Engine: "bing"})
+	if video.Domain != "youtube.com" || video.DisplayURL != "youtube.com › watch" {
+		t.Fatalf("video row should be attributed to its cite, got domain=%q display=%q", video.Domain, video.DisplayURL)
+	}
+}
+
 func TestParseBingHTMLAds(t *testing.T) {
 	t.Parallel()
 

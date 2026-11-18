@@ -4,9 +4,9 @@ import { OpenSERP } from "@openserp/sdk";
 //   const client = new OpenSERP({ apiKey: "<YOUR_API_TOKEN>", timeoutMs: 60_000 });
 const client = new OpenSERP({ baseUrl: "http://localhost:7000", timeoutMs: 60_000 });
 
-// `extract: N` fetches the top N pages (max 5) and returns their cleaned
+// `extract: N` fetches up to N organic pages (max 5) and returns their cleaned
 // content alongside each result, so you get the page text in a single request.
-// `extract: true` is shorthand for the top result.
+// `extract: true` is shorthand for the top organic result.
 const { results } = await client.search({
   engine: "ecosia",
   text: "what is a serp api",

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version               = "0.8.13"
+	version               = "0.8.20"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -34,10 +34,10 @@ type Config struct {
 	CORS             CORSConfig           `mapstructure:"cors"`
 	Captcha          CaptchaConfig        `mapstructure:"captcha"`
 	Config2Capcha    Config2Captcha       `mapstructure:"2captcha"`
-	GoogleConfig     EngineConfig         `mapstructure:"google"`
+	GoogleConfig     GoogleConfig         `mapstructure:"google"`
 	YandexConfig     EngineConfig         `mapstructure:"yandex"`
 	BaiduConfig      EngineConfig         `mapstructure:"baidu"`
-	BingConfig       EngineConfig         `mapstructure:"bing"`
+	BingConfig       BingConfig           `mapstructure:"bing"`
 	DuckDuckGoConfig EngineConfig         `mapstructure:"duckduckgo"`
 	EcosiaConfig     EngineConfig         `mapstructure:"ecosia"`
 }
@@ -69,6 +69,7 @@ type AppConfig struct {
 	DebugEndpoints bool          `mapstructure:"debug_endpoints"`
 	LogFormat      string        `mapstructure:"log_format"`
 	LogLevel       string        `mapstructure:"log_level"`
+	SaveLog        bool          `mapstructure:"save_log"`
 	MaxProcesses   int           `mapstructure:"max_processes"`
 	IdleTTL        time.Duration `mapstructure:"idle_ttl"`
 	MegaTimeout    time.Duration `mapstructure:"mega_timeout"`
@@ -77,6 +78,19 @@ type AppConfig struct {
 type EngineConfig struct {
 	core.SearchEngineOptions `mapstructure:",squash"`
 	Proxy                    string `mapstructure:"proxy"`
+	// Disabled leaves the engine out of serve: no endpoints, not used by mega.
+	Disabled bool `mapstructure:"disabled"`
+}
+
+type GoogleConfig struct {
+	EngineConfig          `mapstructure:",squash"`
+	core.URLResolveConfig `mapstructure:",squash"`
+}
+
+type BingConfig struct {
+	EngineConfig `mapstructure:",squash"`
+	// SearchBox types the query on the homepage; false opens /search directly.
+	SearchBox bool `mapstructure:"search_box"`
 }
 
 type CacheConfig struct {
@@ -135,6 +149,7 @@ var flagToConfigKey = map[string]string{
 	"cb_recovery":             "circuit_breaker.recovery_seconds",
 	"cb_successes":            "circuit_breaker.successes",
 	"log_format":              "app.log_format",
+	"resolve-urls":            "google.resolve_urls",
 }
 
 var RootCmd = &cobra.Command{
@@ -170,7 +185,7 @@ var RootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		core.InitLogger(config.Server.IsVerbose, config.Server.IsDebug, quiet, config.App.LogFormat)
+		core.InitLogger(config.Server.IsVerbose, config.Server.IsDebug, quiet, config.App.SaveLog, config.App.LogFormat)
 		if override {
 			logrus.SetLevel(level)
 		}
@@ -179,19 +194,18 @@ var RootCmd = &cobra.Command{
 	},
 }
 
-// logLevelOverride parses app.log_level, which replaces the -q/-v/-d log level.
-// A value from env or config yields to those flags when they are typed.
+// Explicit verbosity flags override app.log_level from env or config.
 func logLevelOverride(flags *pflag.FlagSet, raw string) (logrus.Level, bool, error) {
+	typed := flags.Changed("quiet") || flags.Changed("verbose") || flags.Changed("debug")
 	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	if raw == "" || (typed && !flags.Changed("log_level")) {
 		return 0, false, nil
 	}
 	level, err := logrus.ParseLevel(raw)
 	if err != nil || level < logrus.ErrorLevel {
 		return 0, false, fmt.Errorf("invalid log level %q: expected error, warn, info, debug or trace", raw)
 	}
-	typed := flags.Changed("quiet") || flags.Changed("verbose") || flags.Changed("debug")
-	return level, flags.Changed("log_level") || !typed, nil
+	return level, true, nil
 }
 
 func commandDefaultsToQuiet(cmd *cobra.Command) bool {
@@ -213,6 +227,7 @@ func sanitizedConfigForLog(cfg Config) map[string]interface{} {
 			"debug_endpoints": cfg.App.DebugEndpoints,
 			"log_format":      cfg.App.LogFormat,
 			"log_level":       cfg.App.LogLevel,
+			"save_log":        cfg.App.SaveLog,
 			"max_processes":   cfg.App.MaxProcesses,
 			"idle_ttl":        cfg.App.IdleTTL.String(),
 			"mega_timeout":    cfg.App.MegaTimeout.String(),
@@ -312,7 +327,7 @@ func initializeConfig(cmd *cobra.Command) error {
 		// No ./config.* is normal for go install and release binaries, defaults apply.
 		var notFound viper.ConfigFileNotFoundError
 		if !errors.As(err, &notFound) {
-			logrus.Warnf("cannot read config: %v", err)
+			return fmt.Errorf("cannot read config: %w", err)
 		}
 	}
 
@@ -347,6 +362,14 @@ func initializeConfig(cmd *cobra.Command) error {
 	err = v.Unmarshal(&config)
 	if err != nil {
 		return fmt.Errorf("cannot unmarshall config: %v", err)
+	}
+	// Keep boolean true distinct from integer 1 (top one result).
+	config.GoogleConfig.URLs = v.GetString("google.resolve_urls")
+	if _, _, err := core.ParseResolveURLs(config.GoogleConfig.URLs); err != nil {
+		return fmt.Errorf("invalid google.resolve_urls: %w", err)
+	}
+	if config.GoogleConfig.Concurrency <= 0 || config.GoogleConfig.Timeout <= 0 || config.GoogleConfig.Cooldown <= 0 {
+		return fmt.Errorf("google.resolve_concurrency, google.resolve_timeout and google.resolve_cooldown must be positive")
 	}
 
 	if _, err := core.ParseBlockedResourceTypes(config.App.BlockResources); err != nil {
@@ -427,6 +450,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("server.insecure", false)
 	v.SetDefault("app.log_format", "")
 	v.SetDefault("app.log_level", "")
+	v.SetDefault("app.save_log", true)
 
 	v.SetDefault("app.timeout", 30)
 	v.SetDefault("app.browser_path", "")
@@ -454,7 +478,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("extract.enabled", true)
 	v.SetDefault("extract.default_mode", "auto")
 	v.SetDefault("extract.timeout", "20s")
-	v.SetDefault("extract.max_bytes", 2*1024*1024)
+	v.SetDefault("extract.max_bytes", 3*1024*1024)
 	v.SetDefault("extract.max_concurrent", 2)
 	v.SetDefault("extract.allow_private_networks", false)
 	// Keep stage2 defaults stable even when config file is absent.
@@ -469,6 +493,16 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("cors.allow_headers", "Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Proxy-URL, X-Proxy-Country, X-Proxy-Class, X-Proxy-Provider, X-Proxy-Session-ID, X-Request-ID, X-Tenant")
 	v.SetDefault("cors.max_age", 86400)
 	v.SetDefault("captcha.solver_enabled", false)
+	for _, s := range engineSpecs() {
+		// A default makes OPENSERP_<ENGINE>_DISABLED bindable without a config entry.
+		v.SetDefault(s.name+".disabled", false)
+	}
+	resolve := core.DefaultURLResolveConfig()
+	v.SetDefault("google.resolve_urls", resolve.URLs)
+	v.SetDefault("google.resolve_concurrency", resolve.Concurrency)
+	v.SetDefault("google.resolve_timeout", resolve.Timeout)
+	v.SetDefault("google.resolve_cooldown", resolve.Cooldown)
+	v.SetDefault("bing.search_box", true)
 }
 
 func init() {
@@ -498,4 +532,5 @@ func init() {
 	RootCmd.PersistentFlags().IntVar(&config.CircuitBreaker.Successes, "cb_successes", 2, "Consecutive successful half-open checks needed to close circuit")
 	RootCmd.PersistentFlags().StringVar(&config.App.LogFormat, "log_format", "", "Log format: json or text (default: json in production, text in debug)")
 	RootCmd.PersistentFlags().StringVar(&config.App.LogLevel, "log_level", "", "Log level: error, warn, info, debug or trace (default: warn for CLI, info for serve)")
+	RootCmd.PersistentFlags().BoolVar(&config.App.SaveLog, "save_log", true, "Also write logs to ./logs.txt (serve mode); false keeps them on stderr only")
 }

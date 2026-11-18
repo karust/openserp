@@ -8,4 +8,3 @@ node index.js
 ```
 
 Edit the `text`, `engine`, or `limit` in [index.js](index.js) to change the search.
-To use the hosted API instead of a local server, follow the commented line at the top of the file.

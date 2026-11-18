@@ -185,6 +185,16 @@ func TestBuildCacheKeyChangesWithPaginationAndFlags(t *testing.T) {
 	}); changed == baseKey {
 		t.Fatal("expected features to affect cache key")
 	}
+	resolved := base
+	resolved.ResolveURLs = true
+	resolvedKey := BuildCacheKey("google", "search", resolved)
+	if resolvedKey == baseKey {
+		t.Fatal("expected resolve_urls to affect cache key")
+	}
+	resolved.ResolveTop = 3
+	if BuildCacheKey("google", "search", resolved) == resolvedKey {
+		t.Fatal("expected resolve depth to affect cache key")
+	}
 }
 
 func TestBuildCacheKeyNormalizesStableFields(t *testing.T) {

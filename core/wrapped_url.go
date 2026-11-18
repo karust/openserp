@@ -22,7 +22,14 @@ func IsUsableResultURL(raw string) bool {
 	if u.Hostname() == "" {
 		return false
 	}
-	return !isGoogleRedirectURL(u)
+	return !isGoogleRedirectURL(u) && !isBingClickURL(u)
+}
+
+// isBingClickURL matches a Bing /ck/a click wrapper. normalizeURL unwraps the
+// ones that carry a destination; video rows only point at Bing's own player.
+func isBingClickURL(u *url.URL) bool {
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	return (host == "" || host == "bing.com" || strings.HasSuffix(host, ".bing.com")) && u.Path == "/ck/a"
 }
 
 // IsWrappedGoogleURL recognizes redirect paths, not opaque token signatures.

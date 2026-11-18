@@ -58,8 +58,9 @@ func parseBingDocument(doc *goquery.Document) []core.SearchResult {
 		href, _ := titleTag.Attr("href")
 		title := bingDocumentTitle(item, titleTag)
 		desc := bingDocumentDescription(item, title)
+		cite := core.NormalizeWhitespace(item.Find(Selectors.Cite).First().Text())
 
-		if res, ok := assembleBingRow(href, title, desc, isAd, rank); ok {
+		if res, ok := assembleBingRow(href, title, desc, cite, isAd, rank); ok {
 			results = append(results, res)
 		}
 	})
@@ -70,10 +71,15 @@ func parseBingDocument(doc *goquery.Document) []core.SearchResult {
 // assembleBingRow validates an already-extracted Bing row and assigns ranks.
 // Shared by the rod (browser) and goquery (raw / parse) parsers, which differ
 // only in how they pull title/href/desc out of the DOM.
-func assembleBingRow(href, title, desc string, isAd bool, rank *core.RankState) (core.SearchResult, bool) {
+func assembleBingRow(href, title, desc, cite string, isAd bool, rank *core.RankState) (core.SearchResult, bool) {
 	url := strings.TrimSpace(href)
 	if url == "" || url == "#" || strings.HasPrefix(url, "javascript:") {
 		return core.SearchResult{}, false
+	}
+	// /ck/a tokens change per page view, so the same result on two pages
+	// would survive dedupe.
+	if dest := core.UnwrapBingURL(url); dest != "" {
+		url = dest
 	}
 	if title == "" {
 		return core.SearchResult{}, false
@@ -87,6 +93,7 @@ func assembleBingRow(href, title, desc string, isAd bool, rank *core.RankState) 
 		Title:        title,
 		Description:  desc,
 		Ad:           isAd,
+		DisplayURL:   cite,
 	}, true
 }
 

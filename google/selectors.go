@@ -11,6 +11,7 @@ var Selectors = struct {
 	NoResults      string
 	ResultStats    string
 	CookieBtn      string
+	NoResultsCard  string
 	Results        string
 	ResultsBroad   string
 	Ad             string
@@ -45,6 +46,8 @@ var Selectors = struct {
 	NoResults:   "#botstuff, #topstuff, .mnr-c",
 	ResultStats: "div#result-stats",
 	CookieBtn:   "div[role='dialog'][aria-modal] button",
+	// Notices also use this wrapper; confirm zero-results text before returning.
+	NoResultsCard: ".mnr-c",
 	// Results targets the canonical organic result block. div.tF2Cxc is the
 	// stable per-result wrapper; the :not(:has(div.tF2Cxc)) guard keeps only the
 	// innermost block so nested knowledge-panel cards (which reuse tF2Cxc) don't
@@ -55,14 +58,7 @@ var Selectors = struct {
 	Ad:           "div[data-text-ad], [data-text-ad]",
 	Link:         "a",
 	Title:        "h3",
-	// Cite and SourceName are the visible attribution Google renders for every
-	// result: the breadcrumb ("https://www.pcmag.com › ... › VPN") and the site
-	// name beside the favicon ("PCMag", "Reddit · r/VPN"). Google now hands
-	// automated clients encrypted link wrappers instead of hrefs, but it cannot
-	// stop showing the user which site a result came from — so these are what a
-	// result's domain and identity are derived from when the href is opaque.
-	// Between them they covered every result on the SERPs we sampled; cite alone
-	// covered ~78% (Reddit and video blocks put comment counts in cite instead).
+	// Attribution survives opaque links; forum and video cites may contain counts.
 	Cite:         "cite",
 	SourceName:   "span.VuuXrf",
 	DescPrimary:  "div[data-sncf='1'] div",
@@ -84,4 +80,16 @@ var Selectors = struct {
 
 func searchResultSelectors() []string {
 	return []string{Selectors.Results, Selectors.ResultsBroad}
+}
+
+// searchReadySelectors are probed in order; the no-results card goes last so
+// rendered results always win.
+func searchReadySelectors() []string {
+	return []string{
+		Selectors.Results + ":has(" + Selectors.Title + ")",
+		Selectors.ResultsBroad + ":has(" + Selectors.Title + ")",
+		":is(" + Selectors.Ad + "):has(" + Selectors.Link + ")",
+		Selectors.AnswerBox,
+		Selectors.NoResultsCard,
+	}
 }

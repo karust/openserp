@@ -55,7 +55,7 @@ func parseDDGDocument(doc *goquery.Document) []core.SearchResult {
 		}
 
 		desc := firstText(item, Selectors.Desc...)
-		isAd := ddgSelectionHasAdMarker(item)
+		isAd := ddgSelectionHasAdMarker(item) || isDDGAdURL(href)
 
 		resultRank, absoluteRank := rank.Next(isAd)
 		results = append(results, core.SearchResult{

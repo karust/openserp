@@ -1,7 +1,7 @@
 # Search with extraction (JavaScript)
 
-Runs a search with `extract: true`, so OpenSERP fetches the top pages and returns
-their cleaned content alongside each result — search and scrape in one request.
+Runs a search with `extract: 2` and adds up to two organic pages' cleaned content
+alongside the results - search and scrape in one request.
 
 ```bash
 npm install

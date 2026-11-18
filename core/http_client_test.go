@@ -304,3 +304,32 @@ func resetRawHTTPClientCache(t *testing.T) {
 		entry.client.CloseIdleConnections()
 	}
 }
+
+func TestRawClickRequestDoesNotFollowRedirects(t *testing.T) {
+	resetRawHTTPClientCache(t)
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Path != "/goto" {
+			t.Error("destination page was fetched")
+		}
+		if r.Header.Get("Referer") != "http://"+r.Host+"/" || r.Header.Get("Sec-Fetch-Site") != "same-origin" {
+			t.Errorf("unexpected click headers: %v", r.Header)
+		}
+		w.Header().Set("Location", "/destination")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer server.Close()
+	ctx := WithBrowserProfileUsage(context.Background())
+	resp, err := rawClickRequest(ctx, server.URL+"/goto?url=token", Query{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	DrainAndCloseResponse(resp)
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/destination" || calls.Load() != 1 {
+		t.Fatalf("redirect followed: status=%d calls=%d location=%q", resp.StatusCode, calls.Load(), resp.Header.Get("Location"))
+	}
+	if ids := BrowserProfileIDsFromContext(ctx); len(ids) != 0 {
+		t.Fatalf("click request changed SERP profile metadata: %v", ids)
+	}
+}

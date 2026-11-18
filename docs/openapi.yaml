@@ -47,6 +47,7 @@ paths:
         - $ref: "#/components/parameters/StartQuery"
         - $ref: "#/components/parameters/FilterQuery"
         - $ref: "#/components/parameters/FeaturesQuery"
+        - $ref: "#/components/parameters/ResolveURLsQuery"
         - $ref: "#/components/parameters/ExtractQuery"
         - $ref: "#/components/parameters/ExtractModeQuery"
         - $ref: "#/components/parameters/MinRunesQuery"
@@ -324,6 +325,7 @@ paths:
         - $ref: "#/components/parameters/StartQuery"
         - $ref: "#/components/parameters/FilterQuery"
         - $ref: "#/components/parameters/FeaturesQuery"
+        - $ref: "#/components/parameters/ResolveURLsQuery"
         - $ref: "#/components/parameters/EnginesQuery"
         - $ref: "#/components/parameters/MegaModeQuery"
         - $ref: "#/components/parameters/MegaDedupeQuery"
@@ -465,12 +467,17 @@ paths:
       tags: [Search]
       operationId: extractURL
       summary: Extract clean content from one URL
+      description: >
+        PDF URLs return their text layer without a browser fallback. This needs
+        `mutool` (mupdf-tools), which the Docker image includes. PDFs over
+        `extract.max_bytes` and scans without a text layer fail with 502.
       parameters:
         - $ref: "#/components/parameters/URLQuery"
         - $ref: "#/components/parameters/ExtractModeShortQuery"
         - $ref: "#/components/parameters/MinRunesQuery"
         - $ref: "#/components/parameters/LangQuery"
         - $ref: "#/components/parameters/CleanQuery"
+        - $ref: "#/components/parameters/PreserveStructureQuery"
         - $ref: "#/components/parameters/UseLLMSTxtQuery"
         - $ref: "#/components/parameters/FormatQuery"
         - $ref: "#/components/parameters/UseProxyHeader"
@@ -499,6 +506,7 @@ paths:
       tags: [Search]
       operationId: extractURLPost
       summary: Extract clean content from one URL
+      description: Same as `GET /extract`, PDFs included, with parameters in a JSON body.
       requestBody:
         required: true
         content:
@@ -514,6 +522,10 @@ paths:
                   type: string
                   enum: [auto, fast, rendered]
                   default: auto
+                preserve_structure:
+                  type: boolean
+                  default: false
+                  description: Same as the `preserve_structure` query parameter.
                 clean:
                   type: boolean
                   default: true
@@ -805,6 +817,24 @@ components:
       schema:
         type: boolean
         default: true
+    ResolveURLsQuery:
+      name: resolve_urls
+      in: query
+      required: false
+      description: >
+        Google only. When Google hides result links behind encrypted `/goto`
+        redirects, follow Google's redirect responses, including HTML refresh hops,
+        to return the destination URL. The destination page is not fetched, and ad
+        links are never resolved. `true` resolves every wrapped link, `N` only the first N
+        organic results, `0`/`false` disables it. Links that fail to resolve
+        keep the redirect URL; `domain` still comes from the visible attribution.
+        When omitted, uses the server's `google.resolve_urls` setting (default `true`).
+      schema:
+        oneOf:
+          - type: boolean
+          - type: integer
+            minimum: 0
+        default: true
     EnginesQuery:
       name: engines
       in: query
@@ -872,12 +902,13 @@ components:
       in: query
       required: false
       description: >
-        Fetch and embed cleaned target-page content for the top web results.
+        Fetch and embed cleaned target-page content for the top organic results.
         Accepts a boolean or an integer depth: `extract=0`/`false` disables
-        extraction; `extract=true`/`1` enriches the top result; `extract=N`
-        (1-5) enriches the top N results. The tuning params `extract_mode` and
-        `min_runes` imply `extract=true` (top 1) when present, unless
-        `extract=0` is set explicitly.
+        extraction; `extract=true`/`1` enriches the top organic result;
+        `extract=N` (1-5) enriches the top N organic results. Ads and
+        people-also-ask/answer rows are skipped and never fetched. The tuning
+        params `extract_mode` and `min_runes` imply `extract=true` (top 1) when
+        present, unless `extract=0` is set explicitly.
       schema:
         oneOf:
           - type: boolean
@@ -917,6 +948,21 @@ components:
       schema:
         type: integer
         minimum: 0
+    PreserveStructureQuery:
+      name: preserve_structure
+      in: query
+      required: false
+      description: >
+        Convert the page's content container as-is instead of running article
+        detection: `<main>`, or a known reference layout (DocBook, Texinfo,
+        Apache httpd; the whole `<body>` for man pages). Keeps headings, code
+        blocks and API signatures with their descriptions, along with any menus
+        or sidebars inside that container. Falls back to article detection when
+        there is no container or it lacks headings plus code or definition lists.
+        Ignored when `clean=false`.
+      schema:
+        type: boolean
+        default: false
     CleanQuery:
       name: clean
       in: query
@@ -1269,6 +1315,14 @@ components:
         took_ms:
           type: integer
           example: 842
+        partial:
+          type: boolean
+          description: True when only part of the result page is available. Ranks keep their original positions. Omitted otherwise.
+        total_results:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Estimated total number of matches reported by the search engine, when available. Omitted when unknown or zero.
         engines_failed:
           type: array
           items:
@@ -1392,6 +1446,7 @@ components:
           type: string
           description: >
             For usable destination URLs: `s_` + hex(first 8 bytes of MD5(engine|normalized_url)).
+            Plaintext Google redirects are unwrapped before normalization.
             Normalized URL: lowercase scheme+host, trailing slash stripped, utm_*/fbclid/gclid
             tracking params removed. Same usable URL yields the same ID across requests.
             For wrapped or unusable URLs, a best-effort ID uses visible domain, source name,
@@ -1409,6 +1464,9 @@ components:
           example: The Go Programming Language
         url:
           type: string
+          description: >
+            Destination URL. Google `/goto` redirects are resolved unless
+            `resolve_urls=false`; resolved links drop Google's `#:~:text=` highlight directives.
           example: https://go.dev/
         display_url:
           type: string
@@ -2097,6 +2155,10 @@ components:
           enum: [auto, fast, rendered]
           default: auto
           description: Extraction mode
+        preserve_structure:
+          type: boolean
+          default: false
+          description: Same as the `preserve_structure` query parameter.
         clean:
           type: boolean
           default: true

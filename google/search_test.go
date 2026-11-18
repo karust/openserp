@@ -37,7 +37,7 @@ func TestBuildSearchURL(t *testing.T) {
 				if got := params.Get("oq"); got != params.Get("q") {
 					t.Fatalf("oq should match q, got %q vs %q", got, params.Get("q"))
 				}
-				if got := params.Get("tbs"); got != "cdr:1,cd_min:20240101,cd_max:20240131" {
+				if got := params.Get("tbs"); got != "cdr:1,cd_min:01/01/2024,cd_max:01/31/2024" {
 					t.Fatalf("unexpected tbs: %q", got)
 				}
 				if got := params.Get("num"); got != "50" {
@@ -300,7 +300,7 @@ func TestBuildImageSearchURL(t *testing.T) {
 				if got := params.Get("num"); got != "25" {
 					t.Fatalf("unexpected num value: %q", got)
 				}
-				if got := params.Get("tbs"); got != "cdr:1,cd_min:20240301,cd_max:20240315" {
+				if got := params.Get("tbs"); got != "cdr:1,cd_min:03/01/2024,cd_max:03/15/2024" {
 					t.Fatalf("unexpected tbs value: %q", got)
 				}
 				if got := params.Get("hl"); got != "en" {

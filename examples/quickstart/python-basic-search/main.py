@@ -1,7 +1,5 @@
 from openserp import OpenSERP
 
-# Hosted API instead? Get a key at https://openserp.org/dashboard/keys:
-#   with OpenSERP(api_key="<YOUR_API_TOKEN>") as client:
 with OpenSERP(base_url="http://localhost:7000") as client:
     response = client.search(
         engine="google",
@@ -14,3 +12,6 @@ with OpenSERP(base_url="http://localhost:7000") as client:
     for item in response.results:
         print(f"{item.rank}. {item.title}")
         print(f"   {item.url}")
+
+    if client.last_response:
+        print("Request ID:", client.last_response.request_id)

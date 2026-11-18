@@ -21,6 +21,7 @@ func TestLogLevelOverride(t *testing.T) {
 		{name: "unset"},
 		{name: "config", raw: " DEBUG ", want: logrus.DebugLevel, ok: true},
 		{name: "typed -v beats env/config", raw: "error", typed: []string{"verbose"}},
+		{name: "typed -v ignores invalid env/config", raw: "bogus", typed: []string{"verbose"}},
 		{name: "--log_level beats typed -d", raw: "error", typed: []string{"log_level", "debug"}, want: logrus.ErrorLevel, ok: true},
 	}
 	for _, tc := range cases {
@@ -74,6 +75,34 @@ func TestInitializeConfigLogLevel(t *testing.T) {
 	}
 }
 
+func TestInitializeConfigSaveLog(t *testing.T) {
+	cases := []struct {
+		name, env, file string
+		want            bool
+	}{
+		{"default writes the log file", "", "", true},
+		{"config turns it off", "", "app:\n  save_log: false\n", false},
+		{"env turns it off", "false", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateConfig(t)
+			t.Setenv("OPENSERP_APP_SAVE_LOG", tc.env)
+			if tc.file != "" {
+				if err := os.WriteFile("config.yaml", []byte(tc.file), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := initializeConfig(configCommand(t, "")); err != nil {
+				t.Fatal(err)
+			}
+			if config.App.SaveLog != tc.want {
+				t.Fatalf("save_log = %v, want %v", config.App.SaveLog, tc.want)
+			}
+		})
+	}
+}
+
 // Issue #44: no ./config.yaml is normal and must not log a warning.
 func TestInitializeConfigWithoutConfigFile(t *testing.T) {
 	isolateConfig(t)
@@ -88,6 +117,16 @@ func TestInitializeConfigWithoutConfigFile(t *testing.T) {
 	}
 	if logs.Len() > 0 {
 		t.Fatalf("unexpected logs: %s", logs.String())
+	}
+}
+
+func TestInitializeConfigRejectsMalformedFile(t *testing.T) {
+	isolateConfig(t)
+	if err := os.WriteFile("config.yaml", []byte("app: [\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := initializeConfig(configCommand(t, "")); err == nil {
+		t.Fatal("expected a config parse error")
 	}
 }
 
@@ -109,6 +148,9 @@ func isolateConfig(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv("OPENSERP_SERVER_CONFIG_PATH", "")
 	t.Setenv("OPENSERP_APP_LOG_LEVEL", "")
+	for _, key := range []string{"OPENSERP_GOOGLE_RESOLVE_URLS", "OPENSERP_GOOGLE_RESOLVE_CONCURRENCY", "OPENSERP_GOOGLE_RESOLVE_TIMEOUT", "OPENSERP_GOOGLE_RESOLVE_COOLDOWN"} {
+		t.Setenv(key, "")
+	}
 	previous := config
 	t.Cleanup(func() { config = previous })
 }

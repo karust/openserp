@@ -28,6 +28,10 @@ jobs:
         with:
           node-version: "20"
 
+      # mutool lets the PDF extraction test run instead of skipping
+      - name: Install mupdf-tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mupdf-tools
+
       - name: Run unit tests
         run: go test -race -count=1 ./...
 

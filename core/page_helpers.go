@@ -82,7 +82,9 @@ func ClassifyChallengeDocument(doc *goquery.Document, s DocSignals) error {
 	}
 	var text string
 	if len(s.CaptchaMarkers)+len(s.EmptyMarkers) > 0 {
-		text = strings.ToLower(doc.Text())
+		// Script/style text is skipped: SERPs ship UI strings in inline JS (Bing
+		// embeds "There are no results for this question..." on normal pages).
+		text = strings.ToLower(NormalizeWhitespace(blockAwareText(doc.Selection)))
 	}
 	if anyMarkerMatches(text, s.CaptchaMarkers) {
 		return ErrCaptcha
