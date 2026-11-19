@@ -370,6 +370,21 @@ Engines can return CAPTCHAs, rate limits or unrelated results. Browser mode does
 
 Advanced proxy configuration is available in [config.yaml](./config.yaml). You can enable tagged proxy pools and per-request override via `X-Use-Proxy: <tag>` or `X-Use-Proxy: direct`.
 
+## UNIX Socket
+
+Set the host to `unix:<path>.sock` to serve the API on a UNIX domain socket instead of TCP; the port is then ignored. A stale socket file at that path is replaced on startup and removed on shutdown.
+
+```bash
+./openserp serve -a unix:/tmp/openserp.sock
+curl --unix-socket /tmp/openserp.sock "http://localhost/google/search?text=golang"
+```
+
+By default the socket gets its mode from the umask (usually `0755`), so only the owner can connect. To let another user connect (for example a web backend running as a different user), set `server.socket_mode` or `--socket-mode`, e.g. `0660` with a shared group or `0777` for any local user. The other user also needs execute permission on the socket's directory.
+
+```bash
+./openserp serve -a unix:/tmp/openserp.sock --socket-mode 0777
+```
+
 ## API Docs
 
 Once the server is running, the interactive docs are available locally:
