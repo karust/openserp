@@ -30,22 +30,7 @@ func GuardedDialContext(ctx context.Context, network, addr string) (net.Conn, er
 		return nil, err
 	}
 
-	dialer := &net.Dialer{}
-	var lastErr error
-	for _, ip := range ips {
-		if !ipMatchesNetwork(ip, network) {
-			continue
-		}
-		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-		if err == nil {
-			return conn, nil
-		}
-		lastErr = err
-	}
-	if lastErr != nil {
-		return nil, lastErr
-	}
-	return nil, fmt.Errorf("no public IPs available for %s", host)
+	return dialFirstReachable(ctx, network, port, ips, host)
 }
 
 func ValidatePublicHTTPURL(ctx context.Context, rawURL string) error {
@@ -80,7 +65,7 @@ func resolveHostIPs(ctx context.Context, host string) (public, blocked []netip.A
 		}
 		return nil, []netip.Addr{ip}, nil
 	}
-	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	ips, err := activeResolver().LookupNetIP(ctx, "ip", host)
 	if err != nil {
 		return nil, nil, err
 	}
