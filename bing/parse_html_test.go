@@ -2,6 +2,7 @@ package bing
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"os"
 	"strings"
@@ -87,11 +88,18 @@ func TestParseBingHTMLNoResults(t *testing.T) {
 func TestParseBingHTMLScriptMarkerAndWrappedLinks(t *testing.T) {
 	t.Parallel()
 
+	const player = "/videos/riverview/relatedvideo?q=mr.beast&ru=%2fsearch%3fq%3dmr.beast%26form%3dQBLH&mmscn=vwrc&mid=719D9B8FC992A9C1AC64719D9B8FC992A9C1AC64&FORM=WRVORC&ntb=1"
+	firstVideoToken := base64.RawURLEncoding.EncodeToString([]byte(player + "&msockid=one"))
+	secondVideoToken := base64.RawURLEncoding.EncodeToString([]byte("//www.bing.com" + player + "&msockid=two"))
+	directVideoURL := "https://www.bing.com" + player + "&msockid=three"
+
 	html := `<html><head><script>var s={"searchNoResult":"There are no results for this question"};</script></head><body>
 <ol id="b_results">
   <li class="b_algo"><h2><a href="https://www.bing.com/ck/a?!&&p=aaa&u=a1aHR0cHM6Ly9nby5kZXYvZG9jLw&ntb=1">Docs</a></h2><div class="b_caption"><p>Go docs</p></div></li>
   <li class="b_algo"><h2><a href="https://www.bing.com/ck/a?!&&p=bbb&u=a1aHR0cHM6Ly9nby5kZXYvZG9jLw&ntb=1">Docs</a></h2><div class="b_caption"><p>Go docs</p></div></li>
-  <li class="b_algo"><div class="b_attribution"><cite>https://www.youtube.com <span>› watch</span></cite></div><h2><a href="https://www.bing.com/ck/a?!&&p=ccc&u=a1L3ZpZGVvcy9yaXZlcnZpZXc&ntb=1">Go Course - YouTube</a></h2></li>
+  <li class="b_algo"><div class="b_attribution"><cite>https://www.youtube.com <span>› watch</span></cite></div><h2><a href="https://www.bing.com/ck/a?!&amp;p=ccc&amp;u=a1` + firstVideoToken + `">100 People Vs World’s Biggest Trap! - YouTube</a></h2></li>
+  <li class="b_algo"><div class="b_attribution"><cite>https://www.youtube.com <span>› watch</span></cite></div><h2><a href="https://www.bing.com/ck/a?!&amp;p=ddd&amp;u=a1` + secondVideoToken + `">100 People Vs World’s Biggest Trap! - YouTube</a></h2></li>
+  <li class="b_algo"><h2><a href="` + strings.ReplaceAll(directVideoURL, "&", "&amp;") + `">100 People Vs World’s Biggest Trap! - YouTube</a></h2></li>
 </ol></body></html>`
 	results, err := ParseHTML(bytes.NewReader([]byte(html)))
 	if err != nil {
@@ -103,9 +111,16 @@ func TestParseBingHTMLScriptMarkerAndWrappedLinks(t *testing.T) {
 	if results[0].URL != "https://go.dev/doc/" {
 		t.Fatalf("expected unwrapped URL, got %q", results[0].URL)
 	}
+	const wantPlayer = "https://www.bing.com/videos/riverview/relatedvideo?FORM=WRVORC&mid=719D9B8FC992A9C1AC64719D9B8FC992A9C1AC64&mmscn=vwrc&ntb=1&q=mr.beast&ru=%2Fsearch%3Fq%3Dmr.beast%26form%3DQBLH"
+	if results[1].URL != wantPlayer {
+		t.Fatalf("video player URL = %q, want %q", results[1].URL, wantPlayer)
+	}
 	video := core.EnrichResult(results[1], core.EnrichContext{Engine: "bing"})
 	if video.Domain != "youtube.com" || video.DisplayURL != "youtube.com › watch" {
 		t.Fatalf("video row should be attributed to its cite, got domain=%q display=%q", video.Domain, video.DisplayURL)
+	}
+	if core.IsUsableResultURL(video.URL) {
+		t.Fatalf("Bing player %q was treated as a publisher destination", video.URL)
 	}
 }
 

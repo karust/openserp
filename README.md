@@ -351,7 +351,7 @@ Run `openserp search --help` for the full flag list. Results go to stdout, logs 
 | -------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `filter`       | `google`          | Duplicate filter: `true` hides similar results, `false` includes them.                                                           |
 | `features`     | browser `Search`  | Populate `serp_features[]` from the live page. Defaults to `true`.                                                               |
-| `resolve_urls` | `google`          | Turn Google `/goto` redirect links into destination URLs without fetching destination pages (ads skipped). `true` (default), `false`, or top `N`. |
+| `resolve_urls` | `google`          | Try to resolve Google `/goto` links within `google.resolve_timeout` (5s by default).`true` (default), `false`, or top `N`. Ads are skipped. |
 
 </details>
 

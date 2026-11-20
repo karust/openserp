@@ -2,7 +2,6 @@ package core
 
 import (
 	"crypto/md5"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/url"
@@ -329,34 +328,33 @@ func normalizeURL(raw string) string {
 	if err != nil {
 		return raw
 	}
-	if isBingClickURL(u) {
-		if unwrapped := UnwrapBingURL(raw); unwrapped != "" {
-			u, _ = url.Parse(unwrapped)
-		}
+	if unwrapped, _ := bingResultURL(u); unwrapped != nil {
+		u = unwrapped
 	}
 
 	// Plaintext redirects can expose a destination; encrypted tokens cannot.
 	if isGoogleRedirectURL(u) {
+		wrapper := u
 		query := u.Query()
 		for _, key := range []string{"url", "q", "adurl"} {
-			candidate := strings.TrimSpace(query.Get(key))
-			if IsUsableResultURL(candidate) {
-				u, _ = url.Parse(candidate)
+			candidate, err := url.Parse(strings.TrimSpace(query.Get(key)))
+			if err == nil && isUsableResultURL(candidate) {
+				u = candidate
 				break
 			}
 		}
+		if u == wrapper {
+			return raw
+		}
 	}
 
-	u.Scheme = strings.ToLower(u.Scheme)
 	u.Host = strings.ToLower(u.Host)
 
-	// Strip common tracking parameters.
 	q := u.Query()
-	trackingParams := []string{
+	for _, p := range []string{
 		"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
 		"fbclid", "gclid", "msclkid", "ref", "_ga",
-	}
-	for _, p := range trackingParams {
+	} {
 		q.Del(p)
 	}
 	u.RawQuery = q.Encode()
@@ -367,28 +365,6 @@ func normalizeURL(raw string) string {
 		normalized = strings.TrimRight(normalized, "/")
 	}
 	return normalized
-}
-
-// UnwrapBingURL extracts the real destination from a Bing click-tracking URL,
-// or returns "" when raw isn't one. Bing encodes as: u=a1<url-safe-base64-without-padding>
-func UnwrapBingURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || !isBingClickURL(u) {
-		return ""
-	}
-	uParam := u.Query().Get("u")
-	if !strings.HasPrefix(uParam, "a1") {
-		return ""
-	}
-	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(uParam[2:], "="))
-	if err != nil {
-		return ""
-	}
-	candidate := strings.TrimSpace(string(decoded))
-	if IsUsableResultURL(candidate) {
-		return candidate
-	}
-	return ""
 }
 
 // extractDomain returns the registrable domain (no www.) from a URL string.

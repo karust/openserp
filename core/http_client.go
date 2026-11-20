@@ -176,8 +176,8 @@ func doGuardedRawRequest(ctx context.Context, client tlsclient.HttpClient, searc
 		if err != nil {
 			return nil, err
 		}
-		location, ok := redirectLocation(resp)
-		if !ok {
+		location := redirectLocation(resp)
+		if location == "" {
 			return resp, nil
 		}
 		if hop >= maxGuardedRedirects {
@@ -190,34 +190,30 @@ func doGuardedRawRequest(ctx context.Context, client tlsclient.HttpClient, searc
 			return nil, err
 		}
 		DrainAndCloseResponse(resp)
-		current = next
+		current = next.String()
 	}
 }
 
-func redirectLocation(resp *http.Response) (string, bool) {
-	if resp == nil {
-		return "", false
-	}
+func redirectLocation(resp *http.Response) string {
 	switch resp.StatusCode {
 	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
 		http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
-		location := strings.TrimSpace(resp.Header.Get("Location"))
-		return location, location != ""
+		return strings.TrimSpace(resp.Header.Get("Location"))
 	default:
-		return "", false
+		return ""
 	}
 }
 
-func resolveRedirectURL(base, location string) (string, error) {
+func resolveRedirectURL(base, location string) (*url.URL, error) {
 	baseURL, err := url.Parse(base)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	locURL, err := url.Parse(location)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return baseURL.ResolveReference(locURL).String(), nil
+	return baseURL.ResolveReference(locURL), nil
 }
 
 func ReadRawSearchBody(resp *http.Response) ([]byte, error) {

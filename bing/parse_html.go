@@ -76,11 +76,8 @@ func assembleBingRow(href, title, desc, cite string, isAd bool, rank *core.RankS
 	if url == "" || url == "#" || strings.HasPrefix(url, "javascript:") {
 		return core.SearchResult{}, false
 	}
-	// /ck/a tokens change per page view, so the same result on two pages
-	// would survive dedupe.
-	if dest := core.UnwrapBingURL(url); dest != "" {
-		url = dest
-	}
+	// Click tokens change across impressions. Normalize before deduplication.
+	url = core.BingResultURL(url)
 	if title == "" {
 		return core.SearchResult{}, false
 	}

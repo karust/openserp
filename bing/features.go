@@ -1,10 +1,7 @@
 package bing
 
 import (
-	"context"
-
 	"github.com/PuerkitoBio/goquery"
-	"github.com/go-rod/rod"
 	"github.com/karust/openserp/core"
 )
 
@@ -48,8 +45,4 @@ func extractBingFeatures(doc *goquery.Document) []core.SerpFeature {
 			Confidence:    0.6,
 		},
 	})
-}
-
-func extractBingFeaturesFromPage(ctx context.Context, page *rod.Page) []core.SerpFeature {
-	return core.FeaturesFromPageWithWait(ctx, page, extractBingFeatures)
 }
