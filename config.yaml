@@ -12,7 +12,7 @@ app:
   log_format: "text" # json|text
   log_level: "" # error|warn|info|debug|trace; empty = warn for CLI, info for serve
   save_log: true # Also write logs to ./logs.txt in serve mode; false = stderr only
-  timeout: 15 # Browser/search timeout in seconds, per attempt; the request deadline is derived from this x retries
+  timeout: 15 # Browser/search timeout per attempt in whole seconds. The request budget includes retries.
   browser_path: "" # Custom browser binary path (chrome/chromium/edge..)
   profiles: "" # Overriding built-in browser profiles
   head: false # Headful mode
@@ -21,9 +21,9 @@ app:
   block_resources: "image,font,css,media" # Block heavy subresources in browser mode
   block_trackers: true # Block known tracker domains
   max_processes: 6 # Concurrent Chrome processes
-  idle_ttl: 5m # close a Chrome that has not served traffic for this long
-
-  mega_timeout: 90s # max total wait for /mega/* requests; slow engines return partial results
+  # Use duration strings for these two settings (e.g. 90s, 5m, or 24h for one day).
+  idle_ttl: 5m # Close Chrome after this much idle time
+  mega_timeout: 90s # Total wait for /mega/* requests. Slow engines return partial results.
 
 extract:
   enabled: true
@@ -34,18 +34,19 @@ extract:
 
 proxies:
   allow_request_proxy_url: true
-  # Force a single proxy for all engines.
+  # Use one proxy for all search attempts, including retries, unless the request overrides it.
   # Same behavior as passing --proxy on the CLI.
   #global: http://127.0.0.1:8080
 
-  # Advanced mode: define tagged proxy pools and opt engines in with `proxy: <tag>`.
+  # Without a global proxy, engines connect directly unless they select a pool with `proxy: <tag>`.
   #entries:
   #  - url: http://127.0.0.1:8080
   #    tags: [default, us]
   #  - url: socks5h://127.0.0.1:1080
   #    tags: [eu]
   health:
-    failure_threshold: 2 # Disable proxy after this many consecutive failures
+    # Tagged pools only. 0 uses the built-in default of 3.
+    failure_threshold: 2 # Consecutive proxy network failures before disabling an entry
   lanes:
     enabled: true # Reuse browser profile/cookies per engine + proxy session ID
     max_lanes: 100 # LRU cap for sticky lanes kept in worker memory
@@ -82,7 +83,7 @@ google:
   rate_burst: 3 # Burst requests before limiter applies
   resolve_urls: true # Default: true = all, false/0 = off, N = top N organic results
   resolve_concurrency: 4 # Concurrent redirect requests per search
-  resolve_timeout: 5s # Total URL resolution budget per search
+  resolve_timeout: 5s # URL resolution budget per search, capped by the search deadline
   resolve_cooldown: 10m # Pause resolution through an exit after a challenge
   #captcha: true # Engine-level solver flag (also requires captcha.solver_enabled=true)
   #disabled: true # Leave this engine out of serve: no endpoints, not used by mega (env: OPENSERP_GOOGLE_DISABLED)
@@ -94,13 +95,11 @@ yandex:
 baidu:
   rate_requests: 60
   rate_burst: 3
-  # No proxy tag means direct traffic
 
 bing:
   rate_requests: 60
   rate_burst: 3
   search_box: true # Submit through the homepage; false uses legacy /search URLs (env: OPENSERP_BING_SEARCH_BOX)
-  # No proxy tag means direct traffic
 
 duckduckgo:
   rate_requests: 60
@@ -109,4 +108,3 @@ duckduckgo:
 ecosia:
   rate_requests: 60
   rate_burst: 3
-  # No proxy tag means direct traffic

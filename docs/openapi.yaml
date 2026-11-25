@@ -863,6 +863,9 @@ components:
       required: false
       description: >
         Enable deduplication by normalized URL. Default `true`.
+        For web search, matching HTTP and HTTPS URLs on their default ports share
+        one result, with HTTPS preferred. Ads and organic results stay separate.
+        Each engine's SERP features retain their original attribution.
       schema:
         type: boolean
         default: true

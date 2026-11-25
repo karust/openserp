@@ -1058,16 +1058,14 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string) error {
 		return apiErr
 	}
 
+	order := megaResultOrder(rawResults, runCfg.Dedupe, action == "search")
 	if action == "image" {
-		imageResults := rawResults
-		if runCfg.Dedupe {
-			imageResults = s.deduplicateMegaResults(imageResults)
-		}
 		env := NewImageEnvelope(q, requestID, startedAt, engineNames)
 		env.Meta.EnginesResponded = responded
 		env.Meta.EnginesFailed = enginesFailed
 		env.Meta.EngineErrors = engineErrors
-		for _, r := range imageResults {
+		for _, i := range order {
+			r := rawResults[i]
 			ectx := EnrichContext{Engine: r.Engine, Query: q}
 			env.Results = append(env.Results, EnrichImageResult(r.SearchResult, ectx))
 		}
@@ -1082,17 +1080,20 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string) error {
 		return sendImageEnvelope(c, format, env)
 	}
 
-	webResults := rawResults
-	if runCfg.Dedupe {
-		webResults = s.deduplicateMegaResults(webResults)
-	}
 	env := NewEnvelope(q, requestID, startedAt, engineNames)
 	env.Meta.EnginesResponded = responded
 	env.Meta.EnginesFailed = enginesFailed
 	env.Meta.EngineErrors = engineErrors
-	for _, r := range webResults {
-		ectx := EnrichContext{Engine: r.Engine, Query: q}
-		AppendEnrichedSearchResult(env, r.SearchResult, ectx, startedAt)
+	// Features belong to their source engine even when another engine wins the URL.
+	allResults := make([]Result, len(rawResults))
+	for i, r := range rawResults {
+		ctx := EnrichContext{Engine: r.Engine, Query: q}
+		allResults[i] = enrichSearchResultWithFeatures(env, r.SearchResult, ctx, startedAt)
+	}
+	for _, i := range order {
+		if result := allResults[i]; result.ID != "" {
+			env.Results = append(env.Results, result)
+		}
 	}
 	env.Finalize(startedAt, q)
 	if q.Extract {
@@ -1100,12 +1101,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string) error {
 	}
 
 	if runCfg.Merge {
-		allEnriched := make([]Result, 0, len(rawResults))
-		for _, r := range rawResults {
-			ectx := EnrichContext{Engine: r.Engine, Query: q}
-			allEnriched = append(allEnriched, EnrichResult(r.SearchResult, ectx))
-		}
-		clusters := BuildClusters(allEnriched, len(enginesToUse))
+		clusters := BuildClusters(allResults, len(enginesToUse))
 		if len(clusters) > 0 {
 			env.Clusters = &clusters
 		}
@@ -1285,58 +1281,54 @@ func resolveEngineAlias(name string) string {
 	}
 }
 
-func (s *Server) deduplicateMegaResults(results []MegaSearchResult) []MegaSearchResult {
-	urlMap := make(map[string]MegaSearchResult)
-	order := []string{}
+func megaResultOrder(results []MegaSearchResult, dedupe, web bool) []int {
+	order := make([]int, 0, len(results))
+	if !dedupe {
+		for i := range results {
+			order = append(order, i)
+		}
+		return order
+	}
+	urls := make([]megaURLKey, len(results))
+	for i, r := range results {
+		urls[i] = megaURLKey{url: NormalizeURLForClustering(r.URL), ad: r.Ad || (web && r.Type == ResultTypeAd)}
+	}
+	keys := urls
+	if web {
+		keys = megaWebURLKeys(urls)
+	}
 
-	for _, result := range results {
-		if result.URL == "" {
+	positions := make(map[megaURLKey]int)
+	for i, result := range results {
+		key := keys[i]
+		if key.url == "" {
 			continue
 		}
-		normalizedURL := NormalizeURLForClustering(result.URL)
-		if normalizedURL == "" {
-			continue
-		}
-		key := resultDedupKey(SearchResult{URL: normalizedURL, Ad: result.Ad})
-		existing, exists := urlMap[key]
+		pos, exists := positions[key]
 		if !exists {
-			urlMap[key] = result
-			order = append(order, key)
+			positions[key] = len(order)
+			order = append(order, i)
 			continue
 		}
-		if betterMegaResult(result, existing) {
-			urlMap[key] = result
+		current := order[pos]
+		previous := results[current]
+		betterRank := betterMegaRank(result.Rank, previous.Rank, result.Engine, previous.Engine)
+		if preferHTTPS(urls[i].url, urls[current].url, betterRank) {
+			order[pos] = i
 		}
 	}
 
-	deduped := make([]MegaSearchResult, 0, len(urlMap))
-	for _, key := range order {
-		deduped = append(deduped, urlMap[key])
-	}
-
-	sort.Slice(deduped, func(i, j int) bool {
-		if resultLess(deduped[i].SearchResult, deduped[j].SearchResult) {
+	sort.Slice(order, func(i, j int) bool {
+		a, b := results[order[i]], results[order[j]]
+		if resultLess(a.SearchResult, b.SearchResult) {
 			return true
 		}
-		if resultLess(deduped[j].SearchResult, deduped[i].SearchResult) {
+		if resultLess(b.SearchResult, a.SearchResult) {
 			return false
 		}
-		if deduped[i].Engine != deduped[j].Engine {
-			return deduped[i].Engine < deduped[j].Engine
-		}
-		return NormalizeURLForClustering(deduped[i].URL) < NormalizeURLForClustering(deduped[j].URL)
+		return a.Engine < b.Engine
 	})
-	return deduped
-}
-
-func betterMegaResult(candidate, current MegaSearchResult) bool {
-	if candidate.Rank > 0 && (current.Rank <= 0 || candidate.Rank < current.Rank) {
-		return true
-	}
-	if candidate.Rank == current.Rank && candidate.Engine < current.Engine {
-		return true
-	}
-	return false
+	return order
 }
 
 type cacheHitCandidate struct {

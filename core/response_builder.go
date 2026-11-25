@@ -109,18 +109,21 @@ func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 // AppendEnrichedSearchResult preserves the legacy results[] surface while
 // copying any extracted SERP features onto the top-level feature surface.
 func AppendEnrichedSearchResult(env *Envelope, raw SearchResult, ctx EnrichContext, extractedAt time.Time) {
-	var sourceResultID string
-	if raw.URL != "" || raw.Title != "" || raw.Description != "" || raw.Rank != 0 {
-		result := EnrichResult(raw, ctx)
+	if result := enrichSearchResultWithFeatures(env, raw, ctx, extractedAt); result.ID != "" {
 		env.Results = append(env.Results, result)
-		sourceResultID = result.ID
+	}
+}
+
+func enrichSearchResultWithFeatures(env *Envelope, raw SearchResult, ctx EnrichContext, extractedAt time.Time) Result {
+	var result Result
+	if raw.URL != "" || raw.Title != "" || raw.Description != "" || raw.Rank != 0 {
+		result = EnrichResult(raw, ctx)
 	}
 
 	for _, rawFeature := range raw.Features {
-		env.SerpFeatures = append(env.SerpFeatures, EnrichSerpFeature(rawFeature, ctx.Engine, sourceResultID, extractedAt))
+		env.SerpFeatures = append(env.SerpFeatures, EnrichSerpFeature(rawFeature, ctx.Engine, result.ID, extractedAt))
 	}
-	if len(raw.Features) == 0 && sourceResultID != "" && shouldMirrorResultAsFeature(raw.Type) {
-		result := env.Results[len(env.Results)-1]
+	if len(raw.Features) == 0 && result.ID != "" && shouldMirrorResultAsFeature(raw.Type) {
 		env.SerpFeatures = append(env.SerpFeatures, EnrichSerpFeature(SerpFeature{
 			Type:     result.Type,
 			Title:    result.Title,
@@ -130,8 +133,9 @@ func AppendEnrichedSearchResult(env *Envelope, raw SearchResult, ctx EnrichConte
 				Title: result.Title,
 				URL:   result.URL,
 			}},
-		}, ctx.Engine, sourceResultID, extractedAt))
+		}, ctx.Engine, result.ID, extractedAt))
 	}
+	return result
 }
 
 // EnrichSerpFeature stamps a raw feature with stable public fields.
