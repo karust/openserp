@@ -374,11 +374,15 @@ Set the host to `unix:<path>.sock` to serve the API on a UNIX domain socket inst
 curl --unix-socket /tmp/openserp.sock "http://localhost/google/search?text=golang"
 ```
 
-By default the socket gets its mode from the umask (usually `0755`), so only the owner can connect. To let another user connect (for example a web backend running as a different user), set `server.socket_mode` or `--socket-mode`, e.g. `0660` with a shared group or `0777` for any local user. The other user also needs execute permission on the socket's directory.
+An active socket prevents startup. For service deployments, use a directory writable only by the OpenSERP user and leave the `.sock.lock` file in place between starts.
+
+On Linux, only the owner can connect by default (`0755` minus the umask). To let another user connect (for example a web backend running as a different user), set `server.socket_mode` or `--socket-mode`, e.g. `0660` if the backend belongs to the socket's group or `0777` for any local user. The other user also needs execute permission on the socket's directory.
 
 ```bash
 ./openserp serve -a unix:/tmp/openserp.sock --socket-mode 0777
 ```
+
+Quote YAML modes like `"0660"` or set `OPENSERP_SERVER_SOCKET_MODE`. Explicit modes apply on Unix-like systems. On Unix systems other than Linux, use a restrictive umask to limit access until the explicit mode is applied.
 
 ## API Docs
 

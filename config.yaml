@@ -1,7 +1,7 @@
 server:
   host: 0.0.0.0 # API host to bind
   # host: unix:/tmp/openserp.sock # Serve on a UNIX socket instead (must end with .sock; port is ignored)
-  # socket_mode: "0660" # Octal permissions for the UNIX socket file; empty = from umask (usually owner-only connect)
+  # socket_mode: "0660" # Octal permissions for the UNIX socket file; default on Linux: only the owner can connect
   port: 7000 # API port to bind
   debug: false # Enable debug logs and force browser UI mode
   verbose: false # Enable debug-level request logs

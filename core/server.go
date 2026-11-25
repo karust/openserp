@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,10 +16,12 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofrs/flock"
 	browserprofile "github.com/karust/openserp/core/browser"
 	"github.com/karust/openserp/core/fpcheck"
 	"github.com/karust/openserp/core/fpcheck/detectors"
@@ -106,8 +107,7 @@ type ServerOptions struct {
 	Extract extractpkg.Config
 	// GoogleResolve configures Google result URL resolution.
 	GoogleResolve URLResolveConfig
-	// SocketMode sets the permissions of the UNIX socket file. Zero keeps the
-	// umask-derived default, which usually lets only the owner connect.
+	// SocketMode overrides the default permissions of the UNIX socket file.
 	SocketMode os.FileMode
 }
 
@@ -1664,18 +1664,19 @@ func (s *Server) SetDraining(draining bool) {
 
 const defaultShutdownTimeout = 30 * time.Second
 
-const unixSocketPrefix = "unix:"
+var errUnixSocketInUse = errors.New("unix socket already in use")
 
 // parseListenAddr maps the configured host and port to a net.Listen network
 // and address. A host of the form "unix:/path/to/file.sock" selects a UNIX
 // domain socket and the port is ignored.
 func parseListenAddr(host string, port int) (network, addr string, err error) {
-	path, ok := strings.CutPrefix(host, unixSocketPrefix)
+	path, ok := strings.CutPrefix(host, "unix:")
 	if !ok {
 		return "tcp", fmt.Sprintf("%s:%d", host, port), nil
 	}
-	if !strings.HasSuffix(path, ".sock") || len(path) == len(".sock") {
-		return "", "", fmt.Errorf("invalid unix socket host %q: expected unix:<path>.sock", host)
+	if path == ".sock" || !strings.HasSuffix(path, ".sock") ||
+		strings.HasPrefix(path, "@") || strings.ContainsRune(path, 0) {
+		return "", "", fmt.Errorf("invalid unix socket host %q: expected unix:<filesystem-path>.sock", host)
 	}
 	return "unix", path, nil
 }
@@ -1685,16 +1686,46 @@ func parseListenAddr(host string, port int) (network, addr string, err error) {
 // regular files.
 func removeStaleSocket(path string) error {
 	info, err := os.Lstat(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
 	if err != nil {
 		return err
 	}
-	if info.Mode().Type() != fs.ModeSocket {
+	if info.Mode().Type() != os.ModeSocket {
 		return fmt.Errorf("refusing to replace %s: existing file is not a unix socket", path)
 	}
+	conn, err := net.DialTimeout("unix", path, 250*time.Millisecond)
+	if err == nil {
+		_ = conn.Close()
+		return fmt.Errorf("%w: %q", errUnixSocketInUse, path)
+	}
+	// A timeout or permission error may come from a live listener.
+	const wsaConnectionRefused = syscall.Errno(10061)
+	refused := errors.Is(err, syscall.ECONNREFUSED) ||
+		(runtime.GOOS == "windows" && errors.Is(err, wsaConnectionRefused))
+	if !refused {
+		return fmt.Errorf("probe unix socket %q: %w", path, err)
+	}
+	current, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(info, current) {
+		return fmt.Errorf("unix socket path %q changed during startup", path)
+	}
 	return os.Remove(path)
+}
+
+// Fchmod takes an int on Unix and a Handle on Windows.
+func listenUnixSocket[FD ~int | ~uintptr](path string, fchmod func(FD, uint32) error) (net.Listener, error) {
+	var config net.ListenConfig
+	if runtime.GOOS == "linux" {
+		// Linux copies the descriptor mode at bind. Only the owner may connect until chmod.
+		config.Control = func(_, _ string, conn syscall.RawConn) error {
+			var chmodErr error
+			err := conn.Control(func(fd uintptr) { chmodErr = fchmod(FD(fd), 0o755) })
+			return errors.Join(err, chmodErr)
+		}
+	}
+	return config.Listen(context.Background(), "unix", path)
 }
 
 // ParseSocketMode parses an octal permission string such as "0660" or "777".
@@ -1721,19 +1752,31 @@ func (s *Server) Listen() error {
 	if network == "tcp" {
 		return s.app.Listen(addr)
 	}
+	if s.opts.SocketMode != 0 && runtime.GOOS == "windows" {
+		return errors.New("unix socket permissions (--socket-mode) are unsupported on Windows")
+	}
 
-	if err := removeStaleSocket(addr); err != nil {
+	// Keep the lock file in place so concurrent starts always lock the same file.
+	lock := flock.New(addr + ".lock")
+	defer func() { _ = lock.Close() }()
+	locked, err := lock.TryLock()
+	if err != nil {
+		return fmt.Errorf("lock unix socket %q: %w", addr, err)
+	}
+	if !locked {
+		return fmt.Errorf("%w: %q", errUnixSocketInUse, addr)
+	}
+	if err := removeStaleSocket(addr); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	// net.Listen("unix") unlinks the socket file when the listener is closed,
-	// which happens on Shutdown.
-	ln, err := net.Listen(network, addr)
+	// Go unlinks the socket when the listener closes.
+	ln, err := listenUnixSocket(addr, syscall.Fchmod)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = ln.Close() }()
 	if s.opts.SocketMode != 0 {
 		if err := os.Chmod(addr, s.opts.SocketMode); err != nil {
-			_ = ln.Close()
 			return fmt.Errorf("chmod unix socket: %w", err)
 		}
 	}
