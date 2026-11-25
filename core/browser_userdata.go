@@ -56,9 +56,24 @@ func newUserDataDir(root string) (string, error) {
 	return dir, nil
 }
 
+// CheckUserDataDir reports whether a browser profile can be created below root,
+// for callers that launch Chrome lazily. An empty root selects Rod's default
+// location.
+func CheckUserDataDir(root string) error {
+	dir, err := newUserDataDir(root)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(dir); err != nil {
+		return fmt.Errorf("remove probe profile in user_data_dir %q: %w", userDataRoot(root), err)
+	}
+	return nil
+}
+
 // CleanStaleUserDataDirs removes browser profiles that earlier OpenSERP runs
 // left below root (crash, SIGKILL, container stop). Profiles whose Chrome is
-// still running are kept. An empty root selects Rod's default location.
+// still running, or is locked by another host, are kept. An empty root selects
+// Rod's default location.
 // It returns how many directories were removed.
 func CleanStaleUserDataDirs(root string) (int, error) {
 	// Chrome on Windows has no SingletonLock symlink to prove a profile is idle.
@@ -120,10 +135,10 @@ func userDataDirInUse(dir, hostname string, now time.Time) bool {
 	if err != nil || pid <= 0 {
 		return false
 	}
-	// A lock from another host (for example a previous container sharing the
-	// volume) cannot refer to a process of this machine.
+	// The PID of another host (for example a container sharing the volume)
+	// cannot be checked from here, so its Chrome may still be running.
 	if target[:idx] != hostname {
-		return false
+		return true
 	}
 	return processAlive(pid)
 }

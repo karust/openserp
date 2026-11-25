@@ -116,6 +116,11 @@ func serve(cmd *cobra.Command, args []string) error {
 	if _, err := core.CleanStaleUserDataDirs(config.App.UserDataDir); err != nil {
 		logrus.WithError(err).Warn("Could not remove some stale browser profiles")
 	}
+	// The pool launches Chrome on first use, so fail here instead of on a request.
+	// This runs after the sweep, which may have freed space.
+	if err := core.CheckUserDataDir(config.App.UserDataDir); err != nil {
+		return err
+	}
 
 	baseOpts := fingerprintBrowserOpts
 	baseOpts.LeavePageOpen = config.App.IsLeaveHead

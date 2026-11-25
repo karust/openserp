@@ -62,6 +62,28 @@ func TestNewUserDataDirFailsWhenRootUnwritable(t *testing.T) {
 	}
 }
 
+func TestCheckUserDataDir(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "profiles")
+	if err := CheckUserDataDir(root); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("probe left %d entries behind", len(entries))
+	}
+
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckUserDataDir(file); err == nil {
+		t.Fatal("expected error when user_data_dir is a file")
+	}
+}
+
 func TestCleanStaleUserDataDirs(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("stale profile cleanup is disabled on Windows")
@@ -84,15 +106,15 @@ func TestCleanStaleUserDataDirs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 4 {
-		t.Fatalf("removed = %d, want 4", removed)
+	if removed != 3 {
+		t.Fatalf("removed = %d, want 3", removed)
 	}
-	for _, gone := range []string{foreignHost, deadPID, noLock, legacy} {
+	for _, gone := range []string{deadPID, noLock, legacy} {
 		if exists(gone) {
 			t.Errorf("%s should have been removed", gone)
 		}
 	}
-	for _, kept := range []string{live, starting, unrelated, plainFile} {
+	for _, kept := range []string{live, foreignHost, starting, unrelated, plainFile} {
 		if !exists(kept) {
 			t.Errorf("%s should have been kept", kept)
 		}
