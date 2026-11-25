@@ -243,7 +243,7 @@ func (bing *Bing) Search(ctx context.Context, query core.Query) (results []core.
 			break
 		}
 		if query.Features && pagesFetched == 0 {
-			features = extractBingFeaturesFromPage(ctx, page)
+			features = core.FeaturesFromPageWithWait(ctx, page, extractBingFeatures)
 		}
 		previousCount := core.CountOrganicResults(searchResults)
 		searchResults = core.DeduplicateResults(append(searchResults, pageResults...))

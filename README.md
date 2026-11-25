@@ -47,6 +47,8 @@ cd openserp && go build -o openserp . && ./openserp serve
 
 Prebuilt binaries for Linux, macOS and Windows are on the [releases page](https://github.com/karust/openserp/releases). Images: [`karust/openserp`](https://hub.docker.com/r/karust/openserp).
 
+PDF extraction calls `mutool`. The Docker image ships it, other installs need MuPDF (`apt install mupdf-tools`).
+
 </details>
 
 ## Use with AI Agents
@@ -247,6 +249,9 @@ curl "http://127.0.0.1:7000/extract?url=https://example.com&format=markdown"
 # Keep headings, signatures and code blocks on documentation pages
 curl "http://127.0.0.1:7000/extract?url=https://docs.python.org/3/library/copy.html&format=markdown&preserve_structure=true"
 
+# PDFs return their text layer (scans without one return an error)
+curl "http://127.0.0.1:7000/extract?url=https://bitcoin.org/bitcoin.pdf&format=markdown"
+
 # Extract several URLs at once - returns a bare [{page_content, metadata}] array
 # (Open WebUI external loader compatible); failed URLs become items with metadata.error
 curl -X POST "http://127.0.0.1:7000/extract/batch" \
@@ -346,7 +351,7 @@ Run `openserp search --help` for the full flag list. Results go to stdout, logs 
 | -------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `filter`       | `google`          | Duplicate filter: `true` hides similar results, `false` includes them.                                                           |
 | `features`     | browser `Search`  | Populate `serp_features[]` from the live page. Defaults to `true`.                                                               |
-| `resolve_urls` | `google`          | Turn Google `/goto` redirect links into destination URLs (one redirect hop, ads skipped). `true` (default), `false`, or top `N`. |
+| `resolve_urls` | `google`          | Try to resolve Google `/goto` links within `google.resolve_timeout` (5s by default).`true` (default), `false`, or top `N`. Ads are skipped. |
 
 </details>
 
@@ -364,6 +369,25 @@ OpenSERP supports HTTP and SOCKS5 proxies.
 Engines can return CAPTCHAs, rate limits or unrelated results. Browser mode does not eliminate these; try another engine or a proxy when needed.
 
 Advanced proxy configuration is available in [config.yaml](./config.yaml). You can enable tagged proxy pools and per-request override via `X-Use-Proxy: <tag>` or `X-Use-Proxy: direct`.
+
+## UNIX Socket
+
+Set the host to `unix:<path>.sock` to serve the API on a UNIX domain socket instead of TCP; the port is then ignored. A stale socket file at that path is replaced on startup and removed on shutdown.
+
+```bash
+./openserp serve -a unix:/tmp/openserp.sock
+curl --unix-socket /tmp/openserp.sock "http://localhost/google/search?text=golang"
+```
+
+An active socket prevents startup. For service deployments, use a directory writable only by the OpenSERP user and leave the `.sock.lock` file in place between starts.
+
+On Linux, only the owner can connect by default (`0755` minus the umask). To let another user connect (for example a web backend running as a different user), set `server.socket_mode` or `--socket-mode`, e.g. `0660` if the backend belongs to the socket's group or `0777` for any local user. The other user also needs execute permission on the socket's directory.
+
+```bash
+./openserp serve -a unix:/tmp/openserp.sock --socket-mode 0777
+```
+
+Quote YAML modes like `"0660"` or set `OPENSERP_SERVER_SOCKET_MODE`. Explicit modes apply on Unix-like systems. On Unix systems other than Linux, use a restrictive umask to limit access until the explicit mode is applied.
 
 ## API Docs
 

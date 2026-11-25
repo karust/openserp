@@ -80,6 +80,11 @@ func serve(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	socketMode, err := core.ParseSocketMode(config.Server.SocketMode)
+	if err != nil {
+		return err
+	}
+
 	proxyRuntime := core.ProxyRuntimeBrowser
 	if config.Server.IsRawRequests {
 		proxyRuntime = core.ProxyRuntimeRaw
@@ -91,10 +96,11 @@ func serve(cmd *cobra.Command, args []string) error {
 	}
 
 	fingerprintBrowserOpts := buildFingerprintBrowserOptions()
+	serverOpts := buildServerOptions(corsCfg, proxyCfg, fingerprintBrowserOpts)
+	serverOpts.SocketMode = socketMode
 
 	if config.Server.IsRawRequests {
 		logrus.Warn("Browserless results are very inconsistent or may not even work!")
-		serverOpts := buildServerOptions(corsCfg, proxyCfg, fingerprintBrowserOpts)
 		var rawEngines []core.SearchEngine
 		for _, name := range enabledEngineNames("google", "yandex", "baidu", "ecosia") {
 			rawEngines = append(rawEngines, &rawEngine{name: name})
@@ -121,7 +127,6 @@ func serve(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	serverOpts := buildServerOptions(corsCfg, proxyCfg, fingerprintBrowserOpts)
 	serverOpts.BrowserResolver = browserResolver
 	serv := core.NewServerWithOptions(config.Server.Host, config.Server.Port, serverOpts, engines...)
 	return listenWithGracefulShutdown(serv, closeBrowsers)

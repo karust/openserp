@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/base64"
 	"net/url"
 	"strings"
 
@@ -13,23 +14,99 @@ var attributionIDNA = idna.New(idna.MapForLookup(), idna.BidiRule(), idna.Verify
 // IsUsableResultURL reports whether raw can serve as a result's destination.
 func IsUsableResultURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return false
-	}
-	if !strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https") {
-		return false
-	}
-	if u.Hostname() == "" {
-		return false
-	}
-	return !isGoogleRedirectURL(u) && !isBingClickURL(u)
+	return err == nil && isUsableResultURL(u)
 }
 
-// isBingClickURL matches a Bing /ck/a click wrapper. normalizeURL unwraps the
-// ones that carry a destination; video rows only point at Bing's own player.
+func isUsableResultURL(u *url.URL) bool {
+	return (u.Scheme == "http" || u.Scheme == "https") &&
+		u.Hostname() != "" && !isGoogleRedirectURL(u) && !isBingClickURL(u) && !isBingVideoPlayerURL(u)
+}
+
+const bingVideoPlayerPath = "/videos/riverview/relatedvideo"
+
+func isBingHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	return host == "bing.com" || strings.HasSuffix(host, ".bing.com")
+}
+
 func isBingClickURL(u *url.URL) bool {
-	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
-	return (host == "" || host == "bing.com" || strings.HasSuffix(host, ".bing.com")) && u.Path == "/ck/a"
+	return u.Path == "/ck/a" && (u.Hostname() == "" || isBingHost(u.Hostname()))
+}
+
+func isBingVideoPlayerURL(u *url.URL) bool {
+	return u.Path == bingVideoPlayerPath && isBingHost(u.Hostname())
+}
+
+// UnwrapBingURL returns the publisher destination encoded in a Bing click URL.
+func UnwrapBingURL(raw string) string {
+	wrapper, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	_, publisher := bingResultURL(wrapper)
+	return publisher
+}
+
+// BingResultURL unwraps a Bing result, including links to its video player.
+func BingResultURL(raw string) string {
+	link, err := url.Parse(raw)
+	if err == nil {
+		if target, publisher := bingResultURL(link); target != nil {
+			if publisher != "" {
+				return publisher
+			}
+			return target.String()
+		}
+	}
+	return raw
+}
+
+func bingResultURL(link *url.URL) (*url.URL, string) {
+	target := link
+	if isBingClickURL(link) {
+		token, ok := strings.CutPrefix(link.Query().Get("u"), "a1")
+		if !ok {
+			return nil, ""
+		}
+		decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(token, "="))
+		if err != nil {
+			return nil, ""
+		}
+		publisher := strings.TrimSpace(string(decoded))
+		target, err = url.Parse(publisher)
+		if err != nil {
+			return nil, ""
+		}
+		if isUsableResultURL(target) {
+			return target, publisher
+		}
+	} else if !isBingVideoPlayerURL(link) {
+		return nil, ""
+	}
+
+	// Some video rows provide a Bing player as their only click target.
+	if target.Path != bingVideoPlayerPath || target.User != nil {
+		return nil, ""
+	}
+	if target.Scheme == "" && target.Host == "" {
+		target.Host = link.Hostname()
+		if target.Host == "" {
+			target.Host = "www.bing.com"
+		}
+	}
+	if !isBingHost(target.Hostname()) || (target.Scheme != "" && target.Scheme != "https" && target.Scheme != "http") {
+		return nil, ""
+	}
+	query := target.Query()
+	if query.Get("mid") == "" {
+		return nil, ""
+	}
+	if target.Scheme == "" {
+		target.Scheme = "https"
+	}
+	query.Del("msockid")
+	target.RawQuery = query.Encode()
+	return target, ""
 }
 
 // IsWrappedGoogleURL recognizes redirect paths, not opaque token signatures.

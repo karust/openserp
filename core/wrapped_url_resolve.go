@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"golang.org/x/net/html"
 )
 
 // URLResolveConfig sets Google redirect resolution defaults and limits.
@@ -25,10 +27,10 @@ type URLResolveConfig struct {
 func DefaultURLResolveConfig() URLResolveConfig {
 	return URLResolveConfig{
 		URLs: "true",
-		// A resolve is one 302 from Google (~200ms, a few hundred bytes); the
-		// destination page is never fetched.
+		// A resolve reads only Google's redirect responses; the destination page
+		// is never fetched.
 		Concurrency: 4,
-		Timeout:     3 * time.Second,
+		Timeout:     5 * time.Second,
 		// The same exit serves the SERPs, so back off once Google pushes back on
 		// resolves instead of burning the IP.
 		Cooldown: 10 * time.Minute,
@@ -36,6 +38,9 @@ func DefaultURLResolveConfig() URLResolveConfig {
 }
 
 var errResolveChallenged = errors.New("redirect resolve challenged")
+
+const maxGoogleRedirectRequests = 3
+const maxGoogleRedirectBodyBytes = 64 * 1024
 
 // fetchRedirect is swapped in tests.
 var fetchRedirect = rawClickRequest
@@ -112,12 +117,28 @@ resolveLoop:
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			defer func() { <-sem }()
-			if ctx.Err() != nil {
-				return
+			ownsSlot := true
+			defer func() {
+				if ownsSlot {
+					<-sem
+				}
+			}()
+			wait := func(ctx context.Context, delay time.Duration) error {
+				// A refresh wait should not keep other links from starting.
+				<-sem
+				ownsSlot = false
+				if err := SleepContext(ctx, delay); err != nil {
+					return err
+				}
+				select {
+				case sem <- struct{}{}:
+					ownsSlot = true
+				case <-ctx.Done():
+				}
+				return ctx.Err()
 			}
 
-			dest, err := resolveGoogleRedirect(ctx, t.url, query)
+			dest, err := resolveGoogleRedirect(ctx, t.url, query, wait)
 			if errors.Is(err, errResolveChallenged) {
 				startResolveCooldown(exit, time.Now(), cfg.Cooldown)
 				cancel()
@@ -144,12 +165,7 @@ resolveLoop:
 // ad clicks are skipped: fetching them bills the advertiser.
 func resolvableGoogleRedirect(raw, pageURL string) (string, bool) {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || !isGoogleRedirectURL(u) {
-		return "", false
-	}
-	switch strings.TrimSuffix(strings.ToLower(u.Path), "/") {
-	case "/goto", "/url":
-	default:
+	if err != nil || !isGoogleResultRedirect(u) {
 		return "", false
 	}
 	if IsUsableResultURL(normalizeURL(raw)) {
@@ -168,36 +184,133 @@ func resolvableGoogleRedirect(raw, pageURL string) (string, bool) {
 	return u.String(), true
 }
 
-func resolveGoogleRedirect(ctx context.Context, wrapped string, query Query) (string, error) {
-	resp, err := fetchRedirect(ctx, wrapped, query)
-	if err != nil {
-		return "", err
+func isGoogleResultRedirect(u *url.URL) bool {
+	if !isGoogleRedirectURL(u) {
+		return false
 	}
-	defer DrainAndCloseResponse(resp)
+	switch strings.TrimSuffix(strings.ToLower(u.Path), "/") {
+	case "/goto", "/url":
+		return true
+	}
+	return false
+}
 
-	// 400 is a bad or expired token, not pushback.
-	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
-		return "", errResolveChallenged
+func resolveGoogleRedirect(ctx context.Context, wrapped string, query Query, wait func(context.Context, time.Duration) error) (string, error) {
+	current := wrapped
+	var delay time.Duration
+	for range maxGoogleRedirectRequests {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		if delay > 0 {
+			if deadline, ok := ctx.Deadline(); !ok || delay >= time.Until(deadline) {
+				return "", fmt.Errorf("resolve: Google refresh delay %s exceeds remaining budget", delay)
+			}
+			if err := wait(ctx, delay); err != nil {
+				return "", err
+			}
+		}
+		resp, err := fetchRedirect(ctx, current, query)
+		if err != nil {
+			return "", err
+		}
+
+		status := resp.StatusCode
+		if status == http.StatusForbidden || status == http.StatusTooManyRequests {
+			_ = resp.Body.Close()
+			return "", errResolveChallenged
+		}
+		location := redirectLocation(resp)
+		delay = 0
+		if status == http.StatusOK {
+			location, delay = googleRefreshLocation(resp)
+		} else {
+			// Keep small redirect connections reusable without draining large errors.
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxGoogleRedirectBodyBytes))
+		}
+		_ = resp.Body.Close()
+		if location == "" {
+			return "", fmt.Errorf("resolve: HTTP %d without redirect", status)
+		}
+		u, err := resolveRedirectURL(current, location)
+		if err != nil {
+			return "", err
+		}
+		if isGoogleResultRedirect(u) {
+			if plain, err := url.Parse(normalizeURL(u.String())); err == nil && isUsableResultURL(plain) {
+				u = plain
+			}
+		}
+		if isGoogleInterstitial(u) {
+			return "", errResolveChallenged
+		}
+		dest := u.String()
+		if isUsableResultURL(u) {
+			return stripTextFragmentDirective(dest), nil
+		}
+
+		// Google can answer with an HTML refresh to a fresh wrapper. Only follow
+		// Google wrappers; an external destination is returned without fetching it.
+		next, ok := resolvableGoogleRedirect(dest, current)
+		if !ok {
+			return "", fmt.Errorf("resolve: %q is not a destination", dest)
+		}
+		current = next
 	}
-	location, ok := redirectLocation(resp)
-	if !ok {
-		return "", fmt.Errorf("resolve: HTTP %d without redirect", resp.StatusCode)
+	return "", errors.New("resolve: too many Google redirects")
+}
+
+func googleRefreshLocation(resp *http.Response) (string, time.Duration) {
+	// Stop at the refresh tag; the remaining body may be large or stall.
+	z := html.NewTokenizer(io.LimitReader(resp.Body, maxGoogleRedirectBodyBytes))
+	for {
+		switch z.Next() {
+		case html.ErrorToken:
+			return "", 0
+		case html.StartTagToken, html.SelfClosingTagToken:
+			token := z.Token()
+			if token.Data != "meta" {
+				continue
+			}
+			var equiv, content string
+			for _, attr := range token.Attr {
+				switch attr.Key {
+				case "http-equiv":
+					equiv = attr.Val
+				case "content":
+					content = attr.Val
+				}
+			}
+			if strings.EqualFold(strings.TrimSpace(equiv), "refresh") {
+				if location, delay := parseMetaRefreshLocation(content); location != "" {
+					return location, delay
+				}
+			}
+		}
 	}
-	dest, err := resolveRedirectURL(wrapped, location)
-	if err != nil {
-		return "", err
+}
+
+func parseMetaRefreshLocation(content string) (string, time.Duration) {
+	target := strings.TrimSpace(content)
+	var delay time.Duration
+	if seconds, rest, found := strings.Cut(target, ";"); found {
+		parsed, err := time.ParseDuration(strings.TrimSpace(seconds) + "s")
+		if err != nil || parsed < 0 {
+			return "", 0
+		}
+		delay = parsed
+		target = strings.TrimSpace(rest)
 	}
-	u, err := url.Parse(dest)
-	if err != nil {
-		return "", err
+	key, value, found := strings.Cut(target, "=")
+	if !found || !strings.EqualFold(strings.TrimSpace(key), "url") {
+		return "", 0
 	}
-	if isGoogleInterstitial(u) {
-		return "", errResolveChallenged
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 && ((value[0] == '\'' && value[len(value)-1] == '\'') ||
+		(value[0] == '"' && value[len(value)-1] == '"')) {
+		value = value[1 : len(value)-1]
 	}
-	if !IsUsableResultURL(dest) {
-		return "", fmt.Errorf("resolve: %q is not a destination", dest)
-	}
-	return stripTextFragmentDirective(dest), nil
+	return strings.TrimSpace(value), delay
 }
 
 // isGoogleInterstitial catches captcha and consent hops, which would otherwise

@@ -7,6 +7,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/proto"
 )
 
 // pollInterval is how often WaitForElements re-probes selectors while the
@@ -293,15 +294,68 @@ func ClassifyFromPage(page *rod.Page, classify func(*goquery.Document) error) er
 	return classify(doc)
 }
 
-const featureHydrationWait = 2000 * time.Millisecond
+const (
+	featureHydrationQuiet = 400 * time.Millisecond
+	featureHydrationLimit = 2 * time.Second
+)
+
+const waitForFeatureHydration = `(quietMs, limitMs) => new Promise(resolve => {
+	const body = document.body;
+	if (!body) {
+		resolve();
+		return;
+	}
+	let quietTimer;
+	const finish = () => {
+		clearTimeout(quietTimer);
+		clearTimeout(limitTimer);
+		observer.disconnect();
+		resolve();
+	};
+	const scheduleQuiet = () => {
+		clearTimeout(quietTimer);
+		quietTimer = setTimeout(() => {
+			if (document.readyState === "complete" && !document.querySelector('[aria-busy="true"]')) {
+				finish();
+			} else {
+				scheduleQuiet();
+			}
+		}, quietMs);
+	};
+	const observer = new MutationObserver(scheduleQuiet);
+	const limitTimer = setTimeout(finish, limitMs);
+	observer.observe(body, {subtree: true, childList: true, characterData: true, attributes: true});
+	window.scrollTo(0, body.scrollHeight);
+	scheduleQuiet();
+})`
 
 // FeaturesFromPageWithWait lets async feature modules render before snapshotting.
 func FeaturesFromPageWithWait(ctx context.Context, page *rod.Page, extract func(*goquery.Document) []SerpFeature) []SerpFeature {
-	if page != nil {
-		_, _ = page.Eval(`() => window.scrollTo(0, document.body.scrollHeight)`)
-		if err := SleepContext(ctx, featureHydrationWait); err != nil {
-			return nil
-		}
+	ctx = EnsureContext(ctx)
+	if page == nil || ctx.Err() != nil || page.GetContext().Err() != nil {
+		return nil
 	}
-	return FeaturesFromPage(page, extract)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(page.GetContext(), cancel)
+	defer stop()
+
+	waitCtx, stopWaiting := context.WithTimeout(ctx, featureHydrationLimit)
+	defer stopWaiting()
+	waitPage := page.Context(waitCtx)
+	// A canceled navigation listener can leave Rod's Network state stale.
+	quiet := featureHydrationQuiet
+	if err := (proto.NetworkEnable{}).Call(waitPage); err != nil {
+		quiet = featureHydrationLimit
+	}
+	// Subscribe before scrolling and keep the listener through DOM hydration.
+	waitIdle := waitPage.WaitRequestIdle(quiet, nil, nil, nil)
+	if _, err := waitPage.Eval(waitForFeatureHydration, quiet.Milliseconds(), featureHydrationLimit.Milliseconds()); err != nil {
+		stopWaiting()
+	}
+	waitIdle()
+	if ctx.Err() != nil {
+		return nil
+	}
+	return FeaturesFromPage(page.Context(ctx), extract)
 }

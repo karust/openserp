@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,10 +16,12 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofrs/flock"
 	browserprofile "github.com/karust/openserp/core/browser"
 	"github.com/karust/openserp/core/fpcheck"
 	"github.com/karust/openserp/core/fpcheck/detectors"
@@ -54,7 +57,8 @@ type SearchEngine interface {
 // Server exposes OpenSERP HTTP endpoints backed by one or more search engines.
 type Server struct {
 	app           *fiber.App
-	addr          string
+	host          string
+	port          int
 	searchEngines []SearchEngine
 	cache         *ResponseCache
 	resilient     *ResilientSearcher
@@ -103,6 +107,8 @@ type ServerOptions struct {
 	Extract extractpkg.Config
 	// GoogleResolve configures Google result URL resolution.
 	GoogleResolve URLResolveConfig
+	// SocketMode overrides the default permissions of the UNIX socket file.
+	SocketMode os.FileMode
 }
 
 type BrowserResolver func(proxyURL string) (*Browser, error)
@@ -142,7 +148,6 @@ func NewServer(host string, port int, searchEngines ...SearchEngine) *Server {
 // routes. The returned server is ready to Listen; call Shutdown for graceful
 // stop.
 func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngines ...SearchEngine) *Server {
-	addr := fmt.Sprintf("%s:%d", host, port)
 	app := fiber.New(fiber.Config{
 		ErrorHandler: JSONErrorMiddleware(),
 		BodyLimit:    10 * 1024 * 1024,
@@ -150,7 +155,8 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 
 	serv := Server{
 		app:           app,
-		addr:          addr,
+		host:          host,
+		port:          port,
 		searchEngines: searchEngines,
 		resilient:     NewResilientSearcher(searchEngines, opts.Resilience),
 		startTime:     time.Now(),
@@ -1052,16 +1058,14 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string) error {
 		return apiErr
 	}
 
+	order := megaResultOrder(rawResults, runCfg.Dedupe, action == "search")
 	if action == "image" {
-		imageResults := rawResults
-		if runCfg.Dedupe {
-			imageResults = s.deduplicateMegaResults(imageResults)
-		}
 		env := NewImageEnvelope(q, requestID, startedAt, engineNames)
 		env.Meta.EnginesResponded = responded
 		env.Meta.EnginesFailed = enginesFailed
 		env.Meta.EngineErrors = engineErrors
-		for _, r := range imageResults {
+		for _, i := range order {
+			r := rawResults[i]
 			ectx := EnrichContext{Engine: r.Engine, Query: q}
 			env.Results = append(env.Results, EnrichImageResult(r.SearchResult, ectx))
 		}
@@ -1076,17 +1080,20 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string) error {
 		return sendImageEnvelope(c, format, env)
 	}
 
-	webResults := rawResults
-	if runCfg.Dedupe {
-		webResults = s.deduplicateMegaResults(webResults)
-	}
 	env := NewEnvelope(q, requestID, startedAt, engineNames)
 	env.Meta.EnginesResponded = responded
 	env.Meta.EnginesFailed = enginesFailed
 	env.Meta.EngineErrors = engineErrors
-	for _, r := range webResults {
-		ectx := EnrichContext{Engine: r.Engine, Query: q}
-		AppendEnrichedSearchResult(env, r.SearchResult, ectx, startedAt)
+	// Features belong to their source engine even when another engine wins the URL.
+	allResults := make([]Result, len(rawResults))
+	for i, r := range rawResults {
+		ctx := EnrichContext{Engine: r.Engine, Query: q}
+		allResults[i] = enrichSearchResultWithFeatures(env, r.SearchResult, ctx, startedAt)
+	}
+	for _, i := range order {
+		if result := allResults[i]; result.ID != "" {
+			env.Results = append(env.Results, result)
+		}
 	}
 	env.Finalize(startedAt, q)
 	if q.Extract {
@@ -1094,12 +1101,7 @@ func (s *Server) handleMegaEndpoint(c *fiber.Ctx, action string) error {
 	}
 
 	if runCfg.Merge {
-		allEnriched := make([]Result, 0, len(rawResults))
-		for _, r := range rawResults {
-			ectx := EnrichContext{Engine: r.Engine, Query: q}
-			allEnriched = append(allEnriched, EnrichResult(r.SearchResult, ectx))
-		}
-		clusters := BuildClusters(allEnriched, len(enginesToUse))
+		clusters := BuildClusters(allResults, len(enginesToUse))
 		if len(clusters) > 0 {
 			env.Clusters = &clusters
 		}
@@ -1279,58 +1281,54 @@ func resolveEngineAlias(name string) string {
 	}
 }
 
-func (s *Server) deduplicateMegaResults(results []MegaSearchResult) []MegaSearchResult {
-	urlMap := make(map[string]MegaSearchResult)
-	order := []string{}
+func megaResultOrder(results []MegaSearchResult, dedupe, web bool) []int {
+	order := make([]int, 0, len(results))
+	if !dedupe {
+		for i := range results {
+			order = append(order, i)
+		}
+		return order
+	}
+	urls := make([]megaURLKey, len(results))
+	for i, r := range results {
+		urls[i] = megaURLKey{url: NormalizeURLForClustering(r.URL), ad: r.Ad || (web && r.Type == ResultTypeAd)}
+	}
+	keys := urls
+	if web {
+		keys = megaWebURLKeys(urls)
+	}
 
-	for _, result := range results {
-		if result.URL == "" {
+	positions := make(map[megaURLKey]int)
+	for i, result := range results {
+		key := keys[i]
+		if key.url == "" {
 			continue
 		}
-		normalizedURL := NormalizeURLForClustering(result.URL)
-		if normalizedURL == "" {
-			continue
-		}
-		key := resultDedupKey(SearchResult{URL: normalizedURL, Ad: result.Ad})
-		existing, exists := urlMap[key]
+		pos, exists := positions[key]
 		if !exists {
-			urlMap[key] = result
-			order = append(order, key)
+			positions[key] = len(order)
+			order = append(order, i)
 			continue
 		}
-		if betterMegaResult(result, existing) {
-			urlMap[key] = result
+		current := order[pos]
+		previous := results[current]
+		betterRank := betterMegaRank(result.Rank, previous.Rank, result.Engine, previous.Engine)
+		if preferHTTPS(urls[i].url, urls[current].url, betterRank) {
+			order[pos] = i
 		}
 	}
 
-	deduped := make([]MegaSearchResult, 0, len(urlMap))
-	for _, key := range order {
-		deduped = append(deduped, urlMap[key])
-	}
-
-	sort.Slice(deduped, func(i, j int) bool {
-		if resultLess(deduped[i].SearchResult, deduped[j].SearchResult) {
+	sort.Slice(order, func(i, j int) bool {
+		a, b := results[order[i]], results[order[j]]
+		if resultLess(a.SearchResult, b.SearchResult) {
 			return true
 		}
-		if resultLess(deduped[j].SearchResult, deduped[i].SearchResult) {
+		if resultLess(b.SearchResult, a.SearchResult) {
 			return false
 		}
-		if deduped[i].Engine != deduped[j].Engine {
-			return deduped[i].Engine < deduped[j].Engine
-		}
-		return NormalizeURLForClustering(deduped[i].URL) < NormalizeURLForClustering(deduped[j].URL)
+		return a.Engine < b.Engine
 	})
-	return deduped
-}
-
-func betterMegaResult(candidate, current MegaSearchResult) bool {
-	if candidate.Rank > 0 && (current.Rank <= 0 || candidate.Rank < current.Rank) {
-		return true
-	}
-	if candidate.Rank == current.Rank && candidate.Engine < current.Engine {
-		return true
-	}
-	return false
+	return order
 }
 
 type cacheHitCandidate struct {
@@ -1658,10 +1656,124 @@ func (s *Server) SetDraining(draining bool) {
 
 const defaultShutdownTimeout = 30 * time.Second
 
-// Listen starts the Fiber HTTP server on the configured address.
+var errUnixSocketInUse = errors.New("unix socket already in use")
+
+// parseListenAddr maps the configured host and port to a net.Listen network
+// and address. A host of the form "unix:/path/to/file.sock" selects a UNIX
+// domain socket and the port is ignored.
+func parseListenAddr(host string, port int) (network, addr string, err error) {
+	path, ok := strings.CutPrefix(host, "unix:")
+	if !ok {
+		return "tcp", fmt.Sprintf("%s:%d", host, port), nil
+	}
+	if path == ".sock" || !strings.HasSuffix(path, ".sock") ||
+		strings.HasPrefix(path, "@") || strings.ContainsRune(path, 0) {
+		return "", "", fmt.Errorf("invalid unix socket host %q: expected unix:<filesystem-path>.sock", host)
+	}
+	return "unix", path, nil
+}
+
+// removeStaleSocket deletes a socket file left behind by a previous run.
+// Other file types are never removed so a misconfigured path cannot delete
+// regular files.
+func removeStaleSocket(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode().Type() != os.ModeSocket {
+		return fmt.Errorf("refusing to replace %s: existing file is not a unix socket", path)
+	}
+	conn, err := net.DialTimeout("unix", path, 250*time.Millisecond)
+	if err == nil {
+		_ = conn.Close()
+		return fmt.Errorf("%w: %q", errUnixSocketInUse, path)
+	}
+	// A timeout or permission error may come from a live listener.
+	const wsaConnectionRefused = syscall.Errno(10061)
+	refused := errors.Is(err, syscall.ECONNREFUSED) ||
+		(runtime.GOOS == "windows" && errors.Is(err, wsaConnectionRefused))
+	if !refused {
+		return fmt.Errorf("probe unix socket %q: %w", path, err)
+	}
+	current, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(info, current) {
+		return fmt.Errorf("unix socket path %q changed during startup", path)
+	}
+	return os.Remove(path)
+}
+
+// Fchmod takes an int on Unix and a Handle on Windows.
+func listenUnixSocket[FD ~int | ~uintptr](path string, fchmod func(FD, uint32) error) (net.Listener, error) {
+	var config net.ListenConfig
+	if runtime.GOOS == "linux" {
+		// Linux copies the descriptor mode at bind. Only the owner may connect until chmod.
+		config.Control = func(_, _ string, conn syscall.RawConn) error {
+			var chmodErr error
+			err := conn.Control(func(fd uintptr) { chmodErr = fchmod(FD(fd), 0o755) })
+			return errors.Join(err, chmodErr)
+		}
+	}
+	return config.Listen(context.Background(), "unix", path)
+}
+
+// ParseSocketMode parses an octal permission string such as "0660" or "777".
+// An empty string returns zero, meaning the socket keeps its default mode.
+func ParseSocketMode(s string) (os.FileMode, error) {
+	if s == "" {
+		return 0, nil
+	}
+	mode, err := strconv.ParseUint(s, 8, 32)
+	if err != nil || mode == 0 || mode > 0o777 {
+		return 0, fmt.Errorf("invalid socket mode %q: expected octal permissions such as 0660 or 0777", s)
+	}
+	return os.FileMode(mode), nil
+}
+
+// Listen starts the Fiber HTTP server on the configured TCP address or UNIX
+// socket.
 func (s *Server) Listen() error {
+	network, addr, err := parseListenAddr(s.host, s.port)
+	if err != nil {
+		return err
+	}
 	s.SetDraining(false)
-	return s.app.Listen(s.addr)
+	if network == "tcp" {
+		return s.app.Listen(addr)
+	}
+	if s.opts.SocketMode != 0 && runtime.GOOS == "windows" {
+		return errors.New("unix socket permissions (--socket-mode) are unsupported on Windows")
+	}
+
+	// Keep the lock file in place so concurrent starts always lock the same file.
+	lock := flock.New(addr + ".lock")
+	defer func() { _ = lock.Close() }()
+	locked, err := lock.TryLock()
+	if err != nil {
+		return fmt.Errorf("lock unix socket %q: %w", addr, err)
+	}
+	if !locked {
+		return fmt.Errorf("%w: %q", errUnixSocketInUse, addr)
+	}
+	if err := removeStaleSocket(addr); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	// Go unlinks the socket when the listener closes.
+	ln, err := listenUnixSocket(addr, syscall.Fchmod)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = ln.Close() }()
+	if s.opts.SocketMode != 0 {
+		if err := os.Chmod(addr, s.opts.SocketMode); err != nil {
+			return fmt.Errorf("chmod unix socket: %w", err)
+		}
+	}
+	logrus.WithField("socket", addr).Info("Listening on unix socket")
+	return s.app.Listener(ln)
 }
 
 // Shutdown gracefully stops the Fiber HTTP server.

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"html"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,17 +18,23 @@ import (
 
 // stubRedirects swaps the network fetch and returns a reader of fetched URLs.
 func stubRedirects(t *testing.T, handle func(target string) (*http.Response, error)) func() []string {
+	return stubRedirectRequests(t, func(_ context.Context, target string, _ Query) (*http.Response, error) {
+		return handle(target)
+	})
+}
+
+func stubRedirectRequests(t *testing.T, handle func(context.Context, string, Query) (*http.Response, error)) func() []string {
 	t.Helper()
 	var (
 		mu    sync.Mutex
 		calls []string
 	)
 	prev := fetchRedirect
-	fetchRedirect = func(_ context.Context, target string, _ Query) (*http.Response, error) {
+	fetchRedirect = func(ctx context.Context, target string, query Query) (*http.Response, error) {
 		mu.Lock()
 		calls = append(calls, target)
 		mu.Unlock()
-		return handle(target)
+		return handle(ctx, target, query)
 	}
 	resetResolveCooldowns()
 	t.Cleanup(func() {
@@ -55,6 +62,35 @@ func httpResponse(status int, location string) *http.Response {
 		resp.Header.Set("Location", location)
 	}
 	return resp
+}
+
+func googleRefreshResponse(location string) *http.Response {
+	return googleRefreshResponseAfter("0", location)
+}
+
+func googleRefreshResponseAfter(seconds, location string) *http.Response {
+	resp := httpResponse(http.StatusOK, "")
+	resp.Header.Set("Content-Type", "text/html; charset=utf-8")
+	body := `<!doctype html><html><head><meta content="` + seconds + `;url=` + html.EscapeString(location) + `" http-equiv="refresh"></head><body></body></html>`
+	resp.Body = io.NopCloser(strings.NewReader(body))
+	return resp
+}
+
+type countingBody struct {
+	reader io.Reader
+	read   int
+	closed bool
+}
+
+func (b *countingBody) Read(p []byte) (int, error) {
+	n, err := b.reader.Read(p)
+	b.read += n
+	return n, err
+}
+
+func (b *countingBody) Close() error {
+	b.closed = true
+	return nil
 }
 
 // Destinations keyed by token, as Google's /goto answers them.
@@ -109,6 +145,314 @@ func TestResolveWrappedResultURLsSwapsOnlyOpaqueOrganicLinks(t *testing.T) {
 	}
 	if got := calls(); !slices.Equal(got, wantCalls) {
 		t.Errorf("fetched %v, want %v", got, wantCalls)
+	}
+}
+
+func TestResolveWrappedResultURLsFollowsGoogleHTMLRefresh(t *testing.T) {
+	initial := "https://www.google.com/goto?gsessionid=session-token&url=CAES_original"
+	refreshed := "https://www.google.com/goto?url=CAES_refreshed"
+	destination := "https://master.dev/courses/mcp"
+	var firstDeadline time.Time
+	calls := stubRedirectRequests(t, func(ctx context.Context, target string, query Query) (*http.Response, error) {
+		if query.ProxyURL != "socks5h://proxy.example:1080" || query.ProxySessionID != "sticky" {
+			t.Errorf("redirect query changed: %s", query.String())
+		}
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Error("redirect request lost its overall deadline")
+		} else if firstDeadline.IsZero() {
+			firstDeadline = deadline
+		} else if !deadline.Equal(firstDeadline) {
+			t.Error("redirect hop replaced the overall deadline")
+		}
+		switch target {
+		case initial:
+			return googleRefreshResponse("/goto?url=CAES_refreshed"), nil
+		case refreshed:
+			return httpResponse(http.StatusFound, destination), nil
+		default:
+			return httpResponse(http.StatusBadRequest, ""), nil
+		}
+	})
+	results := []SearchResult{{Rank: 8, URL: initial, DisplayURL: "master.dev › courses › mcp"}}
+	query := Query{ResolveURLs: true, ProxyURL: "socks5h://proxy.example:1080", ProxySessionID: "sticky"}
+
+	ResolveWrappedResultURLs(context.Background(), results, query, "https://www.google.com/search?q=mcp")
+
+	if results[0].URL != destination || results[0].Rank != 8 || results[0].DisplayURL != "master.dev › courses › mcp" {
+		t.Fatalf("unexpected resolved result: %+v", results[0])
+	}
+	if got := calls(); !slices.Equal(got, []string{initial, refreshed}) {
+		t.Fatalf("fetched %v, want the original and refreshed Google wrappers", got)
+	}
+}
+
+func TestResolveWrappedResultURLsWaitsForGoogleRefreshWithoutHoldingSlot(t *testing.T) {
+	initial := "https://www.google.com/goto?url=slow"
+	refreshed := "https://www.google.com/goto?url=refreshed"
+	other := "https://www.google.com/goto?url=other"
+	destination := "https://example.org/course"
+	otherDestination := "https://example.org/other"
+	var readyAt time.Time
+	otherFetched := make(chan struct{})
+
+	calls := stubRedirects(t, func(target string) (*http.Response, error) {
+		switch target {
+		case initial:
+			readyAt = time.Now().Add(3 * time.Second)
+			return googleRefreshResponseAfter("3", refreshed), nil
+		case other:
+			close(otherFetched)
+			return httpResponse(http.StatusFound, otherDestination), nil
+		case refreshed:
+			if time.Now().Before(readyAt) {
+				return httpResponse(http.StatusBadRequest, ""), nil
+			}
+			select {
+			case <-otherFetched:
+			default:
+				t.Error("refresh wait held the only resolve slot")
+			}
+			return httpResponse(http.StatusFound, destination), nil
+		default:
+			return nil, errors.New("unexpected redirect target")
+		}
+	})
+	cfg := DefaultURLResolveConfig()
+	cfg.Concurrency = 1
+	results := []SearchResult{{Rank: 1, URL: initial}, {Rank: 2, URL: other}}
+
+	ResolveWrappedResultURLs(context.Background(), results, Query{ResolveURLs: true, ResolveConfig: &cfg}, "")
+
+	if results[0].URL != destination || results[1].URL != otherDestination {
+		t.Fatalf("unexpected results: %+v", results)
+	}
+	if got := len(calls()); got != 3 {
+		t.Fatalf("fetched %d URLs, want 3", got)
+	}
+}
+
+func TestResolveWrappedResultURLsSkipsGoogleRefreshBeyondBudget(t *testing.T) {
+	initial := "https://www.google.com/goto?url=held"
+	refreshed := "https://www.google.com/goto?url=refreshed"
+	other := "https://www.google.com/goto?url=other"
+	destination := "https://example.org/other"
+	calls := stubRedirects(t, func(target string) (*http.Response, error) {
+		switch target {
+		case initial:
+			return googleRefreshResponseAfter("20", refreshed), nil
+		case other:
+			return httpResponse(http.StatusFound, destination), nil
+		default:
+			return nil, errors.New("out-of-budget refresh was fetched")
+		}
+	})
+	cfg := DefaultURLResolveConfig()
+	cfg.Concurrency = 1
+	results := []SearchResult{{Rank: 1, URL: initial}, {Rank: 2, URL: other}}
+
+	ResolveWrappedResultURLs(context.Background(), results, Query{ResolveURLs: true, ResolveConfig: &cfg}, "")
+
+	if results[0].URL != initial || results[1].URL != destination {
+		t.Fatalf("unexpected results: %+v", results)
+	}
+	if got := calls(); !slices.Equal(got, []string{initial, other}) {
+		t.Fatalf("fetched %v, want the two original Google URLs", got)
+	}
+}
+
+func TestResolveWrappedResultURLsDoesNotFetchRefreshDestination(t *testing.T) {
+	initial := "https://www.google.com/goto?url=token"
+	destination := "https://example.org/course"
+	calls := stubRedirects(t, func(target string) (*http.Response, error) {
+		if target != initial {
+			return nil, errors.New("destination must not be fetched")
+		}
+		return googleRefreshResponseAfter("20", destination), nil
+	})
+	results := []SearchResult{{Rank: 1, URL: initial}}
+
+	ResolveWrappedResultURLs(context.Background(), results, Query{ResolveURLs: true}, "")
+
+	if results[0].URL != destination || len(calls()) != 1 {
+		t.Fatalf("url=%q calls=%v", results[0].URL, calls())
+	}
+}
+
+func TestResolveGoogleRedirectCapsHTMLBodyRead(t *testing.T) {
+	body := &countingBody{reader: strings.NewReader(strings.Repeat("x", maxGoogleRedirectBodyBytes+1024))}
+	stubRedirects(t, func(string) (*http.Response, error) {
+		resp := httpResponse(http.StatusOK, "")
+		resp.Body = body
+		return resp, nil
+	})
+
+	_, _ = resolveGoogleRedirect(context.Background(), "https://www.google.com/goto?url=token", Query{}, SleepContext)
+
+	if !body.closed || body.read > maxGoogleRedirectBodyBytes {
+		t.Fatalf("HTML body read=%d closed=%t", body.read, body.closed)
+	}
+}
+
+func TestResolveWrappedResultURLsBoundsGoogleRefreshChain(t *testing.T) {
+	calls := stubRedirects(t, func(string) (*http.Response, error) {
+		return googleRefreshResponse("/goto?url=next"), nil
+	})
+	results := []SearchResult{{Rank: 1, URL: "/goto?url=start"}}
+
+	ResolveWrappedResultURLs(context.Background(), results, Query{ResolveURLs: true}, "")
+
+	if results[0].URL != "/goto?url=start" || len(calls()) != maxGoogleRedirectRequests {
+		t.Fatalf("url=%q calls=%v", results[0].URL, calls())
+	}
+	if resolveCoolingDown("", time.Now()) {
+		t.Fatal("refresh loops must not trigger a challenge cooldown")
+	}
+}
+
+func TestResolveGoogleRedirectUnwrapsPlaintextHop(t *testing.T) {
+	for _, status := range []int{http.StatusFound, http.StatusOK} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			calls := stubRedirects(t, func(string) (*http.Response, error) {
+				location := "/url?q=https%3A%2F%2Fexample.org%2Fcourse%23%3A~%3Atext%3DMCP"
+				if status == http.StatusOK {
+					return googleRefreshResponse(location), nil
+				}
+				return httpResponse(status, location), nil
+			})
+			dest, err := resolveGoogleRedirect(context.Background(), "https://www.google.com/goto?url=token", Query{}, SleepContext)
+			if err != nil || dest != "https://example.org/course" || len(calls()) != 1 {
+				t.Fatalf("dest=%q err=%v calls=%v", dest, err, calls())
+			}
+		})
+	}
+}
+
+type refreshTailErrorReader struct{}
+
+func (refreshTailErrorReader) Read([]byte) (int, error) {
+	return 0, errors.New("connection reset after refresh tag")
+}
+
+func TestResolveGoogleRedirectStopsAfterRefreshTag(t *testing.T) {
+	body := &countingBody{reader: io.MultiReader(
+		strings.NewReader(`<meta http-equiv="refresh" content="0;url=https://example.org/course">`),
+		refreshTailErrorReader{},
+	)}
+	stubRedirects(t, func(string) (*http.Response, error) {
+		resp := httpResponse(http.StatusOK, "")
+		resp.Body = body
+		return resp, nil
+	})
+	dest, err := resolveGoogleRedirect(context.Background(), "https://www.google.com/goto?url=token", Query{}, SleepContext)
+	if err != nil || dest != "https://example.org/course" || !body.closed {
+		t.Fatalf("dest=%q err=%v closed=%t", dest, err, body.closed)
+	}
+}
+
+func TestResolveGoogleRedirectCapsNonHTMLBodyRead(t *testing.T) {
+	for _, status := range []int{http.StatusFound, http.StatusBadRequest, http.StatusForbidden, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			body := &countingBody{reader: strings.NewReader(strings.Repeat("x", maxGoogleRedirectBodyBytes+1024))}
+			stubRedirects(t, func(string) (*http.Response, error) {
+				resp := httpResponse(status, "https://example.org/course")
+				resp.Body = body
+				return resp, nil
+			})
+			_, _ = resolveGoogleRedirect(context.Background(), "https://www.google.com/goto?url=token", Query{}, SleepContext)
+			if !body.closed || body.read > maxGoogleRedirectBodyBytes {
+				t.Fatalf("body read=%d closed=%t", body.read, body.closed)
+			}
+			if (status == http.StatusForbidden || status == http.StatusTooManyRequests) && body.read != 0 {
+				t.Fatalf("challenge body read=%d, want 0", body.read)
+			}
+		})
+	}
+}
+
+func TestResolveGoogleRedirectRejectsAdHops(t *testing.T) {
+	for _, location := range []string{
+		"/aclk?adurl=https%3A%2F%2Fexample.org%2F",
+		"https://www.googleadservices.com/pagead/aclk?adurl=https%3A%2F%2Fexample.org%2F",
+	} {
+		t.Run(location, func(t *testing.T) {
+			calls := stubRedirects(t, func(string) (*http.Response, error) {
+				return googleRefreshResponse(location), nil
+			})
+			dest, err := resolveGoogleRedirect(context.Background(), "https://www.google.com/goto?url=token", Query{}, SleepContext)
+			if err == nil || dest != "" || len(calls()) != 1 {
+				t.Fatalf("ad hop resolved or fetched: dest=%q err=%v calls=%v", dest, err, calls())
+			}
+		})
+	}
+}
+
+func TestResolveGoogleRedirectPreservesOpaqueHop(t *testing.T) {
+	initial := "https://www.google.com/goto?url=start"
+	next := "https://www.google.com/goto?url=opaque%2ftoken&ref=keep&gsessionid=session"
+	calls := stubRedirects(t, func(target string) (*http.Response, error) {
+		switch target {
+		case initial:
+			return googleRefreshResponse(next), nil
+		case next:
+			return httpResponse(http.StatusFound, "https://example.org/course"), nil
+		}
+		return nil, errors.New("opaque wrapper was changed")
+	})
+	dest, err := resolveGoogleRedirect(context.Background(), initial, Query{}, SleepContext)
+	if err != nil || dest != "https://example.org/course" || len(calls()) != 2 {
+		t.Fatalf("dest=%q err=%v calls=%v", dest, err, calls())
+	}
+}
+
+func TestResolveGoogleRedirectThreeRequestChain(t *testing.T) {
+	calls := stubRedirects(t, func(target string) (*http.Response, error) {
+		switch target {
+		case "https://www.google.com/goto?url=one":
+			return httpResponse(http.StatusFound, "/goto?url=two"), nil
+		case "https://www.google.com/goto?url=two":
+			return googleRefreshResponse("/goto?url=three"), nil
+		case "https://www.google.com/goto?url=three":
+			return httpResponse(http.StatusFound, "https://example.org/course"), nil
+		}
+		return nil, errors.New("unexpected hop")
+	})
+	dest, err := resolveGoogleRedirect(context.Background(), "https://www.google.com/goto?url=one", Query{}, SleepContext)
+	if err != nil || dest != "https://example.org/course" || len(calls()) != 3 {
+		t.Fatalf("dest=%q err=%v calls=%v", dest, err, calls())
+	}
+}
+
+func TestResolveGoogleRedirectCancellationBetweenHops(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := stubRedirects(t, func(string) (*http.Response, error) {
+		cancel()
+		return googleRefreshResponse("/goto?url=two"), nil
+	})
+	_, err := resolveGoogleRedirect(ctx, "https://www.google.com/goto?url=one", Query{}, SleepContext)
+	if !errors.Is(err, context.Canceled) || len(calls()) != 1 {
+		t.Fatalf("err=%v calls=%v", err, calls())
+	}
+}
+
+func TestParseMetaRefreshLocation(t *testing.T) {
+	for _, tc := range []struct {
+		content, want string
+		delay         time.Duration
+	}{
+		{"3;url=/goto?url=token", "/goto?url=token", 3 * time.Second},
+		{"0; URL = 'https://example.org/a?x=1&y=2'", "https://example.org/a?x=1&y=2", 0},
+		{"url=\"/goto?url=token\"", "/goto?url=token", 0},
+		{"3", "", 0},
+		{"3;other=value", "", 0},
+		{"-1;url=/goto?url=token", "", 0},
+		{"99999999999999999;url=/goto?url=token", "", 0},
+		{"", "", 0},
+	} {
+		if got, delay := parseMetaRefreshLocation(tc.content); got != tc.want || delay != tc.delay {
+			t.Errorf("parseMetaRefreshLocation(%q) = %q, %s; want %q, %s", tc.content, got, delay, tc.want, tc.delay)
+		}
 	}
 }
 
@@ -221,10 +565,11 @@ func TestResolveWrappedResultURLsKeepsWrapperOnFailure(t *testing.T) {
 
 func TestResolveWrappedResultURLsBacksOffWhenChallenged(t *testing.T) {
 	for name, challenge := range map[string]*http.Response{
-		"429":     httpResponse(http.StatusTooManyRequests, ""),
-		"403":     httpResponse(http.StatusForbidden, ""),
-		"sorry":   httpResponse(http.StatusFound, "https://www.google.com/sorry/index?continue=x"),
-		"consent": httpResponse(http.StatusFound, "https://consent.google.de/ml?continue=x"),
+		"429":          httpResponse(http.StatusTooManyRequests, ""),
+		"403":          httpResponse(http.StatusForbidden, ""),
+		"sorry":        httpResponse(http.StatusFound, "https://www.google.com/sorry/index?continue=x"),
+		"consent":      httpResponse(http.StatusFound, "https://consent.google.de/ml?continue=x"),
+		"refreshSorry": googleRefreshResponse("https://www.google.com/sorry/index?continue=x"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			calls := stubRedirects(t, func(string) (*http.Response, error) { return challenge, nil })

@@ -1,11 +1,9 @@
 package google
 
 import (
-	"context"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/go-rod/rod"
 	"github.com/karust/openserp/core"
 )
 
@@ -89,8 +87,4 @@ func looksLikeCSS(text string) bool {
 		return true
 	}
 	return strings.Contains(text, "{ ") && strings.Count(text, ": ") > 20 && strings.Count(text, ";") > 20
-}
-
-func extractGoogleFeaturesFromPage(ctx context.Context, page *rod.Page) []core.SerpFeature {
-	return core.FeaturesFromPageWithWait(ctx, page, extractGoogleFeatures)
 }

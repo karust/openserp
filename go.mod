@@ -14,6 +14,7 @@ require (
 	github.com/go-rod/rod v0.116.2
 	github.com/go-shiori/dom v0.0.0-20230515143342-73569d674e1c
 	github.com/gofiber/fiber/v2 v2.52.13
+	github.com/gofrs/flock v0.12.1
 	github.com/google/uuid v1.6.0
 	github.com/markusmobius/go-trafilatura v1.12.2
 	github.com/sirupsen/logrus v1.9.4

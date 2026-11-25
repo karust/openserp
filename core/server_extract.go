@@ -166,11 +166,15 @@ func RawExtractFetch(ctx context.Context, req extractpkg.ExtractRequest, cfg ext
 	if limit <= 0 {
 		limit = int64(cfg.MaxBytes)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, limit))
+	// One byte past the budget tells a full body from a cut one.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, err
 	}
 	out := &extractpkg.FetchResponse{StatusCode: resp.StatusCode, Body: body}
+	if int64(len(body)) > limit {
+		out.Body, out.Truncated = body[:limit], true
+	}
 	if resp.Request != nil && resp.Request.URL != nil {
 		out.FinalURL = resp.Request.URL.String()
 	}

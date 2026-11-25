@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version               = "0.8.19"
+	version               = "0.8.22"
 	defaultConfigFilename = "config"
 	envPrefix             = "OPENSERP"
 )
@@ -55,6 +55,7 @@ type ServerConfig struct {
 	IsQuiet       bool   `mapstructure:"quiet"`
 	IsRawRequests bool   `mapstructure:"raw_requests"`
 	Insecure      bool   `mapstructure:"insecure"`
+	SocketMode    string `mapstructure:"socket_mode"`
 }
 
 type AppConfig struct {
@@ -143,6 +144,7 @@ var flagToConfigKey = map[string]string{
 	"proxy":                   "proxies.global",
 	"debug-endpoints":         "app.debug_endpoints",
 	"insecure":                "server.insecure",
+	"socket-mode":             "server.socket_mode",
 	"cache_ttl":               "cache.ttl_seconds",
 	"cache_max_size":          "cache.max_size",
 	"max_retries":             "resilience.max_retries",
@@ -361,6 +363,9 @@ func initializeConfig(cmd *cobra.Command) error {
 		return err
 	}
 
+	if _, ok := v.Get("server.socket_mode").(string); !ok {
+		return errors.New(`server.socket_mode must be a quoted octal string such as "0660"`)
+	}
 	err = v.Unmarshal(&config)
 	if err != nil {
 		return fmt.Errorf("cannot unmarshall config: %v", err)
@@ -450,6 +455,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("server.quiet", false)
 	v.SetDefault("server.raw_requests", false)
 	v.SetDefault("server.insecure", false)
+	v.SetDefault("server.socket_mode", "")
 	v.SetDefault("app.log_format", "")
 	v.SetDefault("app.log_level", "")
 	v.SetDefault("app.save_log", true)
@@ -481,7 +487,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("extract.enabled", true)
 	v.SetDefault("extract.default_mode", "auto")
 	v.SetDefault("extract.timeout", "20s")
-	v.SetDefault("extract.max_bytes", 2*1024*1024)
+	v.SetDefault("extract.max_bytes", 3*1024*1024)
 	v.SetDefault("extract.max_concurrent", 2)
 	v.SetDefault("extract.allow_private_networks", false)
 	// Keep stage2 defaults stable even when config file is absent.
@@ -510,7 +516,7 @@ func setConfigDefaults(v *viper.Viper) {
 
 func init() {
 	RootCmd.PersistentFlags().IntVarP(&config.Server.Port, "port", "p", 7070, "Port number to run server")
-	RootCmd.PersistentFlags().StringVarP(&config.Server.Host, "host", "a", "127.0.0.1", "Host address to run server")
+	RootCmd.PersistentFlags().StringVarP(&config.Server.Host, "host", "a", "127.0.0.1", "Host address to run server, or unix:<path>.sock for a UNIX socket")
 	RootCmd.PersistentFlags().IntVarP(&config.App.Timeout, "timeout", "t", 30, "Timeout to fail request")
 	RootCmd.PersistentFlags().StringVarP(&config.Server.ConfigPath, "config", "c", "", "Configuration file path")
 	RootCmd.PersistentFlags().StringVarP(&config.App.BrowserPath, "browser-path", "", "", "Custom browser binary path (Chrome/Chromium/Edge/Brave..)")
@@ -527,6 +533,7 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&config.Proxies.Global, "proxy", "x", "", "Force a single proxy for all engines (same as proxies.global)")
 	RootCmd.PersistentFlags().BoolVar(&config.App.DebugEndpoints, "debug-endpoints", false, "Enable debug-only HTTP endpoints")
 	RootCmd.PersistentFlags().BoolVarP(&config.Server.Insecure, "insecure", "k", false, "Allow insecure TLS connections")
+	RootCmd.PersistentFlags().StringVar(&config.Server.SocketMode, "socket-mode", "", "Octal permissions for the UNIX socket file, e.g. 0660 or 0777 (default on Linux: owner-only access)")
 	RootCmd.PersistentFlags().IntVar(&config.Cache.TTLSeconds, "cache_ttl", 300, "Cache TTL in seconds (0 to disable)")
 	RootCmd.PersistentFlags().IntVar(&config.Cache.MaxSize, "cache_max_size", 1000, "Maximum number of cached responses")
 	RootCmd.PersistentFlags().IntVar(&config.Resilience.MaxRetries, "max_retries", 3, "Max retry attempts per search engine (0 to disable)")

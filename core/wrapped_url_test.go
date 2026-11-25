@@ -176,12 +176,15 @@ func TestEnrichResultPrefersTheRealURL(t *testing.T) {
 func TestEnrichResultFallsBackToAttribution(t *testing.T) {
 	raw := SearchResult{
 		Rank:       1,
-		URL:        liveRelative,
+		URL:        liveAbsolute + "&ref=keep&gsessionid=session%2fid",
 		Title:      "The best VPN service 2026",
 		DisplayURL: "https://www.techradar.com › VPN › VPN Services",
 		SourceName: "TechRadar",
 	}
 	got := EnrichResult(raw, EnrichContext{Engine: "google"})
+	if got.URL != raw.URL {
+		t.Errorf("wrapper URL = %q, want %q", got.URL, raw.URL)
+	}
 	if got.Domain != "techradar.com" {
 		t.Errorf("domain = %q, want techradar.com", got.Domain)
 	}
@@ -375,5 +378,29 @@ func TestUnwrapBingURL(t *testing.T) {
 				t.Errorf("unexpected rewrite: %q -> %q", raw, got.URL)
 			}
 		})
+	}
+}
+
+func TestBingPlayerClickKeepsAttribution(t *testing.T) {
+	const player = "/videos/riverview/relatedvideo?mid=video-id&q=video&msockid=one"
+	token := "a1" + base64.RawURLEncoding.EncodeToString([]byte(player))
+	wrapper := "/ck/a?u=" + token
+	const want = "https://www.bing.com/videos/riverview/relatedvideo?mid=video-id&q=video"
+
+	if got := UnwrapBingURL(wrapper); got != "" {
+		t.Fatalf("UnwrapBingURL = %q, want no publisher URL", got)
+	}
+
+	result := EnrichResult(SearchResult{
+		URL:        wrapper,
+		DisplayURL: "youtube.com › watch",
+	}, EnrichContext{Engine: "bing"})
+	if result.URL != want || result.Domain != "youtube.com" || IsUsableResultURL(result.URL) {
+		t.Fatalf("unexpected Bing video: url=%q domain=%q", result.URL, result.Domain)
+	}
+
+	unknown := "/ck/a?u=a1" + base64.RawURLEncoding.EncodeToString([]byte("/search?q=video"))
+	if got := BingResultURL(unknown); got != unknown {
+		t.Fatalf("unrecognized relative target changed to %q", got)
 	}
 }

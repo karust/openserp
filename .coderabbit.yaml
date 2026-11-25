@@ -1,0 +1,64 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+reviews:
+  profile: "chill"
+
+  high_level_summary_in_walkthrough: true
+  in_progress_fortune: false
+  sequence_diagrams: false
+  suggested_reviewers: false
+
+  auto_approvals:
+    enabled: false
+
+  path_instructions:
+    - path: "**/*.go"
+      instructions: |
+        Prioritize correctness, security, performance,
+        concurrency, resource management, and error handling.
+        Preserve backward compatibility with public APIs.
+        Avoid unnecessary abstractions and dependencies.
+        Do not suggest purely cosmetic changes.
+        Recommend regression tests for behavioral changes.
+        Keep unit tests independent of Chromium and external services.
+
+    - path: "core/**"
+      instructions: |
+        Check context cancellation, timeouts, proxy handling,
+        goroutine leaks, browser lifecycle, and thread safety.
+
+    - path: "{core/**,extract/types.go,docs/openapi.yaml,examples/**}"
+      instructions: |
+        Flag unintended changes to HTTP routes, parameters, status codes,
+        headers, and response or error shapes. Check that docs/openapi.yaml
+        and affected examples match the server when the API changes.
+
+    - path: "{google,bing,yandex,duckduckgo,baidu,ecosia}/**"
+      instructions: |
+        Check parsing robustness, pagination, CAPTCHA detection,
+        localization, and error classification.
+        Preserve normalized search result structures.
+        Consider consistency with other search engines.
+        Avoid introducing unnecessary browser operations.
+        Keep engine selectors in selectors.go and use small, sanitized HTML
+        fixtures for parser regression tests.
+
+    - path: "{extract/**,core/server_extract.go,core/http_client.go,core/network_guard.go}"
+      instructions: |
+        Check SSRF guards for raw and browser fetches, including URL validation,
+        DNS resolution, and redirects. Check response size limits, memory use,
+        and handling of malformed content.
+
+    - path: "{cmd/**,config.yaml}"
+      instructions: |
+        Preserve CLI flags and config keys. Check that precedence stays CLI
+        flags, OPENSERP_* environment variables, config.yaml, then defaults.
+        Check input validation and error messages.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        Check workflow permissions, supply-chain security,
+        secret exposure, and release reproducibility.
+
+chat:
+  art: false

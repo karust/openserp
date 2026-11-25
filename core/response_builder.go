@@ -2,7 +2,6 @@ package core
 
 import (
 	"crypto/md5"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/url"
@@ -110,18 +109,21 @@ func EnrichResult(raw SearchResult, ctx EnrichContext) Result {
 // AppendEnrichedSearchResult preserves the legacy results[] surface while
 // copying any extracted SERP features onto the top-level feature surface.
 func AppendEnrichedSearchResult(env *Envelope, raw SearchResult, ctx EnrichContext, extractedAt time.Time) {
-	var sourceResultID string
-	if raw.URL != "" || raw.Title != "" || raw.Description != "" || raw.Rank != 0 {
-		result := EnrichResult(raw, ctx)
+	if result := enrichSearchResultWithFeatures(env, raw, ctx, extractedAt); result.ID != "" {
 		env.Results = append(env.Results, result)
-		sourceResultID = result.ID
+	}
+}
+
+func enrichSearchResultWithFeatures(env *Envelope, raw SearchResult, ctx EnrichContext, extractedAt time.Time) Result {
+	var result Result
+	if raw.URL != "" || raw.Title != "" || raw.Description != "" || raw.Rank != 0 {
+		result = EnrichResult(raw, ctx)
 	}
 
 	for _, rawFeature := range raw.Features {
-		env.SerpFeatures = append(env.SerpFeatures, EnrichSerpFeature(rawFeature, ctx.Engine, sourceResultID, extractedAt))
+		env.SerpFeatures = append(env.SerpFeatures, EnrichSerpFeature(rawFeature, ctx.Engine, result.ID, extractedAt))
 	}
-	if len(raw.Features) == 0 && sourceResultID != "" && shouldMirrorResultAsFeature(raw.Type) {
-		result := env.Results[len(env.Results)-1]
+	if len(raw.Features) == 0 && result.ID != "" && shouldMirrorResultAsFeature(raw.Type) {
 		env.SerpFeatures = append(env.SerpFeatures, EnrichSerpFeature(SerpFeature{
 			Type:     result.Type,
 			Title:    result.Title,
@@ -131,8 +133,9 @@ func AppendEnrichedSearchResult(env *Envelope, raw SearchResult, ctx EnrichConte
 				Title: result.Title,
 				URL:   result.URL,
 			}},
-		}, ctx.Engine, sourceResultID, extractedAt))
+		}, ctx.Engine, result.ID, extractedAt))
 	}
+	return result
 }
 
 // EnrichSerpFeature stamps a raw feature with stable public fields.
@@ -329,34 +332,33 @@ func normalizeURL(raw string) string {
 	if err != nil {
 		return raw
 	}
-	if isBingClickURL(u) {
-		if unwrapped := UnwrapBingURL(raw); unwrapped != "" {
-			u, _ = url.Parse(unwrapped)
-		}
+	if unwrapped, _ := bingResultURL(u); unwrapped != nil {
+		u = unwrapped
 	}
 
 	// Plaintext redirects can expose a destination; encrypted tokens cannot.
 	if isGoogleRedirectURL(u) {
+		wrapper := u
 		query := u.Query()
 		for _, key := range []string{"url", "q", "adurl"} {
-			candidate := strings.TrimSpace(query.Get(key))
-			if IsUsableResultURL(candidate) {
-				u, _ = url.Parse(candidate)
+			candidate, err := url.Parse(strings.TrimSpace(query.Get(key)))
+			if err == nil && isUsableResultURL(candidate) {
+				u = candidate
 				break
 			}
 		}
+		if u == wrapper {
+			return raw
+		}
 	}
 
-	u.Scheme = strings.ToLower(u.Scheme)
 	u.Host = strings.ToLower(u.Host)
 
-	// Strip common tracking parameters.
 	q := u.Query()
-	trackingParams := []string{
+	for _, p := range []string{
 		"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
 		"fbclid", "gclid", "msclkid", "ref", "_ga",
-	}
-	for _, p := range trackingParams {
+	} {
 		q.Del(p)
 	}
 	u.RawQuery = q.Encode()
@@ -367,28 +369,6 @@ func normalizeURL(raw string) string {
 		normalized = strings.TrimRight(normalized, "/")
 	}
 	return normalized
-}
-
-// UnwrapBingURL extracts the real destination from a Bing click-tracking URL,
-// or returns "" when raw isn't one. Bing encodes as: u=a1<url-safe-base64-without-padding>
-func UnwrapBingURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || !isBingClickURL(u) {
-		return ""
-	}
-	uParam := u.Query().Get("u")
-	if !strings.HasPrefix(uParam, "a1") {
-		return ""
-	}
-	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(uParam[2:], "="))
-	if err != nil {
-		return ""
-	}
-	candidate := strings.TrimSpace(string(decoded))
-	if IsUsableResultURL(candidate) {
-		return candidate
-	}
-	return ""
 }
 
 // extractDomain returns the registrable domain (no www.) from a URL string.
