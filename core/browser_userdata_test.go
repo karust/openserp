@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -125,5 +126,25 @@ func TestCleanStaleUserDataDirsMissingRoot(t *testing.T) {
 	removed, err := CleanStaleUserDataDirs(filepath.Join(t.TempDir(), "missing"))
 	if err != nil || removed != 0 {
 		t.Fatalf("got (%d, %v), want (0, nil)", removed, err)
+	}
+}
+
+func TestCleanStaleUserDataDirsKeepsProfileOnLockInspectionError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("stale profile cleanup is disabled on Windows")
+	}
+	orig := readlink
+	readlink = func(string) (string, error) { return "", errors.New("input/output error") }
+	t.Cleanup(func() { readlink = orig })
+
+	root := t.TempDir()
+	profile := mkProfile(t, root, "openserp-active", time.Hour, "")
+
+	removed, err := CleanStaleUserDataDirs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 0 || !exists(profile) {
+		t.Fatalf("profile with unreadable lock must be kept, removed = %d", removed)
 	}
 }

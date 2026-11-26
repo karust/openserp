@@ -29,6 +29,9 @@ const (
 // directories before OpenSERP started naming them itself.
 var legacyUserDataDirName = regexp.MustCompile(`^[0-9a-f]{16}$`)
 
+// readlink is replaced in tests to simulate lock inspection failures.
+var readlink = os.Readlink
+
 // userDataRoot returns the directory that holds per-launch Chromium profiles.
 func userDataRoot(configured string) string {
 	if root := strings.TrimSpace(configured); root != "" {
@@ -120,8 +123,13 @@ func isOpenSERPUserDataDirName(name string) bool {
 // userDataDirInUse reports whether dir may belong to a live Chrome. Chrome
 // records "<hostname>-<pid>" in the SingletonLock symlink while it runs.
 func userDataDirInUse(dir, hostname string, now time.Time) bool {
-	target, err := os.Readlink(filepath.Join(dir, "SingletonLock"))
+	target, err := readlink(filepath.Join(dir, "SingletonLock"))
 	if err != nil {
+		// Only a missing or non-symlink lock proves Chrome is not running.
+		// Other errors (for example I/O) leave the profile's state unknown.
+		if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.EINVAL) {
+			return true
+		}
 		if info, statErr := os.Stat(dir); statErr == nil {
 			return now.Sub(info.ModTime()) < staleUserDataMinAge
 		}
