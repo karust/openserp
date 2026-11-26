@@ -112,6 +112,16 @@ func serve(cmd *cobra.Command, args []string) error {
 		return listenWithGracefulShutdown(serv, nil)
 	}
 
+	// Profiles of Chrome processes killed by an earlier run would otherwise pile up.
+	if _, err := core.CleanStaleUserDataDirs(config.App.UserDataDir); err != nil {
+		logrus.WithError(err).Warn("Could not remove some stale browser profiles")
+	}
+	// The pool launches Chrome on first use, so fail here instead of on a request.
+	// This runs after the sweep, which may have freed space.
+	if err := core.CheckUserDataDir(config.App.UserDataDir); err != nil {
+		return err
+	}
+
 	baseOpts := fingerprintBrowserOpts
 	baseOpts.LeavePageOpen = config.App.IsLeaveHead
 	baseOpts.CaptchaSolverEnabled = captchaSolverEnabled
@@ -135,6 +145,7 @@ func buildFingerprintBrowserOptions() core.BrowserOpts {
 		IsLeakless:         config.App.IsLeakless,
 		Timeout:            time.Second * time.Duration(config.App.Timeout),
 		BrowserPath:        config.App.BrowserPath,
+		UserDataDir:        config.App.UserDataDir,
 		Insecure:           config.Server.Insecure,
 		BlockResourceTypes: blockedResourceTypes,
 		BlockTrackers:      config.App.BlockTrackers,
